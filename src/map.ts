@@ -1,4 +1,6 @@
 import { LANDMARK_NAMES } from './data'
+import { VectorTile } from '@mapbox/vector-tile'
+import { PbfReader } from 'pbf'
 
 export type Pt = [number, number]
 
@@ -50,24 +52,8 @@ export interface CityData {
 }
 
 const RADIUS = 750
-const ENDPOINTS = [
-  'https://overpass-api.de/api/interpreter',
-  'https://maps.mail.ru/osm/tools/overpass/api/interpreter',
-  'https://overpass.kumi.systems/api/interpreter',
-  'https://overpass.private.coffee/api/interpreter',
-]
-
-const ROAD_WIDTH: Record<string, number> = {
-  motorway: 16,
-  trunk: 14,
-  primary: 12,
-  secondary: 10,
-  tertiary: 9,
-  unclassified: 7,
-  residential: 7,
-  living_street: 6,
-  pedestrian: 6,
-}
+const TILE_ZOOM = 15
+const TILEJSON_URL = 'https://tiles.openfreemap.org/planet'
 
 function rng(seed: number) {
   let s = seed >>> 0 || 1
@@ -155,60 +141,6 @@ export function cityKey(lat: number, lon: number) {
   return `${lat.toFixed(3)},${lon.toFixed(3)}`
 }
 
-interface OsmGeom { lat: number; lon: number }
-interface OsmElement {
-  type: string
-  id: number
-  tags?: Record<string, string>
-  nodes?: number[]
-  geometry?: OsmGeom[]
-  members?: { role: string; geometry?: OsmGeom[] }[]
-}
-
-const PRIMARY_TIMEOUT = 20000
-const MIRROR_TIMEOUT = 45000
-
-async function overpassRequest(url: string, query: string, timeout: number, signal: AbortSignal) {
-  const ctrl = new AbortController()
-  const abort = () => ctrl.abort()
-  signal.addEventListener('abort', abort)
-  const timer = setTimeout(abort, timeout)
-  try {
-    const res = await fetch(url, { method: 'POST', body: new URLSearchParams({ data: query }), signal: ctrl.signal })
-    if (!res.ok) throw new Error(`${new URL(url).host}: HTTP ${res.status}`)
-    const json = await res.json()
-    if (!Array.isArray(json?.elements)) throw new Error(`${new URL(url).host}: bad response`)
-    return json as { elements: OsmElement[] }
-  } finally {
-    clearTimeout(timer)
-    signal.removeEventListener('abort', abort)
-  }
-}
-
-/** Primary server first; if it refuses or stalls, race every mirror and take the first good answer. */
-async function downloadOverpass(query: string, onStatus: (s: string) => void, signal: AbortSignal) {
-  const [primary, ...mirrors] = ENDPOINTS
-  try {
-    onStatus(`Uplinking to ${new URL(primary).host}…`)
-    return await overpassRequest(primary, query, PRIMARY_TIMEOUT, signal)
-  } catch (e) {
-    if (signal.aborted) throw e
-    console.warn('Primary Overpass failed', e)
-  }
-  onStatus(`Primary uplink busy. Racing ${mirrors.length} mirror servers…`)
-  const race = new AbortController()
-  const stop = () => race.abort()
-  signal.addEventListener('abort', stop)
-  try {
-    return await Promise.any(mirrors.map((m) => overpassRequest(m, query, MIRROR_TIMEOUT, race.signal)))
-  } catch {
-    throw new Error('All map servers failed')
-  } finally {
-    race.abort()
-    signal.removeEventListener('abort', stop)
-  }
-}
-
 const DB_NAME = 'hoverghini-cache'
 function openDb(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
@@ -239,6 +171,227 @@ async function cachePut(key: string, value: unknown) {
   }
 }
 
+export interface MapDelta {
+  buildingsFrom: number
+  roadsFrom: number
+  tiles: number
+}
+
+type LngLat = [number, number]
+type GeoGeometry =
+  | { type: 'Polygon'; coordinates: LngLat[][] }
+  | { type: 'MultiPolygon'; coordinates: LngLat[][][] }
+  | { type: 'LineString'; coordinates: LngLat[] }
+  | { type: 'MultiLineString'; coordinates: LngLat[][] }
+
+const ROAD_CLASS: Record<string, { width: number; major: boolean }> = {
+  motorway: { width: 16, major: true },
+  trunk: { width: 14, major: true },
+  primary: { width: 12, major: true },
+  secondary: { width: 10, major: true },
+  tertiary: { width: 9, major: false },
+  minor: { width: 7, major: false },
+  service: { width: 6, major: false },
+  track: { width: 5, major: false },
+}
+
+function tileFor(lat: number, lon: number, z: number) {
+  const n = 2 ** z
+  return {
+    x: Math.floor(((lon + 180) / 360) * n),
+    y: Math.floor(((1 - Math.asinh(Math.tan((lat * Math.PI) / 180)) / Math.PI) / 2) * n),
+  }
+}
+
+function worldToLatLon(city: CityData, x: number, z: number) {
+  const kx = 111320 * Math.cos((city.lat * Math.PI) / 180)
+  return { lat: city.lat - z / 110540, lon: city.lon + x / kx }
+}
+
+async function fetchWithTimeout(url: string, signal: AbortSignal | undefined, timeout = 12000) {
+  const ctrl = new AbortController()
+  const stop = () => ctrl.abort()
+  signal?.addEventListener('abort', stop)
+  const timer = setTimeout(stop, timeout)
+  try {
+    const res = await fetch(url, { signal: ctrl.signal })
+    if (!res.ok) throw new Error(`${new URL(url).host}: HTTP ${res.status}`)
+    return res
+  } finally {
+    clearTimeout(timer)
+    signal?.removeEventListener('abort', stop)
+  }
+}
+
+async function tileTemplate(signal: AbortSignal) {
+  const cached = localStorage.getItem('hoverghini.tile-template')
+  try {
+    const json = await (await fetchWithTimeout(TILEJSON_URL, signal, 8000)).json() as { tiles?: string[] }
+    const template = json.tiles?.[0]
+    if (!template) throw new Error('Tile catalog has no tile URL')
+    localStorage.setItem('hoverghini.tile-template', template)
+    return template
+  } catch (e) {
+    if (signal.aborted || !cached) throw e
+    return cached
+  }
+}
+
+async function downloadTile(url: string, signal?: AbortSignal) {
+  const key = `mvt:${url}`
+  const hit = await cacheGet(key)
+  if (hit instanceof ArrayBuffer) return new Uint8Array(hit)
+  let last: unknown
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      const data = await (await fetchWithTimeout(url, signal, 14000 + attempt * 5000)).arrayBuffer()
+      void cachePut(key, data)
+      return new Uint8Array(data)
+    } catch (e) {
+      last = e
+      if (signal?.aborted) throw e
+    }
+  }
+  throw last
+}
+
+/**
+ * Incrementally turns OpenFreeMap's OpenStreetMap vector tiles into game geometry.
+ * Node and segment keys are global, so roads connect cleanly across tile seams.
+ */
+export class MapStreamer {
+  private city: CityData
+  private template: string
+  private loaded = new Set<string>()
+  private pending = new Map<string, Promise<Uint8Array>>()
+  private nodeIndex = new Map<string, number>()
+  private roadSegments = new Set<string>()
+  private busy = false
+
+  constructor(city: CityData, template: string) {
+    this.city = city
+    this.template = template
+  }
+
+  private project([lon, lat]: LngLat): Pt {
+    const kx = 111320 * Math.cos((this.city.lat * Math.PI) / 180)
+    return [(lon - this.city.lon) * kx, -(lat - this.city.lat) * 110540]
+  }
+
+  private node(pt: Pt) {
+    const key = `${Math.round(pt[0] * 4)},${Math.round(pt[1] * 4)}`
+    let i = this.nodeIndex.get(key)
+    if (i === undefined) {
+      i = this.city.nodes.length
+      this.city.nodes.push({ x: pt[0], z: pt[1], adj: [], main: true })
+      this.nodeIndex.set(key, i)
+    }
+    return i
+  }
+
+  private addRoad(line: LngLat[], width: number, major: boolean) {
+    const pts = line.map((p) => this.project(p))
+    if (pts.length < 2) return
+    const kept: Pt[] = [pts[0]]
+    for (let i = 1; i < pts.length; i++) {
+      const a = kept[kept.length - 1], b = pts[i]
+      if (Math.hypot(b[0] - a[0], b[1] - a[1]) > 0.3) kept.push(b)
+    }
+    if (kept.length < 2) return
+    this.city.roads.push({ pts: kept, width, major })
+    let prev = this.node(kept[0])
+    for (let i = 1; i < kept.length; i++) {
+      const next = this.node(kept[i])
+      const edge = prev < next ? `${prev}:${next}` : `${next}:${prev}`
+      if (!this.roadSegments.has(edge)) {
+        this.roadSegments.add(edge)
+        this.city.nodes[prev].adj.push(next)
+        this.city.nodes[next].adj.push(prev)
+      }
+      prev = next
+    }
+  }
+
+  private parse(data: Uint8Array, x: number, y: number) {
+    const tile = new VectorTile(new PbfReader(data))
+    const bLayer = tile.layers.building
+    if (bLayer) for (let i = 0; i < bLayer.length; i++) {
+      const f = bLayer.feature(i)
+      const geo = f.toGeoJSON(x, y, TILE_ZOOM).geometry as GeoGeometry
+      const props = f.properties as Record<string, string | number | boolean>
+      const polygons = geo.type === 'Polygon' ? [geo.coordinates] : geo.type === 'MultiPolygon' ? geo.coordinates : []
+      let h = Number(props.render_height) || Number(props.height) || Number(props['building:levels']) * 3.4
+      if (!h) {
+        const seed = Number(f.id ?? i) + x * 97 + y * 193
+        h = 7 + ((seed * 16807) % 1000) / 1000 ** 0.55 * 24
+      }
+      for (const rings of polygons) {
+        const outer = rings[0]
+        if (!outer) continue
+        const pts = outer.slice(0, -1).map((p) => this.project(p))
+        const b = makeBuilding(pts, Math.min(Math.max(h, 4), 700), String(props.name ?? '') || undefined)
+        if (b) this.city.buildings.push(b)
+      }
+    }
+
+    const rLayer = tile.layers.transportation
+    if (rLayer) for (let i = 0; i < rLayer.length; i++) {
+      const f = rLayer.feature(i)
+      const cls = ROAD_CLASS[String(f.properties.class)]
+      if (!cls) continue
+      const geo = f.toGeoJSON(x, y, TILE_ZOOM).geometry as GeoGeometry
+      const lines = geo.type === 'LineString' ? [geo.coordinates] : geo.type === 'MultiLineString' ? geo.coordinates : []
+      for (const line of lines) this.addRoad(line, cls.width, cls.major)
+    }
+  }
+
+  async loadAround(x: number, z: number, ring = 1, signal?: AbortSignal): Promise<MapDelta | null> {
+    if (this.busy) return null
+    this.busy = true
+    const beforeB = this.city.buildings.length, beforeR = this.city.roads.length
+    try {
+      const ll = worldToLatLon(this.city, x, z)
+      const center = tileFor(ll.lat, ll.lon, TILE_ZOOM)
+      const jobs: { key: string; x: number; y: number; data: Promise<Uint8Array> }[] = []
+      for (let dx = -ring; dx <= ring; dx++) for (let dy = -ring; dy <= ring; dy++) {
+        const tx = center.x + dx, ty = center.y + dy, key = `${TILE_ZOOM}/${tx}/${ty}`
+        if (this.loaded.has(key)) continue
+        let data = this.pending.get(key)
+        if (!data) {
+          data = downloadTile(this.template.replace('{z}', String(TILE_ZOOM)).replace('{x}', String(tx)).replace('{y}', String(ty)), signal)
+          this.pending.set(key, data)
+        }
+        jobs.push({ key, x: tx, y: ty, data })
+      }
+      if (!jobs.length) return null
+      const settled = await Promise.allSettled(jobs.map((j) => j.data))
+      let tiles = 0
+      settled.forEach((result, i) => {
+        const job = jobs[i]
+        this.pending.delete(job.key)
+        if (result.status === 'fulfilled') {
+          this.parse(result.value, job.x, job.y)
+          this.loaded.add(job.key)
+          tiles++
+        }
+      })
+      if (!tiles) throw new Error('Map tile network unavailable')
+      finalizeGraph(this.city.nodes)
+      let extent = RADIUS
+      for (const n of this.city.nodes) extent = Math.max(extent, Math.abs(n.x), Math.abs(n.z))
+      this.city.radius = extent + 300
+      return { buildingsFrom: beforeB, roadsFrom: beforeR, tiles }
+    } finally {
+      this.busy = false
+    }
+  }
+
+  get tileCount() { return this.loaded.size }
+}
+
+const streamers = new WeakMap<CityData, MapStreamer>()
+export const streamerFor = (city: CityData) => streamers.get(city)
+
 export async function fetchCity(
   name: string,
   lat: number,
@@ -246,80 +399,17 @@ export async function fetchCity(
   onStatus: (s: string) => void,
   signal: AbortSignal,
 ): Promise<CityData> {
-  const dLat = RADIUS / 110540
-  const dLon = RADIUS / (111320 * Math.cos((lat * Math.PI) / 180))
-  const bbox = `${lat - dLat},${lon - dLon},${lat + dLat},${lon + dLon}`
-  const hw = Object.keys(ROAD_WIDTH).concat(['motorway_link', 'trunk_link', 'primary_link', 'secondary_link', 'tertiary_link']).join('|')
-  const query = `[out:json][timeout:90];(way["building"](${bbox});relation["building"](${bbox});way["highway"~"^(${hw})$"](${bbox}););out geom;`
-
-  const cacheId = `osm:${bbox}`
-  let json = (await cacheGet(cacheId)) as { elements: OsmElement[] } | undefined
-  if (json) onStatus('Loaded from local cache…')
-  else {
-    json = await downloadOverpass(query, onStatus, signal)
-    void cachePut(cacheId, json)
-  }
-
-  const kx = 111320 * Math.cos((lat * Math.PI) / 180)
-  const proj = (g: OsmGeom): Pt => [(g.lon - lon) * kx, -(g.lat - lat) * 110540]
-  const r = rng(Math.floor(Math.abs(lat * 1000 + lon * 7000)))
-
-  const buildings: Building[] = []
-  const roads: Road[] = []
-  const nodes: RoadNode[] = []
-  const nodeIndex = new Map<number, number>()
-
-  const heightOf = (tags: Record<string, string>) => {
-    const h = parseFloat(tags.height ?? '')
-    if (h > 0) return h
-    const lv = parseFloat(tags['building:levels'] ?? '')
-    if (lv > 0) return lv * 3.4 + 2
-    return 8 + r() * r() * 34
-  }
-
-  for (const el of json.elements) {
-    const tags = el.tags ?? {}
-    if (tags.building) {
-      const rings: OsmGeom[][] = []
-      if (el.type === 'way' && el.geometry) rings.push(el.geometry)
-      if (el.type === 'relation' && el.members) {
-        for (const m of el.members) if (m.role === 'outer' && m.geometry) rings.push(m.geometry)
-      }
-      for (const ring of rings) {
-        const pts = ring.map(proj)
-        if (pts.length > 1) {
-          const [a, b] = [pts[0], pts[pts.length - 1]]
-          if (a[0] === b[0] && a[1] === b[1]) pts.pop()
-        }
-        const bld = makeBuilding(pts, Math.min(Math.max(heightOf(tags), 4), 700), tags.name)
-        if (bld) buildings.push(bld)
-      }
-    } else if (tags.highway && el.geometry && el.nodes) {
-      const base = tags.highway.replace('_link', '')
-      const width = ROAD_WIDTH[base] ?? 7
-      const pts = el.geometry.map(proj)
-      roads.push({ pts, width, major: width >= 10 })
-      let prev = -1
-      el.nodes.forEach((osmId, i) => {
-        let idx = nodeIndex.get(osmId)
-        if (idx === undefined) {
-          idx = nodes.length
-          nodes.push({ x: pts[i][0], z: pts[i][1], adj: [], main: false })
-          nodeIndex.set(osmId, idx)
-        }
-        if (prev >= 0 && prev !== idx) {
-          if (!nodes[prev].adj.includes(idx)) nodes[prev].adj.push(idx)
-          if (!nodes[idx].adj.includes(prev)) nodes[idx].adj.push(prev)
-        }
-        prev = idx
-      })
-    }
-  }
-
-  if (buildings.length < 20 || nodes.length < 20) throw new Error('Not enough map data here')
-  finalizeGraph(nodes)
   const key = cityKey(lat, lon)
-  return { key, name, lat, lon, radius: RADIUS, buildings, roads, nodes, landmarks: pickLandmarks(key, buildings), procedural: false }
+  const city: CityData = { key, name, lat, lon, radius: RADIUS, buildings: [], roads: [], nodes: [], landmarks: [], procedural: false }
+  onStatus('Connecting to the global OpenStreetMap tile network…')
+  const streamer = new MapStreamer(city, await tileTemplate(signal))
+  streamers.set(city, streamer)
+  onStatus('Streaming the first 9 map sectors…')
+  await streamer.loadAround(0, 0, 1, signal)
+  if (city.nodes.length < 20) throw new Error('No driveable streets found here')
+  city.landmarks = pickLandmarks(key, city.buildings)
+  onStatus(`Loaded ${streamer.tileCount} sectors · ${city.buildings.length.toLocaleString()} real buildings`)
+  return city
 }
 
 /** Offline fallback: a synthetic neon grid city. */

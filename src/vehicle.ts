@@ -396,12 +396,14 @@ export class Player {
         this.pos.x = nx
         this.pos.z = nz
       }
-      const lim = world.city.radius * 1.25
-      const r = Math.hypot(this.pos.x, this.pos.z)
-      if (r > lim) {
-        this.pos.x *= lim / r
-        this.pos.z *= lim / r
-        this.vel.multiplyScalar(0.5)
+      if (world.city.procedural) {
+        const lim = world.city.radius * 1.25
+        const r = Math.hypot(this.pos.x, this.pos.z)
+        if (r > lim) {
+          this.pos.x *= lim / r
+          this.pos.z *= lim / r
+          this.vel.multiplyScalar(0.5)
+        }
       }
       const floor = world.groundHeightAt(this.pos.x, this.pos.z, this.pos.y) + HOVER
       const y = Math.max(this.targetAlt, floor) + Math.sin(performance.now() / 300) * 0.06

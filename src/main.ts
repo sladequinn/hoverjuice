@@ -80,6 +80,7 @@ window.addEventListener('keydown', (e) => {
     if (k === 't') game.tow()
     if (k === 'x') game.toggleVehicle()
     if (k === 'v') game.cycleCamera()
+    if (k === 'q') game.fireWeapon()
   }
   if ([' ', 'arrowup', 'arrowdown'].includes(k)) e.preventDefault()
 })
@@ -102,9 +103,14 @@ document.querySelectorAll<HTMLElement>('[data-tap]').forEach((el) =>
     else if (a === 'prompt') game.promptAction()
     else if (a === 'exit') game.toggleVehicle()
     else if (a === 'cam') game.cycleCamera()
+    else if (a === 'map') game.toggleMap()
+    else if (a === 'fire') game.fireWeapon()
     else game.openModal(a)
   }),
 )
+$('map-close').addEventListener('click', () => game.toggleMap(false))
+$('map-plus').addEventListener('click', () => game.zoomMap(1.35))
+$('map-minus').addEventListener('click', () => game.zoomMap(1 / 1.35))
 $('modal-close').addEventListener('click', () => game.closeModal())
 $('modal').addEventListener('click', (e) => { if (e.target === $('modal')) game.closeModal() })
 

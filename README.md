@@ -8,8 +8,8 @@ real estate for passive income, and work your way up the garage to the ultimate 
 
 ## Features
 
-- **Any city on Earth**: pick a preset hot zone (Tokyo, New York, Hong Kong, Seoul, Dubai…) or search any place.
-  Map data is fetched from the Overpass API; if it is unreachable a procedural simulation grid is generated instead.
+- **Any city on Earth, continuously streamed**: real OpenStreetMap vector tiles load from OpenFreeMap's global CDN,
+  are cached locally, and expand in the background as you travel. The round minimap opens into a full-city map.
 - **Dual-mode flight**
   - **Mag-Lock** snaps you to street conduits. Hold `A`/`D` to choose the branch at the next junction.
     Collision-free and fuel-efficient, with a HUD hint showing which way your route turns.
@@ -20,6 +20,8 @@ real estate for passive income, and work your way up the garage to the ultimate 
 - **Contracts**: Parcel, Express and HJ-77 Precursor jobs with timers, speed tips and late penalties. Pay scales with your vehicle's cargo class.
 - **Garage**: Gutter Hoverboard → Neonic → Sky-Duty Z150 → Hovercedes-Benz → Repuls-Royce Goblin → Hoverarrari → Hoverghini.
 - **On foot & masks**: hop off your ride and run around as a masked courier. 19 low-poly animal masks to collect.
+- **Living streets & combat**: ambient AI hover traffic follows the real road graph. Gang drones patrol the city;
+  fire plasma on foot or from any ride and collect a bounty for each drone.
 - **Look**: Hotline Miami-style neon grade, VHS scanlines, chromatic fringe, synthwave sun, rain and neon billboards.
 - **Real estate**: buy the city's landmark towers for passive rent per minute. Holdings keep paying in every city.
 - Progress autosaves to `localStorage`.
@@ -34,7 +36,9 @@ real estate for passive income, and work your way up the garage to the ultimate 
 | `Shift` | Boost (both modes) / sprint on foot |
 | `Space` / `C` | Climb / descend (Free Hover), hop (Mag-Lock), jump (on foot) |
 | `X` | Hop off / on your ride |
-| `V` or tap minimap | Chase / top-down camera |
+| `V` | Chase / top-down camera |
+| `Q` | Fire plasma weapon |
+| Tap minimap | Open the expanded live city map |
 | `F` / `T` | Refuel at pump / grav-tow |
 | `J` `G` `K` `P` `M` `H` | Contracts, Garage, Masks, Real estate, Warp, Help |
 | Mouse wheel | Camera zoom |
@@ -54,6 +58,6 @@ npm run build    # type-check + production build to dist/
 ## Tech
 
 Vite, TypeScript and Three.js (with UnrealBloom post-processing). No backend and no API keys:
-map data comes from public OpenStreetMap services (Overpass for geometry, Nominatim for search).
+map geometry streams as vector tiles from OpenFreeMap and place search uses Nominatim.
 
 Map data © OpenStreetMap contributors, ODbL.

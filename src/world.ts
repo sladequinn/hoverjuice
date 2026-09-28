@@ -1,6 +1,6 @@
 import * as THREE from 'three'
 import { ShapeUtils } from 'three'
-import { pointInPoly, type CityData, type Pt } from './map'
+import { pointInPoly, type CityData, type MapDelta, type Pt } from './map'
 
 const TINTS = [0xff2e88, 0x00f0ff, 0x9d4dff, 0xff2e88, 0x00f0ff, 0xff6a1a, 0xc13cff, 0xffd400]
 const SIGN_WORDS = ['CYAN-ADE', 'HJ-77', 'HOVERGHINI', 'NEONIC', 'RAMEN 24H', 'KIROSHI', 'MOTEL', 'SYNTH BAR', 'OKABE', 'NO SLEEP', 'DATA DEN', 'VIDEO', 'MIDNIGHT', 'REPULS']
@@ -134,7 +134,12 @@ export class World {
     this.buildRoads()
     this.placePumps()
     this.group.add(this.ownedGroup)
-    city.buildings.forEach((b, i) => {
+    this.indexBuildings(0)
+  }
+
+  private indexBuildings(from: number) {
+    this.city.buildings.forEach((b, i) => {
+      if (i < from) return
       for (let gx = Math.floor(b.minX / CELL); gx <= Math.floor(b.maxX / CELL); gx++)
         for (let gz = Math.floor(b.minZ / CELL); gz <= Math.floor(b.maxZ / CELL); gz++) {
           const k = `${gx},${gz}`
@@ -145,8 +150,14 @@ export class World {
     })
   }
 
+  appendMap(delta: MapDelta) {
+    this.buildBuildings(delta.buildingsFrom)
+    this.buildRoads(delta.roadsFrom)
+    this.indexBuildings(delta.buildingsFrom)
+  }
+
   private buildGround() {
-    const size = this.city.radius * 6
+    const size = this.city.procedural ? this.city.radius * 6 : 40000
     const tex = groundTexture()
     tex.repeat.set(size / 40, size / 40)
     const ground = new THREE.Mesh(new THREE.PlaneGeometry(size, size), new THREE.MeshBasicMaterial({ map: tex }))
@@ -154,20 +165,32 @@ export class World {
     this.group.add(ground)
   }
 
-  private buildBuildings() {
+  private buildBuildings(from = 0) {
     const buckets = [0, 1].map(() => ({ pos: [] as number[], uv: [] as number[], col: [] as number[] }))
     const roofPos: number[] = [], roofCol: number[] = []
     const edgePos: number[] = [], edgeCol: number[] = []
+    const roofProps: { x: number; z: number; y: number; sx: number; sz: number; color: number }[] = []
+    const antennaPos: number[] = []
     const col = new THREE.Color()
     const roofC = new THREE.Color()
 
     this.city.buildings.forEach((b, bi) => {
+      if (bi < from) return
       const tint = TINTS[(bi * 7 + (bi >> 2)) % TINTS.length]
       col.set(tint).multiplyScalar(0.6 + ((bi * 97) % 40) / 100)
       roofC.set(tint).multiplyScalar(0.1)
       const bk = buckets[bi % 3 === 0 ? 1 : 0]
       const tall = b.height > 45
       const h = b.height
+      if (b.area > 90 && (bi * 17) % 5 < 3) {
+        const sx = Math.min(8, Math.max(2.2, (b.maxX - b.minX) * 0.22))
+        const sz = Math.min(7, Math.max(2, (b.maxZ - b.minZ) * 0.2))
+        roofProps.push({ x: b.cx, z: b.cz, y: h + 1.1, sx, sz, color: tint })
+        if (tall && bi % 3 === 0) {
+          const ah = 8 + (bi % 7) * 2
+          antennaPos.push(b.cx, h + 2.2, b.cz, b.cx, h + ah, b.cz)
+        }
+      }
       let d = 0
       const n = b.poly.length
       for (let i = 0; i < n; i++) {
@@ -205,7 +228,7 @@ export class World {
       geo.setAttribute('color', new THREE.Float32BufferAttribute(bk.col, 3))
       this.group.add(new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ map: textures[i], vertexColors: true, side: THREE.DoubleSide })))
     })
-    this.buildSigns()
+    this.buildSigns(from)
 
     const roofGeo = new THREE.BufferGeometry()
     roofGeo.setAttribute('position', new THREE.Float32BufferAttribute(roofPos, 3))
@@ -216,14 +239,38 @@ export class World {
     edgeGeo.setAttribute('position', new THREE.Float32BufferAttribute(edgePos, 3))
     edgeGeo.setAttribute('color', new THREE.Float32BufferAttribute(edgeCol, 3))
     this.group.add(new THREE.LineSegments(edgeGeo, new THREE.LineBasicMaterial({ vertexColors: true })))
+
+    if (roofProps.length) {
+      const units = new THREE.InstancedMesh(
+        new THREE.BoxGeometry(1, 1, 1),
+        new THREE.MeshStandardMaterial({ color: 0x161328, metalness: 0.75, roughness: 0.35 }),
+        roofProps.length,
+      )
+      const matrix = new THREE.Matrix4(), color = new THREE.Color()
+      roofProps.forEach((p, i) => {
+        matrix.compose(
+          new THREE.Vector3(p.x, p.y, p.z),
+          new THREE.Quaternion(),
+          new THREE.Vector3(p.sx, 2.2, p.sz),
+        )
+        units.setMatrixAt(i, matrix)
+        units.setColorAt(i, color.setHex(p.color).multiplyScalar(0.45))
+      })
+      this.group.add(units)
+    }
+    if (antennaPos.length) {
+      const g = new THREE.BufferGeometry()
+      g.setAttribute('position', new THREE.Float32BufferAttribute(antennaPos, 3))
+      this.group.add(new THREE.LineSegments(g, new THREE.LineBasicMaterial({ color: 0xff3d9d })))
+    }
   }
 
-  private buildSigns() {
+  private buildSigns(from = 0) {
     const textures = SIGN_WORDS.map((w, i) => signTexture(w, SIGN_COLORS[i % SIGN_COLORS.length]))
     const materials = textures.map((map) => new THREE.MeshBasicMaterial({ map, side: THREE.DoubleSide, transparent: true }))
     const cands = this.city.buildings
       .map((b, i) => ({ b, i }))
-      .filter(({ b }) => b.height > 22 && b.area > 200)
+      .filter(({ b, i }) => i >= from && b.height > 22 && b.area > 200)
       .sort((p, q) => ((p.i * 7919) % 101) - ((q.i * 7919) % 101))
       .slice(0, 70)
     for (const { b, i } of cands) {
@@ -251,9 +298,10 @@ export class World {
     this.signMats = materials
   }
 
-  private buildRoads() {
+  private buildRoads(from = 0) {
     const pos: number[] = [], line: number[] = [], lineMajor: number[] = []
-    for (const road of this.city.roads) {
+    for (let ri = from; ri < this.city.roads.length; ri++) {
+      const road = this.city.roads[ri]
       const w = road.width / 2
       for (let i = 0; i < road.pts.length - 1; i++) {
         const [x1, z1] = road.pts[i]

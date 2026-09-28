@@ -1,9 +1,11 @@
 import * as THREE from 'three'
 import { CITIES, CONTRACT_TYPES, JUICE_PRICE, VEHICLES, vehicleById, type ContractType } from './data'
-import { fetchCity, geocode, proceduralCity, type CityData } from './map'
+import { fetchCity, geocode, proceduralCity, streamerFor, type CityData } from './map'
 import { Player, type Input } from './vehicle'
 import { Character, MASKS, buildMask, type FootInput } from './character'
 import { World } from './world'
+import { TrafficSystem } from './traffic'
+import { CombatSystem } from './combat'
 
 const SAVE_KEY = 'hoverghini.save.v1'
 
@@ -104,6 +106,8 @@ class Heap {
 export class Game {
   save = loadSave()
   world: World | null = null
+  traffic: TrafficSystem | null = null
+  combat: CombatSystem | null = null
   player: Player
   character: Character
   onFoot = false
@@ -128,6 +132,10 @@ export class Game {
   private pityTimer = 0
   private toastTimer = 0
   private thumbs = new Map<string, string>()
+  private streamTimer = 0
+  private streamBusy = false
+  private mapOpen = false
+  private mapZoom = 1
 
   constructor(scene: THREE.Scene) {
     this.scene = scene
@@ -242,11 +250,25 @@ export class Game {
     await new Promise((r) => setTimeout(r, 30))
 
     if (this.world) {
+      if (this.traffic) {
+        this.scene.remove(this.traffic.group)
+        this.traffic.dispose()
+        this.traffic = null
+      }
+      if (this.combat) {
+        this.scene.remove(this.combat.group)
+        this.combat.dispose()
+        this.combat = null
+      }
       this.scene.remove(this.world.group)
       this.world.dispose()
     }
     this.world = new World(city)
     this.scene.add(this.world.group)
+    this.traffic = new TrafficSystem(this.world)
+    this.scene.add(this.traffic.group)
+    this.combat = new CombatSystem(this.world)
+    this.scene.add(this.combat.group)
     this.refreshOwned()
 
     const main = city.nodes.map((n, i) => ({ n, i })).filter(({ n }) => n.main && n.adj.length > 0)
@@ -266,7 +288,7 @@ export class Game {
     overlay.classList.remove('show')
     $('hud').classList.add('show')
     $('city-name').textContent = city.name
-    $('city-tag').textContent = city.procedural ? 'SIM GRID' : 'OSM LIVE'
+    $('city-tag').textContent = city.procedural ? 'SIM GRID' : `OSM · ${streamerFor(city)?.tileCount ?? 0} SECTORS`
     this.loading = false
     this.closeModal()
     this.toast(
@@ -530,6 +552,50 @@ export class Game {
     this.save.cam = this.save.cam === 'chase' ? 'top' : 'chase'
     this.persist()
     this.toast(this.save.cam === 'top' ? 'Camera: TOP-DOWN' : 'Camera: CHASE', 'info')
+  }
+
+  fireWeapon() {
+    if (this.paused || !this.world || this.juice <= 0) return
+    if (this.combat?.fire(this.actor, this.actorHeading, this.onFoot)) {
+      this.juice = Math.max(0, this.juice - (this.onFoot ? 0.025 : 0.06))
+    }
+  }
+
+  toggleMap(force?: boolean) {
+    if (!this.world) return
+    this.mapOpen = force ?? !this.mapOpen
+    $('map-overlay').classList.toggle('show', this.mapOpen)
+    if (this.mapOpen) this.drawFullMap()
+  }
+
+  zoomMap(factor: number) {
+    this.mapZoom = Math.max(0.7, Math.min(5, this.mapZoom * factor))
+    this.drawFullMap()
+  }
+
+  private async streamMap() {
+    const w = this.world
+    const streamer = w && !w.city.procedural ? streamerFor(w.city) : undefined
+    if (!w || !streamer || this.streamBusy) return
+    this.streamBusy = true
+    $('city-tag').classList.add('streaming')
+    try {
+      const delta = await streamer.loadAround(this.actor.x, this.actor.z)
+      if (delta && this.world === w) {
+        w.appendMap(delta)
+        this.traffic?.ensurePopulation()
+        this.combat?.ensurePopulation()
+        this.buildMinimap()
+        $('city-tag').textContent = `OSM · ${streamer.tileCount} SECTORS`
+        if (this.mapOpen) this.drawFullMap()
+      }
+    } catch (e) {
+      console.warn('Background map streaming failed; cached sectors remain playable', e)
+      this.toast('Map uplink interrupted — retrying in the background', 'bad')
+    } finally {
+      this.streamBusy = false
+      $('city-tag').classList.remove('streaming')
+    }
   }
 
   buyMask(id: string) {
@@ -869,6 +935,7 @@ export class Game {
               <li><kbd>Space</kbd>/<kbd>C</kbd> Climb and descend (Free Hover; ceiling depends on vehicle)</li>
               <li><kbd>X</kbd> Hop off / on your ride. On foot: <kbd>WASD</kbd> run, <kbd>Shift</kbd> sprint, <kbd>Space</kbd> jump</li>
               <li><kbd>V</kbd> Switch chase / top-down camera</li>
+              <li><kbd>Q</kbd> Fire plasma weapon (works on foot or from your ride)</li>
             </ul></div>
             <div><h3>Business</h3><ul class="plain keys">
               <li><kbd>J</kbd> Contract board</li><li><kbd>G</kbd> Garage</li><li><kbd>P</kbd> Real estate</li><li><kbd>M</kbd> Warp to another city</li>
@@ -894,7 +961,8 @@ export class Game {
 
   private buildMinimap() {
     const w = this.world!
-    const size = Math.ceil(w.city.radius * 2.6 * this.mmScale)
+    const size = 1800
+    this.mmScale = 820 / Math.max(750, w.city.radius)
     const c = document.createElement('canvas')
     c.width = c.height = size
     const g = c.getContext('2d')!
@@ -918,6 +986,58 @@ export class Game {
     this.minimapBase = c
   }
 
+  private mapDot(g: CanvasRenderingContext2D, x: number, z: number, color: string, r: number) {
+    const w = this.world!
+    const base = this.minimapBase!
+    const o = base.width / 2
+    g.fillStyle = color
+    g.beginPath()
+    g.arc(o + x * this.mmScale, o + z * this.mmScale, r, 0, Math.PI * 2)
+    g.fill()
+    if (w.city.procedural) return
+  }
+
+  private drawFullMap() {
+    const w = this.world
+    const cv = $<HTMLCanvasElement>('full-map')
+    const g = cv.getContext('2d')
+    if (!w || !g || !this.minimapBase || !this.mapOpen) return
+    const dpr = Math.min(devicePixelRatio, 2)
+    const width = Math.max(1, cv.clientWidth), height = Math.max(1, cv.clientHeight)
+    if (cv.width !== Math.round(width * dpr) || cv.height !== Math.round(height * dpr)) {
+      cv.width = Math.round(width * dpr)
+      cv.height = Math.round(height * dpr)
+    }
+    const base = this.minimapBase, o = base.width / 2
+    const fit = Math.min(cv.width, cv.height) / base.width
+    const scale = fit * this.mapZoom
+    const px = o + this.actor.x * this.mmScale, pz = o + this.actor.z * this.mmScale
+    g.fillStyle = '#05030d'
+    g.fillRect(0, 0, cv.width, cv.height)
+    g.save()
+    g.translate(cv.width / 2, cv.height / 2)
+    g.scale(scale, scale)
+    g.drawImage(base, -px, -pz)
+    g.translate(-px, -pz)
+    for (const p of w.pumps) this.mapDot(g, p.x, p.z, '#19ffe6', 6 / scale)
+    const t = this.target()
+    if (t) this.mapDot(g, t.x, t.z, '#ffe14d', 9 / scale)
+    if (this.route.length > 1) {
+      g.strokeStyle = '#ffe14d'
+      g.lineWidth = 4 / scale
+      g.beginPath()
+      this.route.forEach((i, n) => {
+        const node = w.city.nodes[i]
+        const x = o + node.x * this.mmScale, y = o + node.z * this.mmScale
+        if (n) g.lineTo(x, y); else g.moveTo(x, y)
+      })
+      g.stroke()
+    }
+    this.mapDot(g, this.actor.x, this.actor.z, '#ffffff', 8 / scale)
+    g.restore()
+    $('map-coords').textContent = `${w.city.name} · ${streamerFor(w.city)?.tileCount ?? 'SIM'} sectors · ${(w.city.radius * 2 / 1000).toFixed(1)} km loaded`
+  }
+
   private drawMinimap() {
     const w = this.world
     const cv = $<HTMLCanvasElement>('minimap')
@@ -927,7 +1047,7 @@ export class Game {
     const css = cv.clientWidth
     if (cv.width !== css * dpr) { cv.width = cv.height = css * dpr }
     const S = cv.width
-    const zoom = 1.6 * dpr
+    const zoom = (0.34 / this.mmScale) * dpr
     const base = this.minimapBase
     const o = base.width / 2
     const px = this.actor.x, pz = this.actor.z
@@ -964,6 +1084,7 @@ export class Game {
     g.lineTo(S / 2 - 5 * dpr, S / 2 + 6 * dpr)
     g.closePath()
     g.fill()
+    if (this.mapOpen) this.drawFullMap()
   }
 
   // ---------- frame ----------
@@ -1007,8 +1128,26 @@ export class Game {
         this.drawRoute()
         this.routeTimer = 0.7
       }
+      this.streamTimer -= dt
+      if (this.streamTimer <= 0) {
+        this.streamTimer = 1.5
+        void this.streamMap()
+      }
     }
     w.update(dt)
+    this.traffic?.update(dt, this.actor)
+    this.combat?.update(
+      this.paused ? 0 : dt,
+      this.actor,
+      (amount) => {
+        this.earn(amount)
+        this.toast(`Gang drone neutralized · +${money(amount)}`, 'good')
+      },
+      () => {
+        this.juice = Math.max(0, this.juice - 2.5)
+        this.toast('Hostile plasma hit · HJ-77 containment damaged', 'bad')
+      },
+    )
     this.updateMarkers(dt)
     this.updateHud()
     this.drawMinimap()
@@ -1037,6 +1176,7 @@ export class Game {
     $('money').textContent = money(s.money)
     $('income').textContent = this.incomePerMin ? `+${money(this.incomePerMin)}/min passive` : 'No properties yet'
     $('vehicle-name').textContent = p.spec.name
+    $('combat-status').textContent = this.combat ? `${this.combat.remaining} HOSTILES` : ''
     const foot = this.onFoot
     $('speed').textContent = String(Math.round((foot ? this.character.speed : p.groundSpeed) * 3.6))
     $('alt').textContent = `${Math.round(this.actor.y)} m`

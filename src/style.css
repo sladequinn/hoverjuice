@@ -72,6 +72,7 @@ kbd {
 .mode.free { color: var(--pink); border: 1px solid var(--pink); box-shadow: 0 0 10px rgba(255, 43, 214, 0.4); }
 .boost { opacity: 0.3; font-weight: 700; }
 .boost.on { opacity: 1; color: var(--yellow); text-shadow: 0 0 8px var(--yellow); }
+.combat-status { position: absolute; right: 14px; bottom: 10px; font: 700 0.62rem 'Orbitron'; color: var(--red); letter-spacing: 0.08em; }
 .juice { margin: 12px 0 6px; }
 .juice-label { display: flex; justify-content: space-between; font-family: 'Orbitron'; font-size: 0.7rem; color: var(--cyan); margin-bottom: 4px; }
 .juice-bar { height: 12px; border-radius: 6px; background: rgba(25, 255, 230, 0.08); border: 1px solid rgba(25, 255, 230, 0.4); overflow: hidden; }
@@ -220,6 +221,29 @@ kbd {
   position: absolute; top: 196px; right: 111px; transform: translateX(50%); font-family: 'Orbitron'; font-size: 0.55rem; letter-spacing: 0.1em;
   color: var(--cyan); background: var(--bg); padding: 1px 6px; border-radius: 3px; border: 1px solid var(--line); pointer-events: none;
 }
+.tag.streaming { animation: pulse 0.45s infinite alternate; color: var(--yellow); border-color: var(--yellow); }
+
+/* ---------- expanded live map ---------- */
+.map-overlay { position: fixed; inset: 0; z-index: 4; display: none; background: rgba(5, 3, 13, 0.94); pointer-events: auto; }
+.map-overlay.show { display: block; }
+#full-map { position: absolute; inset: 0; width: 100%; height: 100%; touch-action: none; }
+.map-header {
+  position: absolute; top: max(16px, env(safe-area-inset-top)); left: 50%; transform: translateX(-50%);
+  width: min(620px, calc(100% - 32px)); padding: 11px 14px; display: flex; align-items: center; justify-content: space-between;
+}
+.map-header strong { display: block; font-family: 'Orbitron'; color: var(--cyan); letter-spacing: 0.12em; }
+.map-header span { display: block; color: var(--muted); font-size: 0.85rem; margin-top: 2px; }
+.map-header button, .map-tools button {
+  border: 1px solid var(--line); background: rgba(5, 3, 13, 0.8); color: var(--cyan); border-radius: 50%; cursor: pointer;
+}
+.map-header button { width: 40px; height: 40px; font-size: 1.1rem; }
+.map-tools { position: absolute; right: 18px; bottom: max(20px, env(safe-area-inset-bottom)); padding: 6px; display: flex; flex-direction: column; gap: 6px; }
+.map-tools button { width: 46px; height: 46px; font: 900 1.5rem 'Orbitron'; }
+.map-legend { position: absolute; left: 18px; bottom: max(20px, env(safe-area-inset-bottom)); padding: 9px 12px; display: flex; gap: 10px; align-items: center; font-size: 0.85rem; }
+.map-legend i { width: 9px; height: 9px; display: inline-block; border-radius: 50%; box-shadow: 0 0 8px currentColor; }
+.map-legend .you { color: white; background: white; }
+.map-legend .route { color: var(--yellow); background: var(--yellow); }
+.map-legend .fuel { color: var(--cyan); background: var(--cyan); }
 body.is-touch .cam-label { top: calc(var(--row2) + 144px); right: 56px; }
 .test-funds { justify-content: flex-start; gap: 12px; margin: 10px 0 4px; padding: 10px 12px; border: 1px dashed rgba(255, 196, 0, 0.4); border-radius: 8px; }
 .grid.masks { grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); }
@@ -236,6 +260,7 @@ body.is-touch .hud-tl, body.is-touch .hud-bl {
 body.is-touch .hud-tl { left: 8px; }
 body.is-touch .hud-bl { left: auto; right: 8px; }
 body.is-touch .brand, body.is-touch .vehicle-name, body.is-touch .alt { display: none; }
+body.is-touch .combat-status { right: 8px; bottom: 5px; font-size: 0.52rem; }
 body.is-touch .money { font-size: 1.25rem; line-height: 1.2; }
 body.is-touch .income { font-size: 0.75rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 body.is-touch .city { margin-top: 2px; font-size: 0.85rem; white-space: nowrap; }
@@ -284,6 +309,7 @@ body.is-touch .touch {
 .touch .gas { width: 80px; height: 80px; font-size: 1.05rem; border-color: var(--pink); color: var(--pink); box-shadow: 0 0 16px rgba(255, 43, 214, 0.3); }
 .touch .gas.held { background: rgba(255, 43, 214, 0.35); }
 .touch .boost-btn { border-color: var(--yellow); color: var(--yellow); }
+.touch .fire-btn { border-color: var(--red); color: #ff9caf; box-shadow: 0 0 10px rgba(255, 59, 92, 0.25); }
 #hud:not([data-mode='free']) .free-only { visibility: hidden; }
 #hud:not([data-mode='mag']) .mag-only { display: none !important; }
 #hud[data-mode='mag'] .mag-hide { display: none !important; }

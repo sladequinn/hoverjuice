@@ -34,10 +34,11 @@
           <div class="juice-bar"><div id="juice-fill"></div></div>
         </div>
         <div id="vehicle-name" class="muted small vehicle-name"></div>
+        <div id="combat-status" class="combat-status"></div>
       </div>
 
-      <canvas id="minimap" data-tap="cam" title="Switch camera (V)"></canvas>
-      <div class="cam-label">CAM</div>
+      <canvas id="minimap" data-tap="map" title="Expand city map"></canvas>
+      <div class="cam-label">MAP</div>
       <button id="contract" class="panel contract" data-tap="contracts"></button>
       <button class="menu-btn panel" data-tap="contracts" aria-label="Open menu"><span></span><span></span><span></span></button>
 
@@ -69,12 +70,26 @@
           </div>
           <div class="stack">
             <button data-tap="exit" class="chip foot-hide">EXIT</button>
+            <button data-tap="fire" class="chip fire-btn">FIRE</button>
             <button data-touch="boost" class="chip boost-btn"><span class="foot-hide">BOOST</span><span class="foot-only">SPRINT</span></button>
             <button data-touch="down" class="brk foot-hide">BRK</button>
           </div>
           <button data-touch="up" class="gas"><span class="foot-hide">GO</span><span class="foot-only">JUMP</span></button>
         </div>
       </div>
+    </div>
+
+    <div id="map-overlay" class="map-overlay">
+      <canvas id="full-map"></canvas>
+      <div class="map-header panel">
+        <div><strong>LIVE CITY GRID</strong><span id="map-coords"></span></div>
+        <button id="map-close" aria-label="Close map">✕</button>
+      </div>
+      <div class="map-tools panel">
+        <button id="map-minus" aria-label="Zoom map out">−</button>
+        <button id="map-plus" aria-label="Zoom map in">+</button>
+      </div>
+      <div class="map-legend panel"><i class="you"></i> Courier <i class="route"></i> Route <i class="fuel"></i> HJ-77</div>
     </div>
 
     <div id="title" class="title show">
