@@ -323,7 +323,7 @@ export class MapStreamer {
       let h = Number(props.render_height) || Number(props.height) || Number(props['building:levels']) * 3.4
       if (!h) {
         const seed = Number(f.id ?? i) + x * 97 + y * 193
-        h = 7 + ((seed * 16807) % 1000) / 1000 ** 0.55 * 24
+        h = 7 + Math.pow(((seed * 16807) % 1000) / 1000, 0.55) * 24
       }
       for (const rings of polygons) {
         const outer = rings[0]

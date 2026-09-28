@@ -565,6 +565,7 @@ export class Game {
     if (!this.world) return
     this.mapOpen = force ?? !this.mapOpen
     $('map-overlay').classList.toggle('show', this.mapOpen)
+    this.paused = this.mapOpen
     if (this.mapOpen) this.drawFullMap()
   }
 

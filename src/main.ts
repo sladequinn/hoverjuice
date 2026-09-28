@@ -70,7 +70,10 @@ window.addEventListener('keydown', (e) => {
   const open = modal.classList.contains('show')
   const view = modal.dataset.view
   const views: Record<string, string> = { j: 'contracts', g: 'garage', k: 'masks', p: 'holdings', m: 'warp', h: 'help' }
-  if (k === 'escape') game.closeModal()
+  if (k === 'escape') {
+    if ($('map-overlay').classList.contains('show')) game.toggleMap(false)
+    else game.closeModal()
+  }
   else if (views[k]) {
     if (open && view === views[k]) game.closeModal()
     else game.openModal(views[k])
