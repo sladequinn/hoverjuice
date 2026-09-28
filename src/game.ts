@@ -187,14 +187,39 @@ export class Game {
     overlay.classList.add('show')
     $('loading-city').textContent = name
     $('loading-status').textContent = 'Opening warp gate…'
-    let city: CityData
+    $('btn-load-cancel').style.display = this.world ? '' : 'none'
+    const ctrl = new AbortController()
+    let choice: 'sim' | 'cancel' | null = null
+    const onSim = () => { choice = 'sim'; ctrl.abort() }
+    const onCancel = () => { choice = 'cancel'; ctrl.abort() }
+    $('btn-load-sim').addEventListener('click', onSim)
+    $('btn-load-cancel').addEventListener('click', onCancel)
+    const started = performance.now()
+    const tick = setInterval(() => ($('loading-time').textContent = `${Math.floor((performance.now() - started) / 1000)}s`), 250)
+    $('loading-time').textContent = '0s'
+
+    let city: CityData | null = null
     try {
-      city = await fetchCity(name, lat, lon, (s) => ($('loading-status').textContent = s))
+      city = await fetchCity(name, lat, lon, (s) => ($('loading-status').textContent = s), ctrl.signal)
     } catch (e) {
-      console.warn('Map fetch failed, using simulation grid', e)
-      $('loading-status').textContent = 'Map uplink failed. Compiling a simulation grid…'
-      await new Promise((r) => setTimeout(r, 700))
-      city = proceduralCity(name, lat, lon)
+      if (choice !== 'cancel') {
+        if (choice !== 'sim') {
+          console.warn('Map fetch failed, using simulation grid', e)
+          $('loading-status').textContent = 'Map servers unreachable. Compiling a simulation grid…'
+          await new Promise((r) => setTimeout(r, 900))
+        }
+        city = proceduralCity(name, lat, lon)
+      }
+    } finally {
+      clearInterval(tick)
+      $('btn-load-sim').removeEventListener('click', onSim)
+      $('btn-load-cancel').removeEventListener('click', onCancel)
+    }
+    if (!city) {
+      overlay.classList.remove('show')
+      this.loading = false
+      this.toast('Warp cancelled', 'info')
+      return
     }
     $('loading-status').textContent = `Extruding ${city.buildings.length.toLocaleString()} towers…`
     await new Promise((r) => setTimeout(r, 30))
@@ -446,6 +471,13 @@ export class Game {
     this.toast(`Pumped ${afford.toFixed(1)} L of HJ-77 for ${money(afford * JUICE_PRICE)}`, 'good')
   }
 
+  promptAction() {
+    const w = this.world
+    if (!w || this.paused) return
+    if (w.nearestPump(this.player.pos.x, this.player.pos.z).dist <= 18) this.refuel()
+    else if (this.juice <= 0) this.tow()
+  }
+
   tow() {
     const w = this.world
     if (!w || this.paused) return
@@ -546,8 +578,16 @@ export class Game {
     const m = $('modal')
     m.dataset.view = view
     const body = $('modal-body')
-    $('modal-close').style.display = view === 'win' || !this.world ? 'none' : ''
-    body.innerHTML = this.renderView(view)
+    const tabs: [string, string][] = [['contracts', 'Contracts'], ['garage', 'Garage'], ['holdings', 'Estate'], ['warp', 'Warp'], ['help', 'Help']]
+    const tabBar = this.world && view !== 'win'
+      ? `<nav class="tabs">${tabs.map(([id, label]) => `<button class="tab ${id === view ? 'on' : ''}" data-act="view" data-arg="${id}">${label}</button>`).join('')}<button class="tab-close" data-act="close" aria-label="Close">✕</button></nav>`
+      : ''
+    $('modal-close').style.display = tabBar || view === 'win' || !this.world ? 'none' : ''
+    const card = body.parentElement!
+    const scroll = view === m.dataset.lastView ? card.scrollTop : 0
+    m.dataset.lastView = view
+    body.innerHTML = tabBar + this.renderView(view)
+    card.scrollTop = scroll
     m.classList.add('show')
     this.paused = true
     body.querySelectorAll<HTMLElement>('[data-act]').forEach((b) =>
@@ -708,6 +748,8 @@ export class Game {
             </ul></div>
             <div><h3>Hoverjuice (HJ-77)</h3><p class="muted">Your repulsors drink a volatile turquoise fluid that evaporates constantly, even while parked. Run dry and you sink to a crawl.
             HJ-77 is also the precursor to the street drug Cyan-ade. Precursor contracts pay big, but the leaking canisters double your evaporation.</p></div>
+            <div><h3>Touch controls</h3><p class="muted">◀ ▶ steer (or choose the junction branch), <b>GO</b> thrusts, <b>BRK</b> brakes and reverses.
+            Tap the <b>MAG-LOCK</b> badge to switch modes; <b>BOOST</b> and ▲ ▼ altitude appear in Free Hover. Tap the fuel prompt at a pump to refuel.</p></div>
             <div><h3>Flight modes</h3><p class="muted"><b>Mag-Lock</b> snaps you to street conduits: collision-free, efficient and faster on straights. <b>Free Hover</b> unlocks drifting, boosting and altitude, but towers are solid.</p></div>
           </div>
           <div class="row"><span class="muted">${s.deliveries} deliveries · ${money(s.earned)} earned lifetime</span><button class="btn danger ghost" data-act="reset">Reset save</button></div>`
@@ -866,8 +908,10 @@ export class Game {
     $('speed').textContent = String(Math.round(p.groundSpeed * 3.6))
     $('alt').textContent = `${Math.round(p.pos.y)} m`
     const mode = $('mode')
-    mode.textContent = p.mode === 'mag' ? 'MAG-LOCK' : 'FREE HOVER'
+    setHtml(mode, p.mode === 'mag' ? 'MAG-LOCK' : 'FREE HOVER')
     mode.className = `mode ${p.mode}`
+    $('hud').dataset.mode = p.mode
+    const touch = document.body.classList.contains('touch')
     const pct = this.juice / p.spec.tank
     const fill = $('juice-fill')
     fill.style.width = `${pct * 100}%`
@@ -881,9 +925,9 @@ export class Game {
       const hint = this.routeHint()
       const arrows = ['⮕', '⬆', '⬅']
       turn.style.display = nt.junction || nt.dir === 2 ? '' : 'none'
-      turn.innerHTML = nt.dir === 2
+      setHtml(turn, nt.dir === 2
         ? 'Dead end: auto-reverse'
-        : `Next junction <b>${arrows[nt.dir + 1]}</b>${hint !== null ? ` <span class="${hint === nt.dir ? 'ok' : 'warn'}">route ${arrows[hint + 1]}</span>` : ''}`
+        : `Next junction <b>${arrows[nt.dir + 1]}</b>${hint !== null ? ` <span class="${hint === nt.dir ? 'ok' : 'warn'}">route ${arrows[hint + 1]}</span>` : ''}`)
     } else turn.style.display = 'none'
 
     const c = this.active
@@ -893,28 +937,36 @@ export class Game {
       const w = this.world!
       const tn = w.city.nodes[c.stage === 'pickup' ? c.from : c.to]
       const d = Math.hypot(tn.x - p.pos.x, tn.z - p.pos.z)
-      panel.innerHTML = `<div class="row"><span class="pill ${c.type.id}">${c.type.label}</span><strong class="pay">${money(c.pay)}</strong></div>
+      const dist = d < 1000 ? Math.round(d / 5) * 5 + ' m' : (d / 1000).toFixed(1) + ' km'
+      setHtml(panel, `<div class="row"><span class="pill ${c.type.id}">${c.type.label}</span><strong class="pay">${money(c.pay)}</strong></div>
         <div class="client">${esc(c.client)}</div>
-        <div class="row"><span>${c.stage === 'pickup' ? 'PICKUP' : 'DROP-OFF'} · ${d < 1000 ? Math.round(d) + ' m' : (d / 1000).toFixed(1) + ' km'}</span>
-        <span class="timer ${c.stage === 'dropoff' && c.remaining < 15 ? 'hot' : ''}">${c.stage === 'dropoff' ? (c.remaining > 0 ? Math.ceil(c.remaining) + 's' : 'LATE') : c.time + 's'}</span></div>`
+        <div class="row"><span>${c.stage === 'pickup' ? 'PICKUP' : 'DROP-OFF'} · ${dist}</span>
+        <span class="timer ${c.stage === 'dropoff' && c.remaining < 15 ? 'hot' : ''}">${c.stage === 'dropoff' ? (c.remaining > 0 ? Math.ceil(c.remaining) + 's' : 'LATE') : c.time + 's'}</span></div>`)
     } else if (this.waypoint) {
       panel.classList.add('show')
-      panel.innerHTML = `<div class="client">Waypoint: ${esc(this.waypoint.label)}</div><div class="muted">Press J for contracts</div>`
+      setHtml(panel, `<div class="client">Waypoint: ${esc(this.waypoint.label)}</div><div class="muted">${touch ? 'Tap for contracts' : 'Press <kbd>J</kbd> for contracts'}</div>`)
     } else {
       panel.classList.add('show')
-      panel.innerHTML = `<div class="client">No active contract</div><div class="muted">Press <kbd>J</kbd> to open the contract board</div>`
+      setHtml(panel, `<div class="client">No active contract</div><div class="muted">${touch ? 'Tap to open the contract board' : 'Press <kbd>J</kbd> to open the contract board'}</div>`)
     }
 
     const { dist } = this.world!.nearestPump(p.pos.x, p.pos.z)
     const prompt = $('prompt')
     if (dist < 18 && !this.paused) {
       const need = p.spec.tank - this.juice
-      prompt.innerHTML = need > 0.5 ? `<kbd>F</kbd> Refuel ${need.toFixed(1)} L · ${money(need * JUICE_PRICE)}` : 'Tank full'
+      setHtml(prompt, need > 0.5 ? `${touch ? '⛽ Tap to refuel' : '<kbd>F</kbd> Refuel'} ${need.toFixed(0)} L · ${money(need * JUICE_PRICE)}` : 'Tank full')
       prompt.classList.add('show')
     } else if (this.juice <= 0 && !this.paused) {
-      prompt.innerHTML = `<kbd>T</kbd> Call grav-tow (${money(30 * p.spec.payMult)})`
+      setHtml(prompt, `${touch ? 'Tap to call' : '<kbd>T</kbd> Call'} grav-tow (${money(30 * p.spec.payMult)})`)
       prompt.classList.add('show')
     } else prompt.classList.remove('show')
+  }
+}
+
+function setHtml(el: HTMLElement, html: string) {
+  if (el.dataset.html !== html) {
+    el.dataset.html = html
+    el.innerHTML = html
   }
 }
 

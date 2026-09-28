@@ -38,6 +38,11 @@ window.addEventListener('resize', () => {
   composer.setSize(window.innerWidth, window.innerHeight)
 })
 
+const coarse = window.matchMedia('(pointer: coarse)')
+const syncTouch = () => document.body.classList.toggle('touch', coarse.matches || 'ontouchstart' in window)
+syncTouch()
+coarse.addEventListener('change', syncTouch)
+
 const game = new Game(scene)
 
 // ---------- input ----------
@@ -80,8 +85,7 @@ document.querySelectorAll<HTMLElement>('[data-tap]').forEach((el) =>
   el.addEventListener('click', () => {
     const a = el.dataset.tap!
     if (a === 'mode') game.toggleMode()
-    else if (a === 'refuel') game.refuel()
-    else if (a === 'tow') game.tow()
+    else if (a === 'prompt') game.promptAction()
     else game.openModal(a)
   }),
 )
@@ -146,7 +150,8 @@ function frame() {
     camera.position.lerp(camPos, Math.min(1, dt * 6))
     camTarget.lerp(new THREE.Vector3(p.pos.x + Math.sin(p.heading) * 6, p.pos.y + 1.2, p.pos.z + Math.cos(p.heading) * 6), Math.min(1, dt * 10))
     camera.lookAt(camTarget)
-    const fov = 62 + (p.boosting ? 12 : 0) + p.groundSpeed * 0.08
+    const baseFov = camera.aspect < 1 ? 62 + (1 - camera.aspect) * 30 : 62
+    const fov = baseFov + (p.boosting ? 12 : 0) + p.groundSpeed * 0.08
     camera.fov += (fov - camera.fov) * Math.min(1, dt * 4)
     camera.updateProjectionMatrix()
   } else {

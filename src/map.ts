@@ -52,6 +52,7 @@ export interface CityData {
 const RADIUS = 750
 const ENDPOINTS = [
   'https://overpass-api.de/api/interpreter',
+  'https://maps.mail.ru/osm/tools/overpass/api/interpreter',
   'https://overpass.kumi.systems/api/interpreter',
   'https://overpass.private.coffee/api/interpreter',
 ]
@@ -164,28 +165,100 @@ interface OsmElement {
   members?: { role: string; geometry?: OsmGeom[] }[]
 }
 
-export async function fetchCity(name: string, lat: number, lon: number, onStatus: (s: string) => void): Promise<CityData> {
+const PRIMARY_TIMEOUT = 25000
+const MIRROR_TIMEOUT = 45000
+
+async function overpassRequest(url: string, query: string, timeout: number, signal: AbortSignal) {
+  const ctrl = new AbortController()
+  const abort = () => ctrl.abort()
+  signal.addEventListener('abort', abort)
+  const timer = setTimeout(abort, timeout)
+  try {
+    const res = await fetch(url, { method: 'POST', body: new URLSearchParams({ data: query }), signal: ctrl.signal })
+    if (!res.ok) throw new Error(`${new URL(url).host}: HTTP ${res.status}`)
+    const json = await res.json()
+    if (!Array.isArray(json?.elements)) throw new Error(`${new URL(url).host}: bad response`)
+    return json as { elements: OsmElement[] }
+  } finally {
+    clearTimeout(timer)
+    signal.removeEventListener('abort', abort)
+  }
+}
+
+/** Primary server first; if it refuses or stalls, race every mirror and take the first good answer. */
+async function downloadOverpass(query: string, onStatus: (s: string) => void, signal: AbortSignal) {
+  const [primary, ...mirrors] = ENDPOINTS
+  try {
+    onStatus(`Uplinking to ${new URL(primary).host}…`)
+    return await overpassRequest(primary, query, PRIMARY_TIMEOUT, signal)
+  } catch (e) {
+    if (signal.aborted) throw e
+    console.warn('Primary Overpass failed', e)
+  }
+  onStatus(`Primary uplink busy. Racing ${mirrors.length} mirror servers…`)
+  const race = new AbortController()
+  const stop = () => race.abort()
+  signal.addEventListener('abort', stop)
+  try {
+    return await Promise.any(mirrors.map((m) => overpassRequest(m, query, MIRROR_TIMEOUT, race.signal)))
+  } catch {
+    throw new Error('All map servers failed')
+  } finally {
+    race.abort()
+    signal.removeEventListener('abort', stop)
+  }
+}
+
+const DB_NAME = 'hoverghini-cache'
+function openDb(): Promise<IDBDatabase> {
+  return new Promise((resolve, reject) => {
+    const req = indexedDB.open(DB_NAME, 1)
+    req.onupgradeneeded = () => req.result.createObjectStore('osm')
+    req.onsuccess = () => resolve(req.result)
+    req.onerror = () => reject(req.error)
+  })
+}
+async function cacheGet(key: string): Promise<unknown> {
+  try {
+    const db = await openDb()
+    return await new Promise((resolve) => {
+      const req = db.transaction('osm').objectStore('osm').get(key)
+      req.onsuccess = () => resolve(req.result)
+      req.onerror = () => resolve(undefined)
+    })
+  } catch {
+    return undefined
+  }
+}
+async function cachePut(key: string, value: unknown) {
+  try {
+    const db = await openDb()
+    db.transaction('osm', 'readwrite').objectStore('osm').put(value, key)
+  } catch {
+    /* private browsing or quota: caching is optional */
+  }
+}
+
+export async function fetchCity(
+  name: string,
+  lat: number,
+  lon: number,
+  onStatus: (s: string) => void,
+  signal: AbortSignal,
+): Promise<CityData> {
   const dLat = RADIUS / 110540
   const dLon = RADIUS / (111320 * Math.cos((lat * Math.PI) / 180))
   const bbox = `${lat - dLat},${lon - dLon},${lat + dLat},${lon + dLon}`
   const hw = Object.keys(ROAD_WIDTH).concat(['motorway_link', 'trunk_link', 'primary_link', 'secondary_link', 'tertiary_link']).join('|')
   const query = `[out:json][timeout:90];(way["building"](${bbox});relation["building"](${bbox});way["highway"~"^(${hw})$"](${bbox}););out geom;`
 
-  let json: { elements: OsmElement[] } | null = null
-  let lastErr: unknown
-  for (const url of ENDPOINTS) {
-    try {
-      onStatus(`Uplinking to ${new URL(url).host}…`)
-      const res = await fetch(url, { method: 'POST', body: new URLSearchParams({ data: query }) })
-      if (!res.ok) throw new Error(`HTTP ${res.status}`)
-      onStatus('Decoding city grid…')
-      json = await res.json()
-      break
-    } catch (e) {
-      lastErr = e
-    }
+  const cacheId = `osm:${bbox}`
+  let json = (await cacheGet(cacheId)) as { elements: OsmElement[] } | undefined
+  if (json) onStatus('Loaded from local cache…')
+  else {
+    json = await downloadOverpass(query, onStatus, signal)
+    void cachePut(cacheId, json)
   }
-  if (!json) throw lastErr ?? new Error('No map data')
 
   const kx = 111320 * Math.cos((lat * Math.PI) / 180)
   const proj = (g: OsmGeom): Pt => [(g.lon - lon) * kx, -(g.lat - lat) * 110540]
