@@ -196,8 +196,10 @@ export class World {
       this.pumps.push({ node: i, x: n.x, z: n.z })
       const g = new THREE.Group()
       g.position.set(n.x, 0, n.z)
+      const m = this.city.nodes[n.adj[0] ?? i]
+      const len = Math.hypot(m.x - n.x, m.z - n.z) || 1
       const pillar = new THREE.Mesh(pillarGeo, pillarMat)
-      pillar.position.set(0, 3.5, 0)
+      pillar.position.set(((m.z - n.z) / len) * 10, 3.5, (-(m.x - n.x) / len) * 10)
       g.add(pillar)
       const ring = new THREE.Mesh(ringGeo, ringMat)
       ring.rotation.x = Math.PI / 2
@@ -205,7 +207,7 @@ export class World {
       g.add(ring)
       this.pumpRings.push(ring)
       const beam = new THREE.Mesh(new THREE.CylinderGeometry(0.8, 0.8, 140, 8, 1, true), beamMat)
-      beam.position.y = 70
+      beam.position.set(pillar.position.x, 70, pillar.position.z)
       g.add(beam)
       this.group.add(g)
     }

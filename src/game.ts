@@ -144,7 +144,7 @@ export class Game {
     scene.add(this.beacon)
 
     this.arrow = new THREE.Mesh(
-      new THREE.ConeGeometry(0.5, 1.6, 4),
+      new THREE.ConeGeometry(0.3, 1.1, 4),
       new THREE.MeshBasicMaterial({ color: 0xffe14d }),
     )
     this.arrow.geometry.rotateX(Math.PI / 2)
@@ -209,7 +209,9 @@ export class Game {
 
     const main = city.nodes.map((n, i) => ({ n, i })).filter(({ n }) => n.main && n.adj.length > 0)
     main.sort((a, b) => Math.hypot(a.n.x, a.n.z) - Math.hypot(b.n.x, b.n.z))
-    this.player.placeAtNode(this.world, main[0]?.i ?? 0)
+    const pumps = this.world.pumps
+    const spawn = main.find(({ n }) => pumps.every((p) => Math.hypot(p.x - n.x, p.z - n.z) > 40)) ?? main[0]
+    this.player.placeAtNode(this.world, spawn?.i ?? 0)
     this.juice = Math.max(this.juice, this.player.spec.tank * 0.6)
     this.active = null
     this.waypoint = null
@@ -849,8 +851,10 @@ export class Game {
     this.beacon.getObjectByName('ring')!.rotation.z += dt
     ;(this.arrow.material as THREE.MeshBasicMaterial).color.setHex(color)
     const p = this.player.pos
-    this.arrow.position.set(p.x, p.y + (this.player.spec.kind === 'board' ? 3.2 : 3.6), p.z)
-    this.arrow.lookAt(t.x, p.y + 3, t.z)
+    const ang = Math.atan2(t.x - p.x, t.z - p.z)
+    const y = p.y + (this.player.spec.kind === 'board' ? 2.8 : 3.2)
+    this.arrow.position.set(p.x + Math.sin(ang) * 3, y, p.z + Math.cos(ang) * 3)
+    this.arrow.lookAt(t.x, y, t.z)
   }
 
   private updateHud() {

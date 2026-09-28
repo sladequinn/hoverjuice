@@ -27,7 +27,7 @@ camera.position.set(0, 30, -40)
 
 const composer = new EffectComposer(renderer)
 composer.addPass(new RenderPass(scene, camera))
-const bloom = new UnrealBloomPass(new THREE.Vector2(window.innerWidth, window.innerHeight), 0.85, 0.5, 0.35)
+const bloom = new UnrealBloomPass(new THREE.Vector2(window.innerWidth, window.innerHeight), 0.7, 0.45, 0.5)
 composer.addPass(bloom)
 composer.addPass(new OutputPass())
 
@@ -121,13 +121,15 @@ $('btn-new').addEventListener('click', () => {
 })
 
 // ---------- loop ----------
-const clock = new THREE.Clock()
+let last = performance.now()
 const camTarget = new THREE.Vector3()
 const camPos = new THREE.Vector3()
 let orbit = 0
 
 function frame() {
-  const dt = Math.min(clock.getDelta(), 0.05)
+  const now = performance.now()
+  const dt = Math.min((now - last) / 1000, 0.05)
+  last = now
   const input = readInput()
   game.update(dt, input)
 
