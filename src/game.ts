@@ -581,7 +581,14 @@ export class Game {
     this.streamBusy = true
     $('city-tag').classList.add('streaming')
     try {
-      const delta = await streamer.loadAround(this.actor.x, this.actor.z)
+      // Prefetch one tile ahead instead of loading a costly 3×3 square. At z14 this
+      // gives roughly a kilometre of warning while keeping dense cities phone-friendly.
+      const lookAhead = 850
+      const delta = await streamer.loadAround(
+        this.actor.x + Math.sin(this.actorHeading) * lookAhead,
+        this.actor.z + Math.cos(this.actorHeading) * lookAhead,
+        0,
+      )
       if (delta && this.world === w) {
         w.appendMap(delta)
         this.traffic?.ensurePopulation()
