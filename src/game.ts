@@ -2,6 +2,7 @@ import * as THREE from 'three'
 import { CITIES, CONTRACT_TYPES, JUICE_PRICE, VEHICLES, vehicleById, type ContractType } from './data'
 import { fetchCity, geocode, proceduralCity, type CityData } from './map'
 import { Player, type Input } from './vehicle'
+import { Character, MASKS, buildMask, type FootInput } from './character'
 import { World } from './world'
 
 const SAVE_KEY = 'hoverghini.save.v1'
@@ -24,6 +25,9 @@ interface SaveData {
   deliveries: number
   earned: number
   won: boolean
+  masks: string[]
+  mask: string
+  cam: 'chase' | 'top'
 }
 
 interface Contract {
@@ -49,7 +53,7 @@ export const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.g
 export const money = (n: number) => '$' + Math.floor(n).toLocaleString('en-US')
 
 function defaultSave(): SaveData {
-  return { money: 150, owned: ['board'], current: 'board', holdings: [], city: null, deliveries: 0, earned: 0, won: false }
+  return { money: 150, owned: ['board'], current: 'board', holdings: [], city: null, deliveries: 0, earned: 0, won: false, masks: ['none', 'rooster', 'pig'], mask: 'rooster', cam: 'chase' }
 }
 
 function loadSave(): SaveData {
@@ -101,6 +105,8 @@ export class Game {
   save = loadSave()
   world: World | null = null
   player: Player
+  character: Character
+  onFoot = false
   juice = 0
   scene: THREE.Scene
   paused = true
@@ -121,12 +127,15 @@ export class Game {
   private mmScale = 0.2
   private pityTimer = 0
   private toastTimer = 0
+  private thumbs = new Map<string, string>()
 
   constructor(scene: THREE.Scene) {
     this.scene = scene
-    this.player = new Player(vehicleById(this.save.current))
+    this.player = new Player(vehicleById(this.save.current), this.save.mask)
     this.juice = this.player.spec.tank
     scene.add(this.player.mesh)
+    this.character = new Character(this.save.mask)
+    scene.add(this.character.mesh)
 
     this.beacon = new THREE.Group()
     const beam = new THREE.Mesh(
@@ -150,6 +159,14 @@ export class Game {
     this.arrow.geometry.rotateX(Math.PI / 2)
     this.arrow.visible = false
     scene.add(this.arrow)
+  }
+
+  get actor() {
+    return this.onFoot ? this.character.pos : this.player.pos
+  }
+
+  get actorHeading() {
+    return this.onFoot ? this.character.heading : this.player.heading
   }
 
   get hasSave() {
@@ -274,7 +291,7 @@ export class Game {
     if (!w) return
     const pool = this.mainNodes()
     if (pool.length < 2) return
-    const p = this.player.pos
+    const p = this.actor
     const near = pool.filter((i) => Math.hypot(w.city.nodes[i].x - p.x, w.city.nodes[i].z - p.z) < 450)
     const spec = this.player.spec
     this.offers = []
@@ -343,9 +360,9 @@ export class Game {
     const w = this.world!
     if (!c) return
     const tgt = w.city.nodes[c.stage === 'pickup' ? c.from : c.to]
-    const d = Math.hypot(tgt.x - this.player.pos.x, tgt.z - this.player.pos.z)
+    const d = Math.hypot(tgt.x - this.actor.x, tgt.z - this.actor.z)
     if (c.stage === 'dropoff') c.remaining -= dt
-    if (d < 16 && this.player.pos.y < 30) {
+    if (d < 16 && this.actor.y < 30) {
       if (c.stage === 'pickup') {
         c.stage = 'dropoff'
         c.remaining = c.time
@@ -381,12 +398,12 @@ export class Game {
       })
     }
     let start = -1
-    if (this.player.mode === 'mag') start = this.player.edgeB
+    if (this.player.mode === 'mag' && !this.onFoot) start = this.player.edgeB
     else {
       let bd = Infinity
       nodes.forEach((n, i) => {
         if (!n.main) return
-        const d = Math.hypot(n.x - this.player.pos.x, n.z - this.player.pos.z)
+        const d = Math.hypot(n.x - this.actor.x, n.z - this.actor.z)
         if (d < bd) { bd = d; start = i }
       })
     }
@@ -474,13 +491,92 @@ export class Game {
   promptAction() {
     const w = this.world
     if (!w || this.paused) return
+    if (this.onFoot) { this.toggleVehicle(); return }
     if (w.nearestPump(this.player.pos.x, this.player.pos.z).dist <= 18) this.refuel()
     else if (this.juice <= 0) this.tow()
   }
 
-  tow() {
+  toggleVehicle() {
     const w = this.world
     if (!w || this.paused) return
+    const p = this.player, c = this.character
+    if (this.onFoot) {
+      if (c.pos.distanceTo(p.pos) > 5.5) { this.toast('Walk back to your ride to hop on', 'info'); return }
+      this.onFoot = false
+      c.mesh.visible = false
+      p.showRider(true)
+      this.routeTimer = 0
+      return
+    }
+    if (!p.parked) { this.toast('Slow down and drop low to hop off', 'bad'); return }
+    const side = p.spec.kind === 'board' ? 1.3 : 2.6
+    const rx = -Math.cos(p.heading), rz = Math.sin(p.heading)
+    let x = p.pos.x + rx * side, z = p.pos.z + rz * side
+    if (w.hitBuilding(x, z, 0.5) >= 0) { x = p.pos.x - rx * side; z = p.pos.z - rz * side }
+    p.speed = 0
+    p.vel.set(0, 0)
+    c.pos.set(x, w.groundHeightAt(x, z, p.pos.y), z)
+    c.vel.set(0, 0)
+    c.heading = p.heading
+    c.mesh.visible = true
+    c.update(0, { moveX: 0, moveY: 0, sprint: false, jump: false }, w, p.heading)
+    p.showRider(false)
+    this.onFoot = true
+    this.routeTimer = 0
+    this.toast(`On foot. ${isTouch() ? 'Stick to run, GO to jump' : 'WASD to run, Space to jump, X to hop back on'}`, 'info')
+  }
+
+  cycleCamera() {
+    this.save.cam = this.save.cam === 'chase' ? 'top' : 'chase'
+    this.persist()
+    this.toast(this.save.cam === 'top' ? 'Camera: TOP-DOWN' : 'Camera: CHASE', 'info')
+  }
+
+  buyMask(id: string) {
+    const m = MASKS.find((x) => x.id === id)
+    if (!m || this.save.masks.includes(id) || this.save.money < m.price) return
+    this.save.money -= m.price
+    this.save.masks.push(id)
+    this.equipMask(id)
+  }
+
+  equipMask(id: string) {
+    if (!this.save.masks.includes(id)) return
+    this.save.mask = id
+    this.player.setMask(id)
+    this.character.setMask(id)
+    this.persist()
+    this.openModal('masks')
+  }
+
+  private maskThumbs() {
+    if (this.thumbs.size) return
+    const r = new THREE.WebGLRenderer({ antialias: true, alpha: true, preserveDrawingBuffer: true })
+    r.setPixelRatio(1)
+    r.setSize(128, 128)
+    const sc = new THREE.Scene()
+    sc.add(new THREE.HemisphereLight(0xffffff, 0x662255, 2.4))
+    const dl = new THREE.DirectionalLight(0xffffff, 1.6)
+    dl.position.set(1, 1.5, 2)
+    sc.add(dl)
+    const cam = new THREE.PerspectiveCamera(30, 1, 0.1, 10)
+    cam.position.set(0.5, 0.2, 1.55)
+    cam.lookAt(0, 0.08, 0)
+    for (const m of MASKS) {
+      const g = buildMask(m.id)
+      g.rotation.y = 0.25
+      sc.add(g)
+      r.render(sc, cam)
+      this.thumbs.set(m.id, r.domElement.toDataURL())
+      sc.remove(g)
+    }
+    r.dispose()
+    r.forceContextLoss()
+  }
+
+  tow() {
+    const w = this.world
+    if (!w || this.paused || this.onFoot) return
     const fee = Math.round(30 * this.player.spec.payMult)
     const { pump } = w.nearestPump(this.player.pos.x, this.player.pos.z)
     if (!pump) return
@@ -492,9 +588,10 @@ export class Game {
   toggleMode() {
     const w = this.world
     if (!w || this.paused) return
+    if (this.onFoot) { this.toast('Hop back on your ride first', 'info'); return }
     if (this.player.mode === 'mag') {
-      this.player.unsnap()
-      this.toast(`FREE HOVER: inertia drifting, ${isTouch() ? 'BOOST' : 'Shift'} to hyper-boost`, 'info')
+      const sling = this.player.unsnap()
+      this.toast(sling ? 'SLINGSHOT! Launched off the conduit into FREE HOVER' : `FREE HOVER: inertia drifting, ${isTouch() ? 'BOOST' : 'Shift'} to hyper-boost`, sling ? 'good' : 'info')
     } else if (this.player.pos.y > 12) {
       this.toast('Drop below 12 m to Mag-Lock onto a conduit', 'bad')
     } else if (this.player.snap(w)) {
@@ -578,7 +675,7 @@ export class Game {
     const m = $('modal')
     m.dataset.view = view
     const body = $('modal-body')
-    const tabs: [string, string][] = [['contracts', 'Contracts'], ['garage', 'Garage'], ['holdings', 'Estate'], ['warp', 'Warp'], ['help', 'Help']]
+    const tabs: [string, string][] = [['contracts', 'Contracts'], ['garage', 'Garage'], ['masks', 'Masks'], ['holdings', 'Estate'], ['warp', 'Warp'], ['help', 'Help']]
     const tabBar = this.world && view !== 'win'
       ? `<nav class="tabs">${tabs.map(([id, label]) => `<button class="tab ${id === view ? 'on' : ''}" data-act="view" data-arg="${id}">${label}</button>`).join('')}<button class="tab-close" data-act="close" aria-label="Close">✕</button></nav>`
       : ''
@@ -624,6 +721,14 @@ export class Game {
       }
       case 'view': this.openModal(arg); break
       case 'close': this.closeModal(); break
+      case 'buy-mask': this.buyMask(arg); break
+      case 'equip-mask': this.equipMask(arg); break
+      case 'cheat':
+        this.earn(1_000_000)
+        this.persist()
+        this.toast('+$1,000,000 test funds wired to your account', 'good')
+        this.openModal($('modal').dataset.view || 'garage')
+        break
       case 'reset': if (confirm('Wipe your save and start over as a gutter courier?')) this.resetSave(); break
     }
   }
@@ -696,10 +801,30 @@ export class Game {
               <label>HJ-77 tank <span>${v.tank} L</span></label>${bar(v.tank, max.tank)}
               <label>Cargo pay <span>×${v.payMult}</span></label>${bar(v.payMult, max.pay)}
               <label>Max altitude <span>${v.maxAlt} m</span></label>${bar(v.maxAlt, max.alt)}
-              <label>Evaporation <span>${v.evap.toFixed(2)} L/s</span></label>
+              <label>Evaporation <span>${v.evap.toFixed(3)} L/s</span></label>
             </div>${btn}</div>`
         }).join('')
-        return `<h2>Garage</h2><p class="muted">From gutter deck to Hoverghini. Bigger rides unlock richer cargo classes, but drink more HJ-77.</p><div class="grid">${cards}</div>`
+        return `<h2>Garage</h2><p class="muted">From gutter deck to Hoverghini. Bigger rides unlock richer cargo classes, but drink more HJ-77.</p>
+          <div class="row test-funds"><span class="muted small">Playtesting?</span><button class="btn buy" data-act="cheat">+$1,000,000 test funds</button></div>
+          <div class="grid">${cards}</div>`
+      }
+      case 'masks': {
+        this.maskThumbs()
+        const cards = MASKS.map((m) => {
+          const owned = s.masks.includes(m.id)
+          const current = s.mask === m.id
+          const afford = s.money >= m.price
+          const btn = current
+            ? '<button class="btn" disabled>Wearing</button>'
+            : owned
+              ? `<button class="btn" data-act="equip-mask" data-arg="${m.id}">Wear</button>`
+              : `<button class="btn ${afford ? 'buy' : ''}" data-act="buy-mask" data-arg="${m.id}" ${afford ? '' : 'disabled'}>${m.price ? 'Buy ' + money(m.price) : 'Free'}</button>`
+          return `<div class="card mask ${current ? 'current' : ''}">
+            <img src="${this.thumbs.get(m.id)}" alt="${m.name} mask" width="96" height="96" />
+            <h3>${m.name}</h3><p class="muted small">${m.blurb}</p>${btn}</div>`
+        }).join('')
+        return `<h2>Masks</h2><p class="muted">Every courier needs a face for the job. Your mask shows on the board and when you're on foot.</p>
+          <div class="grid masks">${cards}</div>`
       }
       case 'holdings': {
         const list = w
@@ -740,7 +865,10 @@ export class Game {
               <li><kbd>A</kbd>/<kbd>D</kbd> Steer, or pick the branch at the next junction in Mag-Lock</li>
               <li><kbd>E</kbd> Toggle Mag-Lock / Free Hover</li>
               <li><kbd>Shift</kbd> Hyper-boost (Free Hover only, burns HJ-77 fast)</li>
+              <li><kbd>Shift</kbd> Boost works in Mag-Lock too; <kbd>Space</kbd> hops off the conduit</li>
               <li><kbd>Space</kbd>/<kbd>C</kbd> Climb and descend (Free Hover; ceiling depends on vehicle)</li>
+              <li><kbd>X</kbd> Hop off / on your ride. On foot: <kbd>WASD</kbd> run, <kbd>Shift</kbd> sprint, <kbd>Space</kbd> jump</li>
+              <li><kbd>V</kbd> Switch chase / top-down camera</li>
             </ul></div>
             <div><h3>Business</h3><ul class="plain keys">
               <li><kbd>J</kbd> Contract board</li><li><kbd>G</kbd> Garage</li><li><kbd>P</kbd> Real estate</li><li><kbd>M</kbd> Warp to another city</li>
@@ -750,8 +878,9 @@ export class Game {
             HJ-77 is also the precursor to the street drug Cyan-ade. Precursor contracts pay big, but the leaking canisters double your evaporation.</p></div>
             <div><h3>Touch controls</h3><p class="muted">◀ ▶ steer (or choose the junction branch), <b>GO</b> thrusts, <b>BRK</b> brakes and reverses.
             Tap the <b>MAG-LOCK</b> badge to switch modes; <b>BOOST</b> and ▲ ▼ altitude appear in Free Hover. Tap the fuel prompt at a pump to refuel.</p></div>
-            <div><h3>Flight modes</h3><p class="muted"><b>Mag-Lock</b> snaps you to street conduits: collision-free, efficient and faster on straights. <b>Free Hover</b> unlocks drifting, boosting and altitude, but towers are solid.</p></div>
+            <div><h3>Flight modes</h3><p class="muted"><b>Mag-Lock</b> snaps you to street conduits on an elastic tether: steer to swing across the lane, corners fling you wide, and leaving the conduit at speed slingshots you into Free Hover. <b>Free Hover</b> unlocks drifting, boosting and altitude, but towers are solid.</p></div>
           </div>
+          <div class="row test-funds"><span class="muted small">Playtesting?</span><button class="btn buy" data-act="cheat">+$1,000,000 test funds</button></div>
           <div class="row"><span class="muted">${s.deliveries} deliveries · ${money(s.earned)} earned lifetime</span><button class="btn danger ghost" data-act="reset">Reset save</button></div>`
       case 'win':
         return `<div class="win"><h1>HOVERGHINI</h1><p>From the gutter to the skyline. You own the ultimate status symbol.</p>
@@ -801,12 +930,12 @@ export class Game {
     const zoom = 1.6 * dpr
     const base = this.minimapBase
     const o = base.width / 2
-    const px = this.player.pos.x, pz = this.player.pos.z
+    const px = this.actor.x, pz = this.actor.z
     g.save()
     g.fillStyle = '#05050c'
     g.fillRect(0, 0, S, S)
     g.translate(S / 2, S / 2)
-    g.rotate(-this.player.heading + Math.PI)
+    g.rotate(-this.actorHeading + Math.PI)
     g.scale(zoom, zoom)
     g.drawImage(base, -(o + px * this.mmScale), -(o + pz * this.mmScale))
     const dot = (x: number, z: number, color: string, r: number) => {
@@ -839,7 +968,7 @@ export class Game {
 
   // ---------- frame ----------
 
-  update(dt: number, input: Input) {
+  update(dt: number, input: Input, foot: FootInput, camYaw: number) {
     const w = this.world
     if (!w) return
     if (this.toastTimer > 0) {
@@ -848,10 +977,13 @@ export class Game {
     }
     if (!this.paused) {
       const spec = this.player.spec
-      this.player.update(dt, input, w, this.juice > 0)
+      if (this.onFoot) {
+        this.character.update(dt, foot, w, camYaw)
+        this.player.update(dt, IDLE, w, this.juice > 0)
+      } else this.player.update(dt, input, w, this.juice > 0)
       const leak = this.active?.stage === 'dropoff' ? this.active.type.leak : 0
       const magEff = this.player.mode === 'mag' ? 0.7 : 1
-      this.juice -= (spec.evap + leak + spec.burn * this.player.lastBurn * magEff) * dt
+      this.juice -= (spec.evap * (1 + leak) + spec.burn * this.player.lastBurn * magEff) * dt
       if (this.juice <= 0 && this.juice + dt * spec.evap > 0) this.toast(`HJ-77 depleted! Crawl to a pump or ${isTouch() ? 'tap the prompt' : 'press T'} for a tow.`, 'bad')
       this.juice = Math.max(0, this.juice)
       this.updateContract(dt)
@@ -865,7 +997,7 @@ export class Game {
       }
       this.saveTimer += dt
       if (this.saveTimer > 10) { this.persist(); this.saveTimer = 0 }
-      if (this.waypoint && Math.hypot(this.waypoint.x - this.player.pos.x, this.waypoint.z - this.player.pos.z) < 40) {
+      if (this.waypoint && Math.hypot(this.waypoint.x - this.actor.x, this.waypoint.z - this.actor.z) < 40) {
         this.toast(`Arrived at ${this.waypoint.label}`, 'good')
         this.waypoint = null
       }
@@ -892,9 +1024,9 @@ export class Game {
     this.beacon.children.forEach((c) => ((c as THREE.Mesh).material as THREE.MeshBasicMaterial).color.setHex(color))
     this.beacon.getObjectByName('ring')!.rotation.z += dt
     ;(this.arrow.material as THREE.MeshBasicMaterial).color.setHex(color)
-    const p = this.player.pos
+    const p = this.actor
     const ang = Math.atan2(t.x - p.x, t.z - p.z)
-    const y = p.y + (this.player.spec.kind === 'board' ? 2.8 : 3.2)
+    const y = p.y + (this.onFoot || this.player.spec.kind === 'board' ? 2.6 : 3.2)
     this.arrow.position.set(p.x + Math.sin(ang) * 3, y, p.z + Math.cos(ang) * 3)
     this.arrow.lookAt(t.x, y, t.z)
   }
@@ -905,12 +1037,13 @@ export class Game {
     $('money').textContent = money(s.money)
     $('income').textContent = this.incomePerMin ? `+${money(this.incomePerMin)}/min passive` : 'No properties yet'
     $('vehicle-name').textContent = p.spec.name
-    $('speed').textContent = String(Math.round(p.groundSpeed * 3.6))
-    $('alt').textContent = `${Math.round(p.pos.y)} m`
+    const foot = this.onFoot
+    $('speed').textContent = String(Math.round((foot ? this.character.speed : p.groundSpeed) * 3.6))
+    $('alt').textContent = `${Math.round(this.actor.y)} m`
     const mode = $('mode')
-    setHtml(mode, p.mode === 'mag' ? 'MAG-LOCK' : 'FREE HOVER')
-    mode.className = `mode ${p.mode}`
-    $('hud').dataset.mode = p.mode
+    setHtml(mode, foot ? 'ON FOOT' : p.mode === 'mag' ? 'MAG-LOCK' : 'FREE HOVER')
+    mode.className = `mode ${foot ? 'foot' : p.mode}`
+    $('hud').dataset.mode = foot ? 'foot' : p.mode
     const touch = isTouch()
     const pct = this.juice / p.spec.tank
     const fill = $('juice-fill')
@@ -920,7 +1053,7 @@ export class Game {
     $('boost').classList.toggle('on', p.boosting)
 
     const turn = $('turn')
-    if (p.mode === 'mag') {
+    if (p.mode === 'mag' && !foot) {
       const nt = p.nextTurn(this.world!)
       const hint = this.routeHint()
       const arrows = ['⮕', '⬆', '⬅']
@@ -952,7 +1085,11 @@ export class Game {
 
     const { dist } = this.world!.nearestPump(p.pos.x, p.pos.z)
     const prompt = $('prompt')
-    if (dist < 18 && !this.paused) {
+    const nearRide = foot && this.character.pos.distanceTo(p.pos) < 5.5
+    if (foot) {
+      setHtml(prompt, nearRide ? `${touch ? 'Tap to hop on' : '<kbd>X</kbd> Hop on'} your ${p.spec.name}` : '')
+      prompt.classList.toggle('show', nearRide && !this.paused)
+    } else if (dist < 18 && !this.paused) {
       const need = p.spec.tank - this.juice
       setHtml(prompt, need > 0.5 ? `${touch ? '⛽ Tap to refuel' : '<kbd>F</kbd> Refuel'} ${need.toFixed(0)} L · ${money(need * JUICE_PRICE)}` : 'Tank full')
       prompt.classList.add('show')
@@ -962,6 +1099,8 @@ export class Game {
     } else prompt.classList.remove('show')
   }
 }
+
+const IDLE: Input = { throttle: 0, brake: 0, steer: 0, boost: false, up: false, down: false }
 
 const isTouch = () => document.body.classList.contains('is-touch')
 

@@ -16,7 +16,7 @@ export interface VehicleSpec {
   drift: number
   /** litres of HJ-77 */
   tank: number
-  /** litres per second lost to evaporation, always */
+  /** litres per second lost to evaporation, always (even parked) */
   evap: number
   /** litres per second at full throttle */
   burn: number
@@ -41,8 +41,8 @@ export const VEHICLES: VehicleSpec[] = [
     turn: 2.6,
     drift: 0.55,
     tank: 18,
-    evap: 0.045,
-    burn: 0.09,
+    evap: 0.0112,
+    burn: 0.0225,
     boost: 1.6,
     payMult: 1,
     maxAlt: 6,
@@ -60,8 +60,8 @@ export const VEHICLES: VehicleSpec[] = [
     turn: 2.2,
     drift: 0.5,
     tank: 30,
-    evap: 0.07,
-    burn: 0.14,
+    evap: 0.0175,
+    burn: 0.035,
     boost: 1.55,
     payMult: 1.7,
     maxAlt: 10,
@@ -79,8 +79,8 @@ export const VEHICLES: VehicleSpec[] = [
     turn: 1.5,
     drift: 0.35,
     tank: 70,
-    evap: 0.12,
-    burn: 0.26,
+    evap: 0.03,
+    burn: 0.065,
     boost: 1.4,
     payMult: 3.2,
     maxAlt: 18,
@@ -98,8 +98,8 @@ export const VEHICLES: VehicleSpec[] = [
     turn: 2.2,
     drift: 0.45,
     tank: 60,
-    evap: 0.1,
-    burn: 0.22,
+    evap: 0.025,
+    burn: 0.055,
     boost: 1.6,
     payMult: 4.6,
     maxAlt: 40,
@@ -117,8 +117,8 @@ export const VEHICLES: VehicleSpec[] = [
     turn: 2.1,
     drift: 0.45,
     tank: 90,
-    evap: 0.14,
-    burn: 0.3,
+    evap: 0.035,
+    burn: 0.075,
     boost: 1.65,
     payMult: 7,
     maxAlt: 80,
@@ -136,8 +136,8 @@ export const VEHICLES: VehicleSpec[] = [
     turn: 2.6,
     drift: 0.62,
     tank: 80,
-    evap: 0.2,
-    burn: 0.45,
+    evap: 0.05,
+    burn: 0.1125,
     boost: 1.8,
     payMult: 10,
     maxAlt: 140,
@@ -155,8 +155,8 @@ export const VEHICLES: VehicleSpec[] = [
     turn: 2.8,
     drift: 0.68,
     tank: 120,
-    evap: 0.28,
-    burn: 0.6,
+    evap: 0.07,
+    burn: 0.15,
     boost: 1.9,
     payMult: 15,
     maxAlt: 320,
@@ -197,6 +197,7 @@ export interface ContractType {
   blurb: string
   payMult: number
   timeMult: number
+  /** extra evaporation while carrying, as a multiple of the vehicle's own rate */
   leak: number
 }
 
@@ -206,10 +207,10 @@ export const CONTRACT_TYPES: ContractType[] = [
   {
     id: 'cyanade',
     label: 'HJ-77 Precursor',
-    blurb: 'Unmarked canisters for a Cyan-ade cook. Fumes leak into your repulsors.',
+    blurb: 'Unmarked canisters for a Cyan-ade cook. Leaking fumes double your HJ-77 evaporation.',
     payMult: 2.5,
     timeMult: 0.9,
-    leak: 0.08,
+    leak: 1,
   },
 ]
 

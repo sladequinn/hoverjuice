@@ -36,7 +36,8 @@
         <div id="vehicle-name" class="muted small vehicle-name"></div>
       </div>
 
-      <canvas id="minimap"></canvas>
+      <canvas id="minimap" data-tap="cam" title="Switch camera (V)"></canvas>
+      <div class="cam-label">CAM</div>
       <button id="contract" class="panel contract" data-tap="contracts"></button>
       <button class="menu-btn panel" data-tap="contracts" aria-label="Open menu"><span></span><span></span><span></span></button>
 
@@ -49,13 +50,17 @@
         <button data-tap="garage" title="Garage (G)"><b>G</b>Garage</button>
         <button data-tap="holdings" title="Real estate (P)"><b>P</b>Estate</button>
         <button data-tap="warp" title="Warp (M)"><b>M</b>Warp</button>
+        <button data-tap="masks" title="Masks (K)"><b>K</b>Masks</button>
         <button data-tap="help" title="Help (H)"><b>H</b>Help</button>
       </nav>
 
       <div class="touch">
-        <div class="steer">
-          <button data-touch="left" aria-label="Steer left">◀</button>
-          <button data-touch="right" aria-label="Steer right">▶</button>
+        <div class="left-pad">
+          <div class="steer mag-only">
+            <button data-touch="left" aria-label="Steer left">◀</button>
+            <button data-touch="right" aria-label="Steer right">▶</button>
+          </div>
+          <div id="stick" class="stick mag-hide" aria-label="Analog stick"><div id="stick-knob"></div></div>
         </div>
         <div class="throttle">
           <div class="alt-pad free-only">
@@ -63,10 +68,11 @@
             <button data-touch="dive" aria-label="Descend">▼</button>
           </div>
           <div class="stack">
-            <button data-touch="boost" class="chip boost-btn free-only">BOOST</button>
-            <button data-touch="down" class="brk">BRK</button>
+            <button data-tap="exit" class="chip foot-hide">EXIT</button>
+            <button data-touch="boost" class="chip boost-btn"><span class="foot-hide">BOOST</span><span class="foot-only">SPRINT</span></button>
+            <button data-touch="down" class="brk foot-hide">BRK</button>
           </div>
-          <button data-touch="up" class="gas">GO</button>
+          <button data-touch="up" class="gas"><span class="foot-hide">GO</span><span class="foot-only">JUMP</span></button>
         </div>
       </div>
     </div>
@@ -83,7 +89,7 @@
           <button id="btn-continue" class="btn buy big" style="display: none"></button>
           <button id="btn-new" class="btn big">Choose a city</button>
         </div>
-        <p class="muted small desktop-only">W/A/S/D fly · E switch Mag-Lock / Free Hover · Shift boost · H for the full manual</p>
+        <p class="muted small desktop-only">W/A/S/D fly · E switch Mag-Lock / Free Hover · Shift boost · X hop off · V camera · H manual</p>
       </div>
     </div>
 
