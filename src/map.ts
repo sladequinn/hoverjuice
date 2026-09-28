@@ -52,7 +52,8 @@ export interface CityData {
 }
 
 const RADIUS = 750
-const TILE_ZOOM = 15
+// OpenFreeMap's planet archive currently tops out at z14; requesting z15 returns valid but empty tiles.
+const TILE_ZOOM = 14
 const TILEJSON_URL = 'https://tiles.openfreemap.org/planet'
 
 function rng(seed: number) {
