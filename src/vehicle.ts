@@ -424,7 +424,7 @@ export class Player {
     const pad = this.mesh.getObjectByName('pad') as THREE.Mesh | undefined
     if (pad) {
       pad.position.y = -this.pos.y + 0.15
-      ;(pad.material as THREE.MeshBasicMaterial).opacity = (hasJuice ? 0.14 + Math.random() * 0.05 : 0.04) * (this.spec.kind === 'board' ? 0.5 : 1)
+      ;(pad.material as THREE.MeshBasicMaterial).opacity = (hasJuice ? 0.14 + Math.random() * 0.05 : 0.04) * (this.spec.kind === 'board' ? 0.25 : 1)
     }
   }
 }

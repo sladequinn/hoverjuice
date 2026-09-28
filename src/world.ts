@@ -174,7 +174,7 @@ export class World {
         const [x1, z1] = b.poly[i]
         const [x2, z2] = b.poly[(i + 1) % n]
         const len = Math.hypot(x2 - x1, z2 - z1)
-        const u1 = d / 48, u2 = (d + len) / 48, v = h / 48
+        const u1 = d / 32, u2 = (d + len) / 32, v = h / 32
         d += len
         bk.pos.push(x1, 0, z1, x2, 0, z2, x2, h, z2, x1, 0, z1, x2, h, z2, x1, h, z1)
         bk.uv.push(u1, 0, u2, 0, u2, v, u1, 0, u2, v, u1, v)

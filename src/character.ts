@@ -228,7 +228,7 @@ export function buildMask(id: string) {
   return g
 }
 
-const JACKET = 0xf4efe6
+const JACKET = 0xcfc6d8
 const SLEEVE = 0xff2e88
 const JEANS = 0x2a3a7a
 const skinTone = 0xf2c7a5

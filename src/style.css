@@ -187,7 +187,7 @@ kbd {
 }
 .search input:focus { outline: none; border-color: var(--cyan); box-shadow: 0 0 12px rgba(25, 255, 230, 0.3); }
 .win { text-align: center; padding: 30px 10px; }
-.win h1 { font-family: 'Orbitron'; font-size: clamp(2.2rem, 8vw, 4.5rem); margin: 0; background: linear-gradient(90deg, var(--gold), var(--cyan)); -webkit-background-clip: text; background-clip: text; color: transparent; }
+.win h1 { font-family: 'Orbitron'; font-weight: 900; font-style: italic; font-size: clamp(2.2rem, 8vw, 4.5rem); margin: 0; color: var(--gold); text-shadow: 4px 4px 0 #3a0a4a, 0 0 30px currentColor; animation: hm-title 2.2s ease-in-out infinite alternate, hm-hue 3s steps(1) infinite; }
 
 /* ---------- loading ---------- */
 .loading { position: fixed; inset: 0; display: none; flex-direction: column; align-items: center; justify-content: center; gap: 10px; background: rgba(8, 3, 20, 0.92); z-index: 10; text-align: center; padding: 20px; }

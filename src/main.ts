@@ -13,13 +13,13 @@ const canvas = $<HTMLCanvasElement>('scene')
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance' })
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.75))
 renderer.setSize(window.innerWidth, window.innerHeight)
-renderer.toneMapping = THREE.ACESFilmicToneMapping
-renderer.toneMappingExposure = 1.15
+renderer.toneMapping = THREE.NeutralToneMapping
+renderer.toneMappingExposure = 1.05
 
 const scene = new THREE.Scene()
 scene.fog = new THREE.FogExp2(0x2a0838, 0.0017)
-scene.add(new THREE.HemisphereLight(0xff7ad0, 0x00c8ff, 1.7))
-const sun = new THREE.DirectionalLight(0xffb0e0, 2.2)
+scene.add(new THREE.HemisphereLight(0xff7ad0, 0x00c8ff, 1.1))
+const sun = new THREE.DirectionalLight(0xffb0e0, 1.5)
 sun.position.set(40, 80, -30)
 scene.add(sun)
 const sky = createSky()
@@ -54,6 +54,7 @@ syncTouch()
 coarse.addEventListener('change', syncTouch)
 
 const game = new Game(scene)
+;(window as unknown as { hoverghini: Game }).hoverghini = game
 
 // ---------- input ----------
 const keys = new Set<string>()
@@ -238,7 +239,8 @@ function updateCamera(dt: number) {
   let dist: number, height: number
   if (top) {
     dist = 7 * zoom
-    height = (foot ? 26 : kind === 'truck' ? 42 : 34) * zoom + speed * 0.25
+    height = (foot ? 15 : kind === 'truck' ? 38 : 28) * zoom + speed * 0.25
+    dist = (foot ? 4 : 7) * zoom
   } else if (foot) {
     dist = 5.5 * zoom
     height = 2.6 * zoom

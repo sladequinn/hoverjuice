@@ -523,7 +523,7 @@ export class Game {
     p.showRider(false)
     this.onFoot = true
     this.routeTimer = 0
-    this.toast(`On foot. ${isTouch() ? 'Stick to run, GO to jump' : 'WASD to run, Space to jump, X to hop back on'}`, 'info')
+    this.toast(`On foot. ${isTouch() ? 'Stick to run, JUMP to leap' : 'WASD to run, Space to jump, X to hop back on'}`, 'info')
   }
 
   cycleCamera() {
@@ -724,9 +724,9 @@ export class Game {
       case 'buy-mask': this.buyMask(arg); break
       case 'equip-mask': this.equipMask(arg); break
       case 'cheat':
-        this.earn(1_000_000)
+        this.earn(5_000_000)
         this.persist()
-        this.toast('+$1,000,000 test funds wired to your account', 'good')
+        this.toast('+$5,000,000 test funds wired to your account', 'good')
         this.openModal($('modal').dataset.view || 'garage')
         break
       case 'reset': if (confirm('Wipe your save and start over as a gutter courier?')) this.resetSave(); break
@@ -805,7 +805,7 @@ export class Game {
             </div>${btn}</div>`
         }).join('')
         return `<h2>Garage</h2><p class="muted">From gutter deck to Hoverghini. Bigger rides unlock richer cargo classes, but drink more HJ-77.</p>
-          <div class="row test-funds"><span class="muted small">Playtesting?</span><button class="btn buy" data-act="cheat">+$1,000,000 test funds</button></div>
+          <div class="row test-funds"><span class="muted small">Playtesting?</span><button class="btn buy" data-act="cheat">+$5,000,000 test funds</button></div>
           <div class="grid">${cards}</div>`
       }
       case 'masks': {
@@ -880,7 +880,7 @@ export class Game {
             Tap the <b>MAG-LOCK</b> badge to switch modes; <b>BOOST</b> and ▲ ▼ altitude appear in Free Hover. Tap the fuel prompt at a pump to refuel.</p></div>
             <div><h3>Flight modes</h3><p class="muted"><b>Mag-Lock</b> snaps you to street conduits on an elastic tether: steer to swing across the lane, corners fling you wide, and leaving the conduit at speed slingshots you into Free Hover. <b>Free Hover</b> unlocks drifting, boosting and altitude, but towers are solid.</p></div>
           </div>
-          <div class="row test-funds"><span class="muted small">Playtesting?</span><button class="btn buy" data-act="cheat">+$1,000,000 test funds</button></div>
+          <div class="row test-funds"><span class="muted small">Playtesting?</span><button class="btn buy" data-act="cheat">+$5,000,000 test funds</button></div>
           <div class="row"><span class="muted">${s.deliveries} deliveries · ${money(s.earned)} earned lifetime</span><button class="btn danger ghost" data-act="reset">Reset save</button></div>`
       case 'win':
         return `<div class="win"><h1>HOVERGHINI</h1><p>From the gutter to the skyline. You own the ultimate status symbol.</p>
