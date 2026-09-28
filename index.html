@@ -1,0 +1,102 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+    <meta name="theme-color" content="#0a0418" />
+    <title>Hoverghini: Neon Courier Tycoon</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@500;700;900&family=Rajdhani:wght@500;600;700&display=swap" rel="stylesheet" />
+  </head>
+  <body>
+    <canvas id="scene"></canvas>
+
+    <div id="hud">
+      <div class="hud-tl panel">
+        <div class="brand">HOVERGHINI</div>
+        <div id="money" class="money">$0</div>
+        <div id="income" class="muted small"></div>
+        <div class="city"><span id="city-name"></span><span id="city-tag" class="tag"></span></div>
+      </div>
+
+      <canvas id="minimap"></canvas>
+      <div id="contract" class="panel contract"></div>
+
+      <div class="hud-bl panel">
+        <div class="row">
+          <div><span id="speed" class="speed">0</span><span class="unit">km/h</span></div>
+          <div class="right">
+            <div id="mode" class="mode mag">MAG-LOCK</div>
+            <div class="muted small">ALT <span id="alt">0 m</span> · <span id="boost" class="boost">BOOST</span></div>
+          </div>
+        </div>
+        <div class="juice">
+          <div class="juice-label"><span>HJ-77</span><span id="juice-text"></span></div>
+          <div class="juice-bar"><div id="juice-fill"></div></div>
+        </div>
+        <div id="vehicle-name" class="muted small"></div>
+      </div>
+
+      <div id="turn" class="turn"></div>
+      <div id="prompt" class="prompt"></div>
+      <div id="toast" class="toast"></div>
+
+      <nav class="menu">
+        <button data-tap="contracts" title="Contracts (J)"><b>J</b>Contracts</button>
+        <button data-tap="garage" title="Garage (G)"><b>G</b>Garage</button>
+        <button data-tap="holdings" title="Real estate (P)"><b>P</b>Estate</button>
+        <button data-tap="warp" title="Warp (M)"><b>M</b>Warp</button>
+        <button data-tap="help" title="Help (H)"><b>H</b>Help</button>
+      </nav>
+
+      <div class="touch">
+        <div class="pad">
+          <button data-touch="left">◀</button>
+          <button data-touch="right">▶</button>
+        </div>
+        <div class="pad actions">
+          <button data-tap="mode" class="small-btn">MODE</button>
+          <button data-tap="refuel" class="small-btn">FUEL</button>
+          <button data-touch="climb" class="small-btn">▲ UP</button>
+          <button data-touch="dive" class="small-btn">▼ DN</button>
+          <button data-touch="boost" class="small-btn boost-btn">BOOST</button>
+          <button data-touch="down">BRK</button>
+          <button data-touch="up" class="gas">GO</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="title" class="title show">
+      <div class="title-inner">
+        <p class="kicker">Neon courier · Tycoon simulator</p>
+        <h1>HOVERGHINI</h1>
+        <p class="lede">
+          Start as a broke gutter courier on a leaky hoverboard. Run high-stakes deliveries through any real city on Earth,
+          keep your repulsors wet with volatile HJ-77, buy up the skyline, and earn the ultimate status symbol.
+        </p>
+        <div class="title-actions">
+          <button id="btn-continue" class="btn buy big" style="display: none"></button>
+          <button id="btn-new" class="btn big">Choose a city</button>
+        </div>
+        <p class="muted small">W/A/S/D fly · E switch Mag-Lock / Free Hover · Shift boost · H for the full manual</p>
+      </div>
+    </div>
+
+    <div id="modal" class="modal">
+      <div class="modal-card">
+        <button id="modal-close" class="close" aria-label="Close">✕</button>
+        <div id="modal-body"></div>
+      </div>
+    </div>
+
+    <div id="loading" class="loading">
+      <div class="spinner"></div>
+      <div class="loading-city" id="loading-city"></div>
+      <div class="muted" id="loading-status"></div>
+      <div class="muted small">Map data © OpenStreetMap contributors</div>
+    </div>
+
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
