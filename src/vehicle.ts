@@ -44,7 +44,7 @@ export function buildVehicleMesh(spec: VehicleSpec) {
       add(new THREE.BoxGeometry(0.75, 0.12, 2.1), body, 0, 0, 0)
       add(new THREE.BoxGeometry(0.8, 0.04, 2.15), glow, 0, -0.08, 0)
       const rider = new THREE.Group()
-      const suit = new THREE.MeshStandardMaterial({ color: 0x20243a, roughness: 0.6 })
+      const suit = new THREE.MeshStandardMaterial({ color: 0x4a5280, roughness: 0.5, emissive: 0x1a1440 })
       const legs = new THREE.Mesh(new THREE.CylinderGeometry(0.16, 0.2, 0.9, 8), suit)
       legs.position.y = 0.5
       const torso = new THREE.Mesh(new THREE.CylinderGeometry(0.26, 0.2, 0.75, 8), suit)
@@ -55,7 +55,10 @@ export function buildVehicleMesh(spec: VehicleSpec) {
       visor.position.set(0, 1.92, 0.17)
       const bag = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.55, 0.3), new THREE.MeshBasicMaterial({ color: 0xff2bd6 }))
       bag.position.set(0, 1.35, -0.3)
-      rider.add(legs, torso, head, visor, bag)
+      const stripe = new THREE.Mesh(new THREE.TorusGeometry(0.24, 0.03, 6, 16), glow)
+      stripe.rotation.x = Math.PI / 2
+      stripe.position.y = 1.55
+      rider.add(legs, torso, head, visor, bag, stripe)
       rider.rotation.y = 0.5
       rider.position.y = 0.06
       g.add(rider)
@@ -111,7 +114,7 @@ export function buildVehicleMesh(spec: VehicleSpec) {
     new THREE.MeshBasicMaterial({ color: spec.glow, transparent: true, opacity: 0.35, blending: THREE.AdditiveBlending, depthWrite: false }),
   )
   pad.rotation.x = -Math.PI / 2
-  pad.scale.set(halfW * 2.2, halfL * 1.6, 1)
+  pad.scale.set(halfW * 1.6, halfL * 1.2, 1)
   pad.name = 'pad'
   g.add(pad)
   const flame = new THREE.Mesh(

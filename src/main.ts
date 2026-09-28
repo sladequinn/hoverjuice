@@ -136,8 +136,8 @@ function frame() {
   const p = game.player
   if (game.world) {
     const kind = p.spec.kind
-    const dist = (kind === 'board' ? 7 : kind === 'truck' ? 14 : 10) * zoom * (1 + p.groundSpeed / 140)
-    const height = (kind === 'board' ? 3 : kind === 'truck' ? 6 : 4) * zoom + dist * 0.12
+    const dist = (kind === 'board' ? 8 : kind === 'truck' ? 14 : 10) * zoom * (1 + p.groundSpeed / 140)
+    const height = (kind === 'board' ? 4 : kind === 'truck' ? 6 : 4.5) * zoom + dist * 0.15
     const back = p.mode === 'free' && p.vel.length() > 3 ? Math.atan2(p.vel.x, p.vel.y) * 0.35 + p.heading * 0.65 : p.heading
     if (game.paused) orbit += dt * 0.15
     else orbit *= 0.9
