@@ -202,7 +202,7 @@ kbd {
   font-weight: 700; color: var(--muted); letter-spacing: 0.04em;
 }
 .tab-close {
-  flex: none; margin-left: auto; width: 36px; height: 36px; border-radius: 50%; border: 1px solid var(--line); background: transparent;
+  flex: none; margin-left: auto; position: sticky; right: 0; background: rgba(12, 7, 30, 0.97); width: 36px; height: 36px; border-radius: 50%; border: 1px solid var(--line); background: transparent;
   color: var(--muted); cursor: pointer; font-size: 1rem;
 }
 .tab-close:hover { color: var(--cyan); border-color: var(--cyan); }
@@ -213,40 +213,42 @@ kbd {
 .menu-btn { display: none; }
 
 /* ---------- touch layout ---------- */
-body.touch { --row2: calc(88px + env(safe-area-inset-top)); }
-body.touch .desktop-only, body.touch .menu { display: none; }
-body.touch .hud-tl, body.touch .hud-bl {
+body.is-touch { --row2: calc(88px + env(safe-area-inset-top)); }
+body.is-touch .desktop-only, body.is-touch .menu { display: none; }
+body.is-touch .hud-tl, body.is-touch .hud-bl {
   top: calc(8px + env(safe-area-inset-top)); bottom: auto; width: calc(50% - 12px); max-width: 250px; min-width: 0; padding: 8px 10px; height: 74px;
 }
-body.touch .hud-tl { left: 8px; }
-body.touch .hud-bl { left: auto; right: 8px; }
-body.touch .brand, body.touch .vehicle-name, body.touch .alt { display: none; }
-body.touch .money { font-size: 1.25rem; line-height: 1.2; }
-body.touch .income { font-size: 0.75rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-body.touch .city { margin-top: 2px; font-size: 0.85rem; white-space: nowrap; overflow: hidden; }
-body.touch .speed { font-size: 1.6rem; }
-body.touch .unit { font-size: 0.75rem; margin-left: 3px; }
-body.touch .mode { font-size: 0.62rem; padding: 6px 7px; letter-spacing: 0.06em; }
-body.touch .juice { margin: 8px 0 0; }
-body.touch .juice-label { font-size: 0.6rem; }
-body.touch .juice-bar { height: 8px; }
+body.is-touch .hud-tl { left: 8px; }
+body.is-touch .hud-bl { left: auto; right: 8px; }
+body.is-touch .brand, body.is-touch .vehicle-name, body.is-touch .alt { display: none; }
+body.is-touch .money { font-size: 1.25rem; line-height: 1.2; }
+body.is-touch .income { font-size: 0.75rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+body.is-touch .city { margin-top: 2px; font-size: 0.85rem; white-space: nowrap; }
+body.is-touch #city-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+body.is-touch .tag { flex: none; font-size: 0.5rem; }
+body.is-touch .speed { font-size: 1.6rem; }
+body.is-touch .unit { font-size: 0.75rem; margin-left: 3px; }
+body.is-touch .mode { font-size: 0.62rem; padding: 6px 7px; letter-spacing: 0.06em; }
+body.is-touch .juice { margin: 8px 0 0; }
+body.is-touch .juice-label { font-size: 0.6rem; }
+body.is-touch .juice-bar { height: 8px; }
 
-body.touch .contract {
+body.is-touch .contract {
   top: var(--row2); left: 8px; right: 64px; width: auto; max-width: 440px; padding: 6px 10px; min-height: 48px; font-size: 0.85rem;
 }
-body.touch .contract .client { margin: 2px 0; font-size: 0.95rem; }
-body.touch .contract .pill { font-size: 0.55rem; padding: 2px 6px; }
-body.touch .menu-btn {
+body.is-touch .contract .client { margin: 2px 0; font-size: 0.95rem; }
+body.is-touch .contract .pill { font-size: 0.55rem; padding: 2px 6px; }
+body.is-touch .menu-btn {
   display: flex; flex-direction: column; justify-content: center; align-items: center; gap: 4px; position: absolute;
   top: var(--row2); right: 8px; width: 48px; height: 48px; cursor: pointer;
 }
-body.touch .menu-btn span { display: block; width: 20px; height: 2px; border-radius: 1px; background: var(--cyan); box-shadow: 0 0 6px var(--cyan); }
-body.touch #minimap { top: calc(var(--row2) + 56px); right: 8px; width: 96px; height: 96px; }
-body.touch .turn { top: calc(var(--row2) + 56px); left: 8px; transform: none; font-size: 0.85rem; padding: 5px 10px; }
-body.touch .toast { top: auto; bottom: calc(190px + env(safe-area-inset-bottom)); font-size: 0.9rem; }
-body.touch .prompt { bottom: calc(132px + env(safe-area-inset-bottom)); font-size: 1rem; white-space: nowrap; }
+body.is-touch .menu-btn span { display: block; width: 20px; height: 2px; border-radius: 1px; background: var(--cyan); box-shadow: 0 0 6px var(--cyan); }
+body.is-touch #minimap { top: calc(var(--row2) + 56px); right: 8px; width: 96px; height: 96px; }
+body.is-touch .turn { top: calc(var(--row2) + 56px); left: 8px; transform: none; font-size: 0.85rem; padding: 5px 10px; }
+body.is-touch .toast { top: auto; bottom: calc(190px + env(safe-area-inset-bottom)); font-size: 0.9rem; }
+body.is-touch .prompt { bottom: calc(132px + env(safe-area-inset-bottom)); font-size: 1rem; white-space: nowrap; }
 
-body.touch .touch {
+body.is-touch .touch {
   display: flex; position: absolute; left: 0; right: 0; bottom: calc(14px + env(safe-area-inset-bottom));
   justify-content: space-between; align-items: flex-end; padding: 0 12px; pointer-events: none;
 }
@@ -272,7 +274,9 @@ body.touch .touch {
 @media (max-width: 760px) {
   .modal { padding: 0; align-items: flex-end; }
   .modal-card { width: 100%; max-height: 92vh; border-radius: 16px 16px 0 0; padding: 18px 14px calc(18px + env(safe-area-inset-bottom)); }
-  .tabs { top: -18px; margin: -18px -14px 12px; padding: 12px 10px 10px 14px; }
+  .tabs { top: -18px; margin: -18px -14px 12px; padding: 12px 10px 10px 14px; gap: 4px; }
+  .tab { padding: 6px 10px; font-size: 0.9rem; }
+  .tab-close { background: rgba(12, 7, 30, 1); box-shadow: -10px 0 12px rgba(12, 7, 30, 1); }
   .grid { grid-template-columns: 1fr; }
   .cities { grid-template-columns: 1fr 1fr; }
   .summary { flex-direction: column; }

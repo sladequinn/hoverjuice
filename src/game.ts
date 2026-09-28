@@ -494,11 +494,11 @@ export class Game {
     if (!w || this.paused) return
     if (this.player.mode === 'mag') {
       this.player.unsnap()
-      this.toast('FREE HOVER: inertia drifting, Shift to hyper-boost', 'info')
+      this.toast(`FREE HOVER: inertia drifting, ${isTouch() ? 'BOOST' : 'Shift'} to hyper-boost`, 'info')
     } else if (this.player.pos.y > 12) {
       this.toast('Drop below 12 m to Mag-Lock onto a conduit', 'bad')
     } else if (this.player.snap(w)) {
-      this.toast('MAG-LOCK engaged: conduit riding, A/D picks the branch', 'info')
+      this.toast(`MAG-LOCK engaged: conduit riding, ${isTouch() ? '◀ ▶' : 'A/D'} picks the branch`, 'info')
     } else {
       this.toast('No street conduit in range', 'bad')
     }
@@ -852,7 +852,7 @@ export class Game {
       const leak = this.active?.stage === 'dropoff' ? this.active.type.leak : 0
       const magEff = this.player.mode === 'mag' ? 0.7 : 1
       this.juice -= (spec.evap + leak + spec.burn * this.player.lastBurn * magEff) * dt
-      if (this.juice <= 0 && this.juice + dt * spec.evap > 0) this.toast('HJ-77 depleted! Crawl to a pump or press T for a tow.', 'bad')
+      if (this.juice <= 0 && this.juice + dt * spec.evap > 0) this.toast(`HJ-77 depleted! Crawl to a pump or ${isTouch() ? 'tap the prompt' : 'press T'} for a tow.`, 'bad')
       this.juice = Math.max(0, this.juice)
       this.updateContract(dt)
       this.offerTimer -= dt
@@ -911,7 +911,7 @@ export class Game {
     setHtml(mode, p.mode === 'mag' ? 'MAG-LOCK' : 'FREE HOVER')
     mode.className = `mode ${p.mode}`
     $('hud').dataset.mode = p.mode
-    const touch = document.body.classList.contains('touch')
+    const touch = isTouch()
     const pct = this.juice / p.spec.tank
     const fill = $('juice-fill')
     fill.style.width = `${pct * 100}%`
@@ -962,6 +962,8 @@ export class Game {
     } else prompt.classList.remove('show')
   }
 }
+
+const isTouch = () => document.body.classList.contains('is-touch')
 
 function setHtml(el: HTMLElement, html: string) {
   if (el.dataset.html !== html) {

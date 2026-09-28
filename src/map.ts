@@ -165,7 +165,7 @@ interface OsmElement {
   members?: { role: string; geometry?: OsmGeom[] }[]
 }
 
-const PRIMARY_TIMEOUT = 25000
+const PRIMARY_TIMEOUT = 20000
 const MIRROR_TIMEOUT = 45000
 
 async function overpassRequest(url: string, query: string, timeout: number, signal: AbortSignal) {

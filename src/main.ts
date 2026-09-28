@@ -39,7 +39,7 @@ window.addEventListener('resize', () => {
 })
 
 const coarse = window.matchMedia('(pointer: coarse)')
-const syncTouch = () => document.body.classList.toggle('touch', coarse.matches || 'ontouchstart' in window)
+const syncTouch = () => document.body.classList.toggle('is-touch', coarse.matches || 'ontouchstart' in window)
 syncTouch()
 coarse.addEventListener('change', syncTouch)
 
