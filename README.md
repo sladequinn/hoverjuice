@@ -19,6 +19,8 @@ real estate for passive income, and work your way up the garage to the ultimate 
   or call a grav-tow (`T`). Cyan-ade precursor contracts pay big but leak into your tank.
 - **Contracts**: Parcel, Express and HJ-77 Precursor jobs with timers, speed tips and late penalties. Pay scales with your vehicle's cargo class.
 - **Garage**: Gutter Hoverboard → Neonic → Sky-Duty Z150 → Hovercedes-Benz → Repuls-Royce Goblin → Hoverarrari → Hoverghini.
+- **On foot & masks**: hop off your ride and run around as a masked courier. 19 low-poly animal masks to collect.
+- **Look**: Hotline Miami-style neon grade, VHS scanlines, chromatic fringe, synthwave sun, rain and neon billboards.
 - **Real estate**: buy the city's landmark towers for passive rent per minute. Holdings keep paying in every city.
 - Progress autosaves to `localStorage`.
 
@@ -29,13 +31,15 @@ real estate for passive income, and work your way up the garage to the ultimate 
 | `W` / `S` | Thrust / brake (hold `S` when stopped in Mag-Lock to reverse) |
 | `A` / `D` | Steer, or pick the junction branch in Mag-Lock |
 | `E` | Toggle Mag-Lock / Free Hover |
-| `Shift` | Hyper-boost (Free Hover) |
-| `Space` / `C` | Climb / descend (Free Hover) |
+| `Shift` | Boost (both modes) / sprint on foot |
+| `Space` / `C` | Climb / descend (Free Hover), hop (Mag-Lock), jump (on foot) |
+| `X` | Hop off / on your ride |
+| `V` or tap minimap | Chase / top-down camera |
 | `F` / `T` | Refuel at pump / grav-tow |
-| `J` `G` `P` `M` `H` | Contracts, Garage, Real estate, Warp, Help |
+| `J` `G` `K` `P` `M` `H` | Contracts, Garage, Masks, Real estate, Warp, Help |
 | Mouse wheel | Camera zoom |
 
-On touch devices, on-screen controls appear automatically.
+On touch devices, on-screen controls appear automatically: a d-pad in Mag-Lock and an analog stick in Free Hover and on foot. The Garage and Help tabs have a test-funds button for playtesting.
 
 ## Running locally
 
