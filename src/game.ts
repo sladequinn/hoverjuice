@@ -6,6 +6,7 @@ import { Character, MASKS, buildMask, type FootInput } from './character'
 import { World } from './world'
 import { TrafficSystem } from './traffic'
 import { CombatSystem } from './combat'
+import { CONTRABAND, DealerSystem } from './dealers'
 
 const SAVE_KEY = 'hoverghini.save.v1'
 
@@ -30,6 +31,7 @@ interface SaveData {
   masks: string[]
   mask: string
   cam: 'chase' | 'top'
+  contraband: Record<string, number>
 }
 
 interface Contract {
@@ -55,7 +57,20 @@ export const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.g
 export const money = (n: number) => '$' + Math.floor(n).toLocaleString('en-US')
 
 function defaultSave(): SaveData {
-  return { money: 150, owned: ['board'], current: 'board', holdings: [], city: null, deliveries: 0, earned: 0, won: false, masks: ['none', 'rooster', 'pig'], mask: 'rooster', cam: 'chase' }
+  return {
+    money: 150,
+    owned: ['board'],
+    current: 'board',
+    holdings: [],
+    city: null,
+    deliveries: 0,
+    earned: 0,
+    won: false,
+    masks: ['none', 'rooster', 'pig'],
+    mask: 'rooster',
+    cam: 'chase',
+    contraband: {},
+  }
 }
 
 function loadSave(): SaveData {
@@ -108,6 +123,7 @@ export class Game {
   world: World | null = null
   traffic: TrafficSystem | null = null
   combat: CombatSystem | null = null
+  dealers: DealerSystem | null = null
   player: Player
   character: Character
   onFoot = false
@@ -136,6 +152,7 @@ export class Game {
   private streamBusy = false
   private mapOpen = false
   private mapZoom = 1
+  private marketEpoch = -1
 
   constructor(scene: THREE.Scene) {
     this.scene = scene
@@ -260,6 +277,11 @@ export class Game {
         this.combat.dispose()
         this.combat = null
       }
+      if (this.dealers) {
+        this.scene.remove(this.dealers.group)
+        this.dealers.dispose()
+        this.dealers = null
+      }
       this.scene.remove(this.world.group)
       this.world.dispose()
     }
@@ -269,6 +291,9 @@ export class Game {
     this.scene.add(this.traffic.group)
     this.combat = new CombatSystem(this.world)
     this.scene.add(this.combat.group)
+    this.dealers = new DealerSystem(this.world)
+    this.scene.add(this.dealers.group)
+    this.marketEpoch = this.dealers.epoch
     this.refreshOwned()
 
     const main = city.nodes.map((n, i) => ({ n, i })).filter(({ n }) => n.main && n.adj.length > 0)
@@ -513,6 +538,11 @@ export class Game {
   promptAction() {
     const w = this.world
     if (!w || this.paused) return
+    const market = this.dealers?.nearest(this.actor.x, this.actor.z)
+    if (market?.dealer && market.dist <= 22) {
+      this.openModal('market')
+      return
+    }
     if (this.onFoot) { this.toggleVehicle(); return }
     if (w.nearestPump(this.player.pos.x, this.player.pos.z).dist <= 18) this.refuel()
     else if (this.juice <= 0) this.tow()
@@ -552,6 +582,64 @@ export class Game {
     this.save.cam = this.save.cam === 'chase' ? 'top' : 'chase'
     this.persist()
     this.toast(this.save.cam === 'top' ? 'Camera: TOP-DOWN' : 'Camera: CHASE', 'info')
+  }
+
+  get cargoUsed() {
+    return Object.values(this.save.contraband).reduce((sum, amount) => sum + amount, 0)
+  }
+
+  get cargoCapacity() {
+    return { board: 8, compact: 22, truck: 70, luxury: 36, super: 24 }[this.player.spec.kind]
+  }
+
+  private nearbyDealer(range = 22) {
+    const nearest = this.dealers?.nearest(this.actor.x, this.actor.z)
+    return nearest?.dealer && nearest.dist <= range ? nearest.dealer : null
+  }
+
+  openDealer() {
+    const dealer = this.nearbyDealer()
+    if (!dealer) {
+      this.toast('No dealer nearby. Open the Night Market to locate one.', 'info')
+      this.openModal('market')
+      return
+    }
+    this.openModal('market')
+  }
+
+  private trade(goodId: string, quantity: number, buying: boolean) {
+    const dealer = this.nearbyDealer()
+    const good = CONTRABAND.find((item) => item.id === goodId)
+    if (!dealer || !good || !this.dealers) return
+    const quote = this.dealers.quote(dealer, good)
+    if (buying) {
+      const room = this.cargoCapacity - this.cargoUsed
+      const amount = Math.max(0, Math.min(quantity, room, Math.floor(this.save.money / quote.ask)))
+      if (!amount) {
+        this.toast(room <= 0 ? 'Cargo is full. Sell something or bring a bigger ride.' : 'Not enough cash for that buy.', 'bad')
+        return
+      }
+      this.save.money -= quote.ask * amount
+      this.save.contraband[good.id] = (this.save.contraband[good.id] ?? 0) + amount
+      this.toast(`Bought ${amount} ${good.unit}${amount === 1 ? '' : 's'} of ${good.name}`, 'good')
+    } else {
+      const amount = Math.max(0, Math.min(quantity, this.save.contraband[good.id] ?? 0))
+      if (!amount) return
+      this.save.contraband[good.id] -= amount
+      this.earn(quote.bid * amount)
+      this.toast(`Moved ${amount} ${good.unit}${amount === 1 ? '' : 's'} of ${good.name} · +${money(quote.bid * amount)}`, 'good')
+    }
+    this.persist()
+    this.openModal('market')
+  }
+
+  private locateDealer(id: string) {
+    const dealer = this.dealers?.dealers.find((candidate) => candidate.id === id)
+    if (!dealer) return
+    this.waypoint = { x: dealer.x, z: dealer.z, label: dealer.name }
+    this.routeTimer = 0
+    this.closeModal()
+    this.toast(`Night Market waypoint: ${dealer.name}`, 'info')
   }
 
   fireWeapon() {
@@ -749,7 +837,7 @@ export class Game {
     const m = $('modal')
     m.dataset.view = view
     const body = $('modal-body')
-    const tabs: [string, string][] = [['contracts', 'Contracts'], ['garage', 'Garage'], ['masks', 'Masks'], ['holdings', 'Estate'], ['warp', 'Warp'], ['help', 'Help']]
+    const tabs: [string, string][] = [['contracts', 'Contracts'], ['market', 'Night Market'], ['garage', 'Garage'], ['masks', 'Masks'], ['holdings', 'Estate'], ['warp', 'Warp'], ['help', 'Help']]
     const tabBar = this.world && view !== 'win'
       ? `<nav class="tabs">${tabs.map(([id, label]) => `<button class="tab ${id === view ? 'on' : ''}" data-act="view" data-arg="${id}">${label}</button>`).join('')}<button class="tab-close" data-act="close" aria-label="Close">✕</button></nav>`
       : ''
@@ -797,6 +885,17 @@ export class Game {
       case 'close': this.closeModal(); break
       case 'buy-mask': this.buyMask(arg); break
       case 'equip-mask': this.equipMask(arg); break
+      case 'buy-good': {
+        const [id, amount] = arg.split('|')
+        this.trade(id, Number(amount), true)
+        break
+      }
+      case 'sell-good': {
+        const [id, amount] = arg.split('|')
+        this.trade(id, Number(amount), false)
+        break
+      }
+      case 'locate-dealer': this.locateDealer(arg); break
       case 'cheat':
         this.earn(5_000_000)
         this.persist()
@@ -854,6 +953,58 @@ export class Game {
           <p class="muted">Pay scales with your ride's cargo class (${this.player.spec.name}: ×${this.player.spec.payMult}). Beat the clock for a speed tip.</p>
           ${active}<div class="grid">${offers || '<p class="muted">No offers right now.</p>'}</div>
           <button class="btn ghost" data-act="refresh">Refresh board</button>`
+      }
+      case 'market': {
+        const dealer = this.nearbyDealer()
+        const inventory = CONTRABAND.map((good) => {
+          const amount = s.contraband[good.id] ?? 0
+          return amount ? `<li><i style="--good:#${good.color.toString(16).padStart(6, '0')}"></i><span>${esc(good.name)}</span><strong>${amount}</strong></li>` : ''
+        }).join('')
+        const cargo = `<div class="market-cargo">
+          <div class="row"><span>CONTRABAND HOLD</span><strong>${this.cargoUsed} / ${this.cargoCapacity}</strong></div>
+          <div class="bar"><i style="width:${Math.min(100, this.cargoUsed / this.cargoCapacity * 100)}%"></i></div>
+          <ul>${inventory || '<li class="muted">Your hold is clean.</li>'}</ul>
+        </div>`
+        if (!dealer || !this.dealers) {
+          const cards = this.dealers?.dealers.map((candidate) => {
+            const specialty = CONTRABAND.find((good) => good.id === candidate.specialty)!
+            const dist = Math.hypot(candidate.x - this.actor.x, candidate.z - this.actor.z)
+            return `<div class="card dealer-card" style="--dealer:#${candidate.color.toString(16).padStart(6, '0')}">
+              <div class="row"><h3>${esc(candidate.name)}</h3><span>${(dist / 1000).toFixed(1)} km</span></div>
+              <p class="muted">Known for cheap ${esc(specialty.name)}. Get within 22 m to trade.</p>
+              <button class="btn ghost" data-act="locate-dealer" data-arg="${candidate.id}">Set waypoint</button>
+            </div>`
+          }).join('') ?? ''
+          return `<h2>Night Market</h2><p class="muted">Six independent dealers work this city. Their prices refresh every few minutes; shortages spike prices and gluts crater them.</p>
+            ${cargo}<div class="grid dealers">${cards}</div>`
+        }
+        const event = this.dealers.event(dealer)
+        const specialty = CONTRABAND.find((good) => good.id === dealer.specialty)!
+        const rows = CONTRABAND.map((good) => {
+          const quote = this.dealers!.quote(dealer, good)
+          const owned = s.contraband[good.id] ?? 0
+          const maxBuy = Math.max(0, Math.min(this.cargoCapacity - this.cargoUsed, Math.floor(s.money / quote.ask)))
+          return `<div class="market-row" style="--good:#${good.color.toString(16).padStart(6, '0')}">
+            <div class="good-info"><i></i><div><strong>${esc(good.name)}</strong><small>${esc(good.blurb)}</small></div></div>
+            <div class="quote ask"><small>BUY</small><strong>${money(quote.ask)}</strong></div>
+            <div class="trade-buttons">
+              <button data-act="buy-good" data-arg="${good.id}|1" ${maxBuy < 1 ? 'disabled' : ''}>+1</button>
+              <button data-act="buy-good" data-arg="${good.id}|5" ${maxBuy < 1 ? 'disabled' : ''}>+5</button>
+              <button data-act="buy-good" data-arg="${good.id}|999">MAX</button>
+            </div>
+            <div class="quote bid"><small>SELL</small><strong>${money(quote.bid)}</strong><span>${owned} held</span></div>
+            <div class="trade-buttons sell">
+              <button data-act="sell-good" data-arg="${good.id}|1" ${owned < 1 ? 'disabled' : ''}>−1</button>
+              <button data-act="sell-good" data-arg="${good.id}|999" ${owned < 1 ? 'disabled' : ''}>ALL</button>
+            </div>
+          </div>`
+        }).join('')
+        return `<div class="market-head" style="--dealer:#${dealer.color.toString(16).padStart(6, '0')}">
+            <div><p class="kicker">Night Market // live quote</p><h2>${esc(dealer.name)}</h2><p class="muted">Specialty: ${esc(specialty.name)} · new prices in ${this.dealers.timeRemaining()}s</p></div>
+            <strong class="market-cash">${money(s.money)}</strong>
+          </div>
+          ${event ? `<div class="market-event ${event.kind}"><b>${event.kind === 'shortage' ? 'SUPPLY SHOCK' : 'STREET GLUT'}</b>${esc(event.headline)}</div>` : ''}
+          ${cargo}<div class="market-table">${rows}</div>`
       }
       case 'garage': {
         const max = { speed: 95, tank: 120, pay: 15, alt: 320 }
@@ -946,11 +1097,13 @@ export class Game {
               <li><kbd>Q</kbd> Fire plasma weapon (works on foot or from your ride)</li>
             </ul></div>
             <div><h3>Business</h3><ul class="plain keys">
-              <li><kbd>J</kbd> Contract board</li><li><kbd>G</kbd> Garage</li><li><kbd>P</kbd> Real estate</li><li><kbd>M</kbd> Warp to another city</li>
+              <li><kbd>J</kbd> Contract board</li><li><kbd>N</kbd> Night Market map</li><li><kbd>R</kbd> Trade with a nearby dealer</li>
+              <li><kbd>G</kbd> Garage</li><li><kbd>P</kbd> Real estate</li><li><kbd>M</kbd> Warp to another city</li>
               <li><kbd>F</kbd> Refuel at a turquoise HJ-77 pump</li><li><kbd>T</kbd> Call a grav-tow to the nearest pump</li>
             </ul></div>
             <div><h3>Hoverjuice (HJ-77)</h3><p class="muted">Your repulsors drink a volatile turquoise fluid that evaporates constantly, even while parked. Run dry and you sink to a crawl.
             HJ-77 is also the precursor to the street drug Cyan-ade. Precursor contracts pay big, but the leaking canisters double your evaporation.</p></div>
+            <div><h3>Night Market</h3><p class="muted">Six dealers hide around every city. Buy contraband where it is cheap and move it where bids are high. Quotes refresh every 150 seconds; supply shocks and street gluts can make or erase a fortune. Cargo capacity depends on your current ride.</p></div>
             <div><h3>Touch controls</h3><p class="muted">◀ ▶ steer (or choose the junction branch), <b>GO</b> thrusts, <b>BRK</b> brakes and reverses.
             Tap the <b>MAG-LOCK</b> badge to switch modes; <b>BOOST</b> and ▲ ▼ altitude appear in Free Hover. Tap the fuel prompt at a pump to refuel.</p></div>
             <div><h3>Flight modes</h3><p class="muted"><b>Mag-Lock</b> snaps you to street conduits on an elastic tether: steer to swing across the lane, corners fling you wide, and leaving the conduit at speed slingshots you into Free Hover. <b>Free Hover</b> unlocks drifting, boosting and altitude, but towers are solid.</p></div>
@@ -1028,6 +1181,7 @@ export class Game {
     g.drawImage(base, -px, -pz)
     g.translate(-px, -pz)
     for (const p of w.pumps) this.mapDot(g, p.x, p.z, '#19ffe6', 6 / scale)
+    for (const dealer of this.dealers?.dealers ?? []) this.mapDot(g, dealer.x, dealer.z, `#${dealer.color.toString(16).padStart(6, '0')}`, 7 / scale)
     const t = this.target()
     if (t) this.mapDot(g, t.x, t.z, '#ffe14d', 9 / scale)
     if (this.route.length > 1) {
@@ -1074,6 +1228,7 @@ export class Game {
     }
     for (const h of this.save.holdings) if (h.cityKey === w.city.key) { const b = w.city.buildings[h.building]; if (b) dot(b.cx, b.cz, '#ffc400', 3) }
     for (const p of w.pumps) dot(p.x, p.z, '#19ffe6', 3.5)
+    for (const dealer of this.dealers?.dealers ?? []) dot(dealer.x, dealer.z, `#${dealer.color.toString(16).padStart(6, '0')}`, 4.5)
     if (this.route.length > 1) {
       g.strokeStyle = '#ffe14d'
       g.lineWidth = 2.5 / zoom * dpr
@@ -1143,6 +1298,7 @@ export class Game {
       }
     }
     w.update(dt)
+    this.dealers?.update(dt)
     this.traffic?.update(dt, this.actor)
     this.combat?.update(
       this.paused ? 0 : dt,
@@ -1156,6 +1312,11 @@ export class Game {
         this.toast('Hostile plasma hit · HJ-77 containment damaged', 'bad')
       },
     )
+    if (this.dealers && this.marketEpoch !== this.dealers.epoch) {
+      this.marketEpoch = this.dealers.epoch
+      if ($('modal').dataset.view === 'market') this.openModal('market')
+      this.toast('Night Market prices just shifted across the city', 'info')
+    }
     this.updateMarkers(dt)
     this.updateHud()
     this.drawMinimap()
@@ -1234,7 +1395,11 @@ export class Game {
     const { dist } = this.world!.nearestPump(p.pos.x, p.pos.z)
     const prompt = $('prompt')
     const nearRide = foot && this.character.pos.distanceTo(p.pos) < 5.5
-    if (foot) {
+    const market = this.dealers?.nearest(this.actor.x, this.actor.z)
+    if (market?.dealer && market.dist < 22 && !this.paused) {
+      setHtml(prompt, `${touch ? 'Tap to trade' : '<kbd>R</kbd> Trade'} with ${esc(market.dealer.name)}`)
+      prompt.classList.add('show')
+    } else if (foot) {
       setHtml(prompt, nearRide ? `${touch ? 'Tap to hop on' : '<kbd>X</kbd> Hop on'} your ${p.spec.name}` : '')
       prompt.classList.toggle('show', nearRide && !this.paused)
     } else if (dist < 18 && !this.paused) {

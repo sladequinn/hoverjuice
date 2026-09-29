@@ -22,6 +22,8 @@ real estate for passive income, and work your way up the garage to the ultimate 
 - **On foot & masks**: hop off your ride and run around as a masked courier. 19 low-poly animal masks to collect.
 - **Living streets & combat**: ambient AI hover traffic follows the real road graph. Gang drones patrol the city;
   fire plasma on foot or from any ride and collect a bounty for each drone.
+- **Night Market**: six physical dealers are procedurally placed around every city. Trade six fictional contraband
+  types across local price differences, timed supply shocks and gluts; cargo capacity depends on your ride.
 - **Look**: Hotline Miami-style neon grade, VHS scanlines, chromatic fringe, synthwave sun, rain and neon billboards.
 - **Real estate**: buy the city's landmark towers for passive rent per minute. Holdings keep paying in every city.
 - Progress autosaves to `localStorage`.
@@ -38,6 +40,7 @@ real estate for passive income, and work your way up the garage to the ultimate 
 | `X` | Hop off / on your ride |
 | `V` | Chase / top-down camera |
 | `Q` | Fire plasma weapon |
+| `N` / `R` | Open the dealer map / trade with a nearby dealer |
 | Tap minimap | Open the expanded live city map |
 | `F` / `T` | Refuel at pump / grav-tow |
 | `J` `G` `K` `P` `M` `H` | Contracts, Garage, Masks, Real estate, Warp, Help |

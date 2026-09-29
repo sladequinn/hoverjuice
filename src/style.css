@@ -251,6 +251,44 @@ body.is-touch .cam-label { top: calc(var(--row2) + 144px); right: 56px; }
 .card.mask img { width: 96px; height: 96px; border-radius: 50%; background: radial-gradient(circle, rgba(255, 46, 136, 0.35), rgba(12, 7, 30, 0) 70%); }
 .card.mask .btn { width: 100%; }
 
+/* ---------- night market ---------- */
+.market-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; border-left: 4px solid var(--dealer); padding-left: 14px; }
+.market-head .kicker { margin: 0 0 2px; font-size: 0.62rem; }
+.market-head h2 { color: var(--dealer); }
+.market-cash { color: var(--gold); font: 900 1.45rem 'Orbitron'; white-space: nowrap; }
+.market-cargo { margin: 14px 0; padding: 12px 14px; border: 1px solid var(--line); border-radius: 10px; background: rgba(0, 0, 0, 0.2); }
+.market-cargo > .row { font: 700 0.75rem 'Orbitron'; color: var(--muted); }
+.market-cargo > .row strong { color: var(--cyan); }
+.market-cargo ul { list-style: none; display: flex; flex-wrap: wrap; gap: 6px 14px; margin: 9px 0 0; padding: 0; }
+.market-cargo li { display: flex; align-items: center; gap: 6px; }
+.market-cargo li i { width: 8px; height: 8px; border-radius: 50%; background: var(--good); box-shadow: 0 0 8px var(--good); }
+.market-event { display: flex; gap: 12px; margin: 12px 0; padding: 10px 12px; border: 1px solid; border-radius: 8px; font-weight: 600; }
+.market-event b { font-family: 'Orbitron'; white-space: nowrap; }
+.market-event.shortage { color: #ffbdc9; border-color: var(--red); background: rgba(255, 59, 92, 0.1); }
+.market-event.glut { color: #b5fff3; border-color: var(--cyan); background: rgba(0, 240, 255, 0.08); }
+.market-table { display: flex; flex-direction: column; gap: 7px; }
+.market-row {
+  display: grid; grid-template-columns: minmax(220px, 1.7fr) 82px 132px 82px 92px; align-items: center; gap: 9px;
+  padding: 10px; border: 1px solid rgba(138, 92, 255, 0.22); border-left: 3px solid var(--good); border-radius: 9px; background: rgba(138, 92, 255, 0.045);
+}
+.good-info { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.good-info > i { flex: none; width: 13px; height: 13px; border-radius: 50%; background: var(--good); box-shadow: 0 0 12px var(--good); }
+.good-info strong, .good-info small { display: block; }
+.good-info small { color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.quote { text-align: right; }
+.quote small, .quote span { display: block; font-size: 0.65rem; color: var(--muted); }
+.quote strong { font-family: 'Orbitron'; color: var(--good); }
+.trade-buttons { display: flex; gap: 4px; }
+.trade-buttons button {
+  flex: 1; min-width: 34px; height: 34px; border-radius: 6px; border: 1px solid var(--good); background: color-mix(in srgb, var(--good) 10%, transparent);
+  color: var(--good); cursor: pointer; font-weight: 800;
+}
+.trade-buttons button:disabled { opacity: 0.25; cursor: not-allowed; }
+.trade-buttons.sell button { border-color: var(--gold); color: var(--gold); background: rgba(255, 196, 0, 0.08); }
+.dealer-card { border-left: 3px solid var(--dealer); }
+.dealer-card h3 { color: var(--dealer); }
+.map-legend .dealer { color: var(--pink); background: var(--pink); }
+
 /* ---------- touch layout ---------- */
 body.is-touch { --row2: calc(88px + env(safe-area-inset-top)); }
 body.is-touch .desktop-only, body.is-touch .menu { display: none; }
@@ -338,4 +376,15 @@ body.is-touch .touch {
   .summary { flex-direction: column; }
   .title h1 { letter-spacing: 0.02em; }
   .lede { font-size: 1.05rem; }
+  .market-head { align-items: flex-start; }
+  .market-cash { font-size: 1rem; }
+  .market-event { flex-direction: column; gap: 3px; }
+  .market-row { grid-template-columns: minmax(0, 1fr) 72px; gap: 7px; }
+  .good-info { grid-column: 1 / -1; }
+  .good-info small { white-space: normal; line-height: 1.15; }
+  .trade-buttons { grid-column: 1; }
+  .quote.bid { grid-column: 2; grid-row: 3; }
+  .trade-buttons.sell { grid-column: 1 / -1; }
+  .market-cargo ul { display: grid; grid-template-columns: 1fr 1fr; }
+  .map-legend { max-width: calc(100% - 90px); flex-wrap: wrap; }
 }

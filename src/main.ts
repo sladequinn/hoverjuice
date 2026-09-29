@@ -69,7 +69,7 @@ window.addEventListener('keydown', (e) => {
   const modal = $('modal')
   const open = modal.classList.contains('show')
   const view = modal.dataset.view
-  const views: Record<string, string> = { j: 'contracts', g: 'garage', k: 'masks', p: 'holdings', m: 'warp', h: 'help' }
+  const views: Record<string, string> = { j: 'contracts', n: 'market', g: 'garage', k: 'masks', p: 'holdings', m: 'warp', h: 'help' }
   if (k === 'escape') {
     if ($('map-overlay').classList.contains('show')) game.toggleMap(false)
     else game.closeModal()
@@ -84,6 +84,7 @@ window.addEventListener('keydown', (e) => {
     if (k === 'x') game.toggleVehicle()
     if (k === 'v') game.cycleCamera()
     if (k === 'q') game.fireWeapon()
+    if (k === 'r') game.openDealer()
   }
   if ([' ', 'arrowup', 'arrowdown'].includes(k)) e.preventDefault()
 })
