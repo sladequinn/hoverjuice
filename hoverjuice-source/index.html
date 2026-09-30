@@ -1,0 +1,133 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+    <meta name="theme-color" content="#0a0418" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <title>Hoverghini: Neon Courier Tycoon</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@500;700;900&family=Rajdhani:wght@500;600;700&display=swap" rel="stylesheet" />
+  </head>
+  <body>
+    <canvas id="scene"></canvas>
+
+    <div id="hud" data-mode="mag">
+      <div class="hud-tl panel">
+        <div class="brand">HOVERGHINI</div>
+        <div id="money" class="money">$0</div>
+        <div id="income" class="muted small income"></div>
+        <div class="city"><span id="city-name"></span><span id="city-tag" class="tag"></span></div>
+      </div>
+
+      <div class="hud-bl panel">
+        <div class="row">
+          <div class="speedo"><span id="speed" class="speed">0</span><span class="unit">km/h</span></div>
+          <div class="right">
+            <button id="mode" class="mode mag" data-tap="mode" title="Toggle flight mode (E)">MAG-LOCK</button>
+            <div class="muted small alt">ALT <span id="alt">0 m</span> · <span id="boost" class="boost">BOOST</span></div>
+          </div>
+        </div>
+        <div class="juice">
+          <div class="juice-label"><span>HJ-77</span><span id="juice-text"></span></div>
+          <div class="juice-bar"><div id="juice-fill"></div></div>
+        </div>
+        <div id="vehicle-name" class="muted small vehicle-name"></div>
+        <div id="combat-status" class="combat-status"></div>
+      </div>
+
+      <canvas id="minimap" data-tap="map" title="Expand city map"></canvas>
+      <div class="cam-label">MAP</div>
+      <button id="contract" class="panel contract" data-tap="contracts"></button>
+      <button class="menu-btn panel" data-tap="contracts" aria-label="Open menu"><span></span><span></span><span></span></button>
+
+      <div id="turn" class="turn"></div>
+      <button id="prompt" class="prompt" data-tap="prompt"></button>
+      <div id="toast" class="toast"></div>
+
+      <nav class="menu">
+        <button data-tap="contracts" title="Contracts (J)"><b>J</b>Contracts</button>
+        <button data-tap="market" title="Night Market (N)"><b>N</b>Market</button>
+        <button data-tap="garage" title="Garage (G)"><b>G</b>Garage</button>
+        <button data-tap="holdings" title="Real estate (P)"><b>P</b>Estate</button>
+        <button data-tap="warp" title="Warp (M)"><b>M</b>Warp</button>
+        <button data-tap="masks" title="Masks (K)"><b>K</b>Masks</button>
+        <button data-tap="help" title="Help (H)"><b>H</b>Help</button>
+      </nav>
+
+      <div class="touch">
+        <div class="left-pad">
+          <div class="steer mag-only">
+            <button data-touch="left" aria-label="Steer left">◀</button>
+            <button data-touch="right" aria-label="Steer right">▶</button>
+          </div>
+          <div id="stick" class="stick mag-hide" aria-label="Analog stick"><div id="stick-knob"></div></div>
+        </div>
+        <div class="throttle">
+          <div class="alt-pad free-only">
+            <button data-touch="climb" aria-label="Climb">▲</button>
+            <button data-touch="dive" aria-label="Descend">▼</button>
+          </div>
+          <div class="stack">
+            <button data-tap="exit" class="chip foot-hide">EXIT</button>
+            <button data-tap="fire" class="chip fire-btn">FIRE</button>
+            <button data-touch="boost" class="chip boost-btn"><span class="foot-hide">BOOST</span><span class="foot-only">SPRINT</span></button>
+            <button data-touch="down" class="brk foot-hide">BRK</button>
+          </div>
+          <button data-touch="up" class="gas"><span class="foot-hide">GO</span><span class="foot-only">JUMP</span></button>
+        </div>
+      </div>
+    </div>
+
+    <div id="map-overlay" class="map-overlay">
+      <canvas id="full-map"></canvas>
+      <div class="map-header panel">
+        <div><strong>LIVE CITY GRID</strong><span id="map-coords"></span></div>
+        <button id="map-close" aria-label="Close map">✕</button>
+      </div>
+      <div class="map-tools panel">
+        <button id="map-minus" aria-label="Zoom map out">−</button>
+        <button id="map-plus" aria-label="Zoom map in">+</button>
+      </div>
+      <div class="map-legend panel"><i class="you"></i> Courier <i class="route"></i> Route <i class="fuel"></i> HJ-77 <i class="dealer"></i> Dealer</div>
+    </div>
+
+    <div id="title" class="title show">
+      <div class="title-inner">
+        <p class="kicker">Neon courier · Tycoon simulator</p>
+        <h1>HOVERGHINI</h1>
+        <p class="lede">
+          Start as a broke gutter courier on a leaky hoverboard. Run high-stakes deliveries through any real city on Earth,
+          keep your repulsors wet with volatile HJ-77, buy up the skyline, and earn the ultimate status symbol.
+        </p>
+        <div class="title-actions">
+          <button id="btn-continue" class="btn buy big" style="display: none"></button>
+          <button id="btn-new" class="btn big">Choose a city</button>
+        </div>
+        <p class="muted small desktop-only">W/A/S/D fly · E switch Mag-Lock / Free Hover · Shift boost · X hop off · V camera · H manual</p>
+      </div>
+    </div>
+
+    <div id="modal" class="modal">
+      <div class="modal-card">
+        <button id="modal-close" class="close" aria-label="Close">✕</button>
+        <div id="modal-body"></div>
+      </div>
+    </div>
+
+    <div id="loading" class="loading">
+      <div class="spinner"></div>
+      <div class="loading-city" id="loading-city"></div>
+      <div class="muted" id="loading-status"></div>
+      <div class="loading-time" id="loading-time"></div>
+      <div class="loading-actions">
+        <button id="btn-load-sim" class="btn ghost">Use simulation grid</button>
+        <button id="btn-load-cancel" class="btn ghost danger">Cancel</button>
+      </div>
+      <div class="muted small">Map data © OpenStreetMap contributors</div>
+    </div>
+
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
