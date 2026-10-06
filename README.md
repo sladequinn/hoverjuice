@@ -39,6 +39,14 @@ Choose a preset city or use the location button. The explicitly marked simulatio
 
 The purple Hoverghini is awarded by a three-lap pink-slip race, gated by $10M net worth and ownership of the tallest loaded building. A contiguous highway-class road loop must exist in the loaded graph. There is no automatic substitute oval.
 
+## GitHub Pages at slade.ninja
+
+Merge this branch, then open **Settings → Pages → Build and deployment → Source** and choose **GitHub Actions**. Keep the existing custom domain and DNS records. The `Deploy Hoverjuice to Pages` workflow builds the app and publishes `dist`; if needed, run it manually from the Actions tab after changing the setting.
+
+Publishing `main` directly from its root serves uncompiled TypeScript and will show an unstyled, nonfunctional page. The default Vite base `/` is correct for `https://slade.ninja/`. A repository-subpath deployment would instead need `/hoverjuice/` as its Vite base. Browser smoke tests use the production build, so run `npm run build` before `npm run test:browser`.
+
+Pages hosts the client only. Preset cities and browser location work; place search needs the separately deployed geocoder below, and online services need their own hosting.
+
 ## Optional online services
 
 - `server/rooms.ts`: PartyKit telemetry rooms. `npm run dev:rooms` starts development rooms. Configure `VITE_PARTYKIT_HOST` to enable them; unset means offline. `#toronto?crew=ironlungs` starts the matching preset and uses a shared crew room.

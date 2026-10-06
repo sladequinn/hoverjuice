@@ -3,7 +3,7 @@ const {spawn}=require('node:child_process');
 const {mkdirSync}=require('node:fs');
 const assert=require('node:assert/strict');
 (async()=>{
- const server=spawn(process.execPath,['node_modules/vite/bin/vite.js','--host','127.0.0.1','--port','47291','--strictPort'],{stdio:'pipe'});
+ const server=spawn(process.execPath,['node_modules/vite/bin/vite.js','preview','--host','127.0.0.1','--port','47291','--strictPort'],{stdio:'pipe'});
  let browser;
  try{
   await new Promise((resolve,reject)=>{const timeout=setTimeout(()=>reject(new Error('Vite startup timeout')),10000);server.stdout.on('data',d=>{if(d.toString().includes('Local:')){clearTimeout(timeout);resolve()}});server.on('error',reject);server.on('exit',code=>{if(code)reject(new Error('Vite exited '+code))})});
@@ -14,6 +14,8 @@ const assert=require('node:assert/strict');
   await page.route('https://fonts.googleapis.com/**',r=>r.fulfill({body:''}));
   await page.route('https://fonts.gstatic.com/**',r=>r.fulfill({body:''}));
   await page.goto('http://127.0.0.1:47291');
+  assert.ok(await page.locator('script[type="module"]').getAttribute('src').then(src=>src.startsWith('/assets/')&&src.endsWith('.js')),'Page must load compiled JavaScript');
+  assert.ok(await page.locator('link[rel="stylesheet"]').count(),'Page must include compiled CSS');
   await page.evaluate(()=>{document.getElementById('title').classList.remove('show');return window.hoverghini.warp('Test City',43.45,-80.49)});
   await page.waitForTimeout(1000);
   const state=await page.evaluate(()=>{
