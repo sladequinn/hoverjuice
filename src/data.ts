@@ -46,12 +46,12 @@ export const VEHICLES: VehicleSpec[] = [
     boost: 1.6,
     payMult: 1,
     maxAlt: 6,
-    body: 0x1b1f2e,
+    body: 0x9baab2,
     glow: 0x00f0ff,
   },
   {
     id: 'neonic',
-    name: 'Neonic',
+    name: 'Scrapline Compact',
     tagline: 'A shit box with a paint job. Three repulsors, two of them work.',
     kind: 'compact',
     price: 2500,
@@ -65,7 +65,7 @@ export const VEHICLES: VehicleSpec[] = [
     boost: 1.55,
     payMult: 1.7,
     maxAlt: 10,
-    body: 0x34383d,
+    body: 0x7f929e,
     glow: 0x00f0ff,
   },
   {
@@ -122,13 +122,13 @@ export const VEHICLES: VehicleSpec[] = [
     boost: 1.65,
     payMult: 7,
     maxAlt: 80,
-    body: 0x12151c,
+    body: 0x889d96,
     glow: 0x00f0ff,
   },
   {
     id: 'hoverarrari',
     name: 'Hoverarrari',
-    tagline: 'Rosso Plasma. Twin-turbo repulsors and a waitlist of rivals.',
+    tagline: 'Twin-turbo repulsors. Armoured panels. A waiting list of enemies.',
     kind: 'super',
     price: 250000,
     maxSpeed: 72,
@@ -141,7 +141,7 @@ export const VEHICLES: VehicleSpec[] = [
     boost: 1.8,
     payMult: 10,
     maxAlt: 140,
-    body: 0x1b1d2e,
+    body: 0x6b819b,
     glow: 0x00f0ff,
   },
   {
@@ -218,7 +218,7 @@ export const CONTRACT_TYPES: ContractType[] = [
 
 export const LANDMARK_NAMES = [
   'Kessler Arcology',
-  'Neon Spire',
+  'Foundry Spire',
   'Mirrorshade Tower',
   'Chromeheart Plaza',
   'Voltaic Exchange',

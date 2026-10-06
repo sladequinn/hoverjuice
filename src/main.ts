@@ -1,28 +1,22 @@
 import { crewInvite } from './spatial'
 import { CITIES } from './data'
-import { installHeightFog } from './materials'
 import './style.css'
 import * as THREE from 'three'
-import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js'
-import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js'
-import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js'
-import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js'
 import { $, Game } from './game'
 import { createSky, Rain } from './fx'
 import type { Input } from './vehicle'
 
-installHeightFog()
 const canvas = $<HTMLCanvasElement>('scene')
 const renderer = new THREE.WebGLRenderer({ canvas, stencil: true, antialias: true, powerPreference: 'high-performance' })
-renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.75))
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.25, Math.sqrt(1600000 / (innerWidth * innerHeight))))
 renderer.setSize(window.innerWidth, window.innerHeight)
 renderer.toneMapping = THREE.ACESFilmicToneMapping
-renderer.toneMappingExposure = 0.85
+renderer.toneMappingExposure = 1.0
 
 const scene = new THREE.Scene()
-scene.fog = new THREE.FogExp2(0x1b1d2e, 0.0012)
-scene.add(new THREE.HemisphereLight(0x8c98aa, 0x12151c, 1.6))
-const sun = new THREE.DirectionalLight(0xff9d00, 1.5)
+scene.fog = new THREE.FogExp2(0x18212b, 0.0022)
+scene.add(new THREE.HemisphereLight(0xc8dcf0, 0x4b535e, 2.2))
+const sun = new THREE.DirectionalLight(0xffce91, 2.0)
 sun.position.set(40, 80, -30)
 scene.add(sun)
 const sky = createSky()
@@ -33,17 +27,18 @@ scene.add(rain.mesh)
 const camera = new THREE.PerspectiveCamera(62, window.innerWidth / window.innerHeight, 0.3, 4000)
 camera.position.set(0, 30, -40)
 
-const composer = new EffectComposer(renderer)
-composer.addPass(new RenderPass(scene, camera))
-const bloom = new UnrealBloomPass(new THREE.Vector2(window.innerWidth, window.innerHeight), 0.45, 0.3, 0.88)
-composer.addPass(bloom)
-composer.addPass(new OutputPass())
+// One antialiased forward pass. No full-screen bloom chain on the driving path.
+const fill = new THREE.DirectionalLight(0xb5d9ff, 1.4)
+scene.add(fill, fill.target)
+let renderScale = Math.min(window.devicePixelRatio, 1.25, Math.sqrt(1600000 / (innerWidth * innerHeight)))
+let slowFrames = 0
 
 function resize() {
   camera.aspect = window.innerWidth / window.innerHeight
   camera.updateProjectionMatrix()
   renderer.setSize(window.innerWidth, window.innerHeight)
-  composer.setSize(window.innerWidth, window.innerHeight)
+  renderScale = Math.min(window.devicePixelRatio, 1.25, Math.sqrt(1600000 / (innerWidth * innerHeight)))
+  renderer.setPixelRatio(renderScale)
 }
 window.addEventListener('resize', resize)
 resize()
@@ -200,6 +195,8 @@ let orbit = 0
 const camTarget = new THREE.Vector3()
 const camPos = new THREE.Vector3()
 const lookAt = new THREE.Vector3()
+const cameraLead = new THREE.Vector3()
+const fillOffset = new THREE.Vector3(8, 12, -6)
 
 /** Pull the camera in front of any tower between it and the subject. */
 function unblock(from: THREE.Vector3, to: THREE.Vector3) {
@@ -252,7 +249,7 @@ function updateCamera(dt: number) {
   camera.position.lerp(camPos, Math.min(1, dt * 9))
   const lead = top ? 3 : 6
   const heading = p.heading
-  lookAt.lerp(new THREE.Vector3(camTarget.x + Math.sin(heading) * lead, camTarget.y, camTarget.z + Math.cos(heading) * lead), Math.min(1, dt * 8))
+  lookAt.lerp(cameraLead.set(camTarget.x + Math.sin(heading) * lead, camTarget.y, camTarget.z + Math.cos(heading) * lead), Math.min(1, dt * 8))
   camera.lookAt(lookAt)
   const baseFov = camera.aspect < 1 ? 62 + (1 - camera.aspect) * 30 : 62
   const fov = (top ? baseFov - 8 : baseFov) + (p.boosting ? 12 : 0) + speed * 0.08
@@ -263,7 +260,15 @@ function updateCamera(dt: number) {
 // ---------- loop ----------
 function frame() {
   const now = performance.now()
-  const dt = Math.min((now - last) / 1000, 0.05)
+  if (document.hidden || title.classList.contains('show')) { last = now; requestAnimationFrame(frame); return }
+  const frameMs = now - last
+  const dt = Math.min(frameMs / 1000, 0.05)
+  // Hysteresis: adapt only after sustained slow rendering, not one streaming hitch.
+  slowFrames = frameMs > 28 ? slowFrames + 1 : Math.max(0, slowFrames - 2)
+  if (slowFrames > 90 && renderScale > 0.65) {
+    renderScale = Math.max(0.65, renderScale - 0.15)
+    renderer.setPixelRatio(renderScale); slowFrames = 0
+  }
   last = now
   const input = readInput(dt)
   game.update(dt, input)
@@ -276,7 +281,9 @@ function frame() {
   }
   sky.position.copy(camera.position)
   rain.update(dt, camera.position)
-  composer.render()
+  fill.position.copy(camera.position).add(fillOffset)
+  fill.target.position.copy(game.actor)
+  renderer.render(scene, camera)
   requestAnimationFrame(frame)
 }
 requestAnimationFrame(frame)

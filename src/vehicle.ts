@@ -1,5 +1,6 @@
 import { OVERCLOCK_SPEED } from './dynamics'
 import * as THREE from 'three'
+import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js'
 import type { VehicleSpec } from './data'
 import type { World } from './world'
 import { buildCharacter, buildMask, setCharacterMask } from './character'
@@ -31,9 +32,9 @@ function wedge(w: number, h: number, l: number, taper: number) {
 
 export function buildVehicleMesh(spec: VehicleSpec, maskId = 'balaclava') {
   const g = new THREE.Group()
-  const body = new THREE.MeshStandardMaterial({ color: spec.body, metalness: 0.7, roughness: 0.3 })
-  const dark = new THREE.MeshStandardMaterial({ color: 0x0b0d18, metalness: 0.4, roughness: 0.2 })
-  const glass = new THREE.MeshStandardMaterial({ color: 0x0a2a40, metalness: 0.9, roughness: 0.05, emissive: 0x06202a })
+  const body = new THREE.MeshStandardMaterial({ color: spec.body, metalness: 0.22, roughness: 0.48, emissive: spec.body, emissiveIntensity: 0.12 })
+  const dark = new THREE.MeshStandardMaterial({ color: 0x414b56, metalness: 0.2, roughness: 0.55 })
+  const glass = new THREE.MeshStandardMaterial({ color: 0x517b8c, metalness: 0.25, roughness: 0.2, emissive: 0x14303b })
   const glow = new THREE.MeshBasicMaterial({ color: spec.glow })
   const add = (geo: THREE.BufferGeometry, mat: THREE.Material, x = 0, y = 0, z = 0) => {
     const m = new THREE.Mesh(geo, mat)
@@ -44,7 +45,7 @@ export function buildVehicleMesh(spec: VehicleSpec, maskId = 'balaclava') {
   let halfW = 1, halfL = 2
   switch (spec.kind) {
     case 'board': {
-      add(new THREE.BoxGeometry(0.75, 0.12, 2.1), body, 0, 0, 0)
+      add(wedge(0.85, 0.18, 2.3, 0.45), body, 0, 0, 0)
       add(new THREE.BoxGeometry(0.8, 0.04, 2.15), glow, 0, -0.08, 0)
       const rider = buildCharacter(maskId)
       const u = rider.userData
@@ -60,8 +61,8 @@ export function buildVehicleMesh(spec: VehicleSpec, maskId = 'balaclava') {
       break
     }
     case 'compact': {
-      add(new THREE.BoxGeometry(2.1, 1.1, 4.6), body, 0, 0.4, 0)
-      add(new THREE.BoxGeometry(1.5, 0.6, 1.7), glass, 0, 1.05, -0.2)
+      add(new RoundedBoxGeometry(2.1, 0.8, 4.6, 1, 0.18), body, 0, 0.4, 0)
+      add(wedge(1.5, 0.6, 1.7, 0.5), glass, 0, 1.05, -0.2)
       add(new THREE.BoxGeometry(1.9, 0.08, 0.1), glow, 0, 0.55, 1.82)
       add(new THREE.BoxGeometry(1.9, 0.08, 0.1), new THREE.MeshBasicMaterial({ color: 0xff1e3c }), 0, 0.55, -1.82)
       add(new THREE.BoxGeometry(0.3, 0.3, 0.3), dark, 0.6, 0.95, -1.5).rotation.z = 0.4

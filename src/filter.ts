@@ -16,22 +16,6 @@ export function criminalEligible(tags: Tags) {
   return Boolean(tags.shop || ['commercial', 'industrial', 'retail', 'warehouse'].includes(String(tags.building)) ||
     ['fuel', 'restaurant', 'cafe', 'bar', 'pub', 'nightclub', 'marketplace'].includes(String(tags.amenity)))
 }
-const brands: Record<string, string> = {
-  shell: 'SHELFISH Precursor & Hydropumps',
-  "mcdonald's": "McREPULSOR'S 24/7 Nutrient Sludge",
-  'tim hortons': 'TIM HOVER’S Coil Coffee & Rations',
-  'burger king': 'BURGER KILL Nutrient Division',
-  esso: 'ESS-OFF Volatile Fuels',
-}
-export function grindVenue(tags: Tags) {
-  const raw = String(tags.name || tags.brand || tags.shop || tags.amenity || 'Unregistered Unit')
-  const brand = String(tags.brand || raw).toLowerCase().replace(/’/g, "'")
-  for (const [key, name] of Object.entries(brands)) if (brand === key || brand.startsWith(key + ' ')) return name
-  const stem = raw.replace(/\s+(pizzeria|pizza|restaurant|cafe|shop|store)$/i, '')
-  const food = tags.cuisine || ['restaurant', 'cafe', 'fast_food'].includes(String(tags.amenity))
-  const endings = food ? ['Synthetic Grill & Hover-Pies', 'Nutrient Works', 'Protein Reclamation'] : ['Salvage & Supply', 'Afterhours Exchange', 'Repulsor Surplus', 'Industrial Reclamation']
-  return `${stem}’s ${endings[hashName(raw) % endings.length]}`.replace(/['’]s['’]s/g, '’s')
-}
 export function syndicate(tags: Tags): Gang {
   const use = String(tags.landuse || tags.amenity || tags.class || '')
   if (/industrial|rail|port|dock/.test(use)) return 'LIARS'

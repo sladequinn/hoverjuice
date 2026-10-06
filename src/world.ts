@@ -48,8 +48,14 @@ export class World {
     })
   }
 
-  appendMap(delta: MapDelta) {
-    this.buildBuildings(delta.buildingsFrom)
+  private disposed = false
+  async appendMap(delta: MapDelta) {
+    for(let from=delta.buildingsFrom;from<this.city.buildings.length;from+=512){
+      if(this.disposed)return
+      this.buildBuildings(from, Math.min(from+512,this.city.buildings.length))
+      await new Promise<void>(resolve=>setTimeout(resolve,0))
+    }
+    if(this.disposed)return
     this.buildRoads(delta.roadsFrom)
     this.buildWater()
     this.placePumps()
@@ -68,7 +74,7 @@ export class World {
     this.group.add(ground)
   }
 
-  private buildBuildings(from = 0) {
+  private buildBuildings(from = 0, end = this.city.buildings.length) {
     const buckets = [0, 1].map(() => ({ pos: [] as number[], uv: [] as number[], col: [] as number[] }))
     const roofPos: number[] = [], roofCol: number[] = [], roofGang:number[]=[]
     const ranges:{bi:number;start:number;count:number}[]=[]
@@ -79,10 +85,10 @@ export class World {
     const roofC = new THREE.Color()
 
     this.city.buildings.forEach((b, bi) => {
-      if (bi < from) return
+      if (bi < from || bi >= end) return
       const tint = TINTS[(bi * 7 + (bi >> 2)) % TINTS.length]
       col.set(tint).multiplyScalar(0.6 + ((bi * 97) % 40) / 100)
-      roofC.set(tint).multiplyScalar(0.1)
+      roofC.set(tint).multiplyScalar(0.65)
       const bk = buckets[bi % 3 === 0 ? 1 : 0]
       const tall = b.height > 45
       const h = b.height
@@ -182,7 +188,7 @@ export class World {
 
   private buildRoads(from = 0) {
     const tunnelWalls:number[] = [], tunnelCaps:number[] = [], tunnelCuts:number[] = []
-    const pos: number[] = [], line: number[] = [], lineMajor: number[] = []
+    const pos: number[] = [], line: number[] = [], lineMajor: number[] = [], shoulders: number[] = []
     const pillars: THREE.Matrix4[] = []
     for (let ri = from; ri < this.city.roads.length; ri++) {
       const road = this.city.roads[ri]
@@ -202,6 +208,12 @@ export class World {
         const nx = (-(z2 - z1) / len) * w, nz = ((x2 - x1) / len) * w
         pos.push(x1 + nx, y1 + 0.05, z1 + nz, x2 + nx, y2 + 0.05, z2 + nz, x2 - nx, y2 + 0.05, z2 - nz)
         pos.push(x1 + nx, y1 + 0.05, z1 + nz, x2 - nx, y2 + 0.05, z2 - nz, x1 - nx, y1 + 0.05, z1 - nz)
+        // Batching concrete verge strips makes the road readable without more per-road objects.
+        for(const side of [-1,1]) {
+          const ox=nx/w*0.45*side, oz=nz/w*0.45*side
+          const ax=x1+nx*side, az=z1+nz*side, bx=x2+nx*side, bz=z2+nz*side
+          shoulders.push(ax,y1+0.09,az,bx,y2+0.09,bz,bx+ox,y2+0.09,bz+oz,ax,y1+0.09,az,bx+ox,y2+0.09,bz+oz,ax+ox,y1+0.09,az+oz)
+        }
         if (road.bridge) {
           while(nextPillar<=distance+len){
             const t=(nextPillar-distance)/len,h=y1+(y2-y1)*t
@@ -236,7 +248,11 @@ export class World {
     const geo = new THREE.BufferGeometry()
     geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3))
     geo.computeVertexNormals()
-    this.group.add(new THREE.Mesh(geo, asphaltMaterial()))
+    this.group.add(new THREE.Mesh(geo, asphaltMaterial(0x202832)))
+    if(shoulders.length){
+      const verge=new THREE.BufferGeometry();verge.setAttribute('position',new THREE.Float32BufferAttribute(shoulders,3));verge.computeVertexNormals()
+      this.group.add(new THREE.Mesh(verge,new THREE.MeshStandardMaterial({color:0x626968,roughness:0.95,side:THREE.DoubleSide})))
+    }
     if(pillars.length) {
       const mesh=new THREE.InstancedMesh(new THREE.BoxGeometry(1,1,1),new THREE.MeshStandardMaterial({color:0x484b4e,roughness:0.9}),pillars.length)
       pillars.forEach((m,i)=>mesh.setMatrixAt(i,m)); this.group.add(mesh)
@@ -263,6 +279,7 @@ export class World {
     if(this.city.procedural && !this.pumps.length) {
       for(let i=0;i<main.length;i+=Math.max(1,Math.floor(main.length/9))) chosen.push({node:main[i].i,x:main[i].n.x,z:main[i].n.z})
     }
+    if(!chosen.length)return
     const pillarGeo = new THREE.CylinderGeometry(0.5, 0.7, 2.5, 8)
     const pillarMat = new THREE.MeshBasicMaterial({ color: 0x19ffe6 })
     const ringGeo = new THREE.TorusGeometry(4, 0.08, 6, 32)
@@ -378,6 +395,7 @@ export class World {
   }
 
   dispose() {
+    this.disposed = true
     this.group.traverse((o) => {
       const m = o as THREE.Mesh
       m.geometry?.dispose()

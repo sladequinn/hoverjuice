@@ -1,4 +1,4 @@
-import { buildingId, criminalEligible, grindVenue, protectedVenue, syndicate, type Tags, type Gang } from './filter'
+import { buildingId, criminalEligible, protectedVenue, syndicate, type Tags, type Gang } from './filter'
 import { LANDMARK_NAMES } from './data'
 import { VectorTile } from '@mapbox/vector-tile'
 import { PbfReader } from 'pbf'
@@ -353,7 +353,7 @@ export class MapStreamer {
     }
   }
 
-  private parse(data: Uint8Array, x: number, y: number) {
+  private async parse(data: Uint8Array, x: number, y: number) {
     const tile = new VectorTile(new PbfReader(data))
     const sourceTile = `${TILE_ZOOM}_${x}_${y}`
     for (const layerName of ['poi', 'landuse', 'water']) {
@@ -366,7 +366,7 @@ export class MapStreamer {
           const [vx, vz] = this.project(geo.coordinates)
           // OpenMapTiles encodes amenities in class/subclass, not necessarily amenity.
           tags.amenity ||= tags.subclass || tags.class || ''
-          this.city.venues.push({ x: vx, z: vz, tags, name: grindVenue(tags) })
+          this.city.venues.push({ x: vx, z: vz, tags, name: String(tags.name || tags.brand || tags.amenity || '') })
         }
         const polygons = geo.type === 'Polygon' ? [geo.coordinates] : geo.type === 'MultiPolygon' ? geo.coordinates : []
         for (const rings of polygons) {
@@ -376,8 +376,20 @@ export class MapStreamer {
         }
       }
     }
+    // Index POIs once per tile, instead of testing every city POI against every building.
+    const venueCells = new Map<string, typeof this.city.venues>()
+    for (const venue of this.city.venues) {
+      const key = `${Math.floor(venue.x/128)},${Math.floor(venue.z/128)}`
+      const list = venueCells.get(key) ?? []; list.push(venue); venueCells.set(key,list)
+    }
+    const zones = this.city.zones.map(zone => {
+      let minX=Infinity,maxX=-Infinity,minZ=Infinity,maxZ=-Infinity
+      for(const [px,pz] of zone.poly){minX=Math.min(minX,px);maxX=Math.max(maxX,px);minZ=Math.min(minZ,pz);maxZ=Math.max(maxZ,pz)}
+      return {zone,minX,maxX,minZ,maxZ}
+    })
     const bLayer = tile.layers.building
     if (bLayer) for (let i = 0; i < bLayer.length; i++) {
+      if(i && i%128===0) await new Promise<void>(resolve=>setTimeout(resolve,0))
       const f = bLayer.feature(i)
       const geo = f.toGeoJSON(x, y, TILE_ZOOM).geometry as GeoGeometry
       const props = f.properties as Record<string, string | number | boolean>
@@ -397,16 +409,17 @@ export class MapStreamer {
           b.id = buildingId(ll.lat, ll.lon); b.tile = sourceTile; b.tags = { ...props }
           // Clipped footprints do not have canonical centroids: never persist claims against them.
           b.clipped = f.loadGeometry().some(r => r.some(p => p.x <= 0 || p.y <= 0 || p.x >= f.extent || p.y >= f.extent))
-          for (const zone of this.city.zones) if (pointInPoly(b.cx, b.cz, zone.poly)) {
+          for (const {zone,minX,maxX,minZ,maxZ} of zones) if (b.cx>=minX && b.cx<=maxX && b.cz>=minZ && b.cz<=maxZ && pointInPoly(b.cx, b.cz, zone.poly)) {
             b.gang = zone.gang
             if (zone.tags.landuse === 'residential' || protectedVenue(zone.tags)) b.tags.landuse = String(zone.tags.landuse || zone.tags.class)
           }
-          for (const venue of this.city.venues) if (pointInPoly(venue.x, venue.z, b.poly)) {
+          for(let gx=Math.floor(b.minX/128);gx<=Math.floor(b.maxX/128);gx++)
+          for(let gz=Math.floor(b.minZ/128);gz<=Math.floor(b.maxZ/128);gz++)
+          for (const venue of venueCells.get(`${gx},${gz}`) ?? []) if (pointInPoly(venue.x, venue.z, b.poly)) {
             if (protectedVenue(venue.tags)) b.tags.amenity = String(venue.tags.amenity)
             else if (!protectedVenue(b.tags)) Object.assign(b.tags, venue.tags)
           }
           b.eligible = !b.clipped && ['commercial','industrial','retail','warehouse'].includes(String(b.tags.building)) && criminalEligible(b.tags)
-          if (b.eligible) b.name = grindVenue(b.tags)
           this.city.buildings.push(b)
         }
       }
@@ -444,15 +457,15 @@ export class MapStreamer {
       if (!jobs.length) return null
       const settled = await Promise.allSettled(jobs.map((j) => j.data))
       let tiles = 0
-      settled.forEach((result, i) => {
+      for (const [i,result] of settled.entries()) {
         const job = jobs[i]
         this.pending.delete(job.key)
         if (result.status === 'fulfilled') {
-          this.parse(result.value, job.x, job.y)
+          await this.parse(result.value, job.x, job.y)
           this.loaded.add(job.key)
           tiles++
         }
-      })
+      }
       if (!tiles) throw new Error('Map tile network unavailable')
       finalizeGraph(this.city.nodes)
       this.city.landmarks=pickLandmarks(this.city.key,this.city.buildings)

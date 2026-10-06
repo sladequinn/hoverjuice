@@ -13,8 +13,8 @@ export class TrafficSystem {
  private up=new THREE.Vector3(0,1,0)
  constructor(world:World){
   this.world=world
-  for(const color of [0x34383d,0x55564e,0x1b1d2e]){
-   const mesh=new THREE.InstancedMesh(new THREE.BoxGeometry(2.1,1.1,4.6),new THREE.MeshStandardMaterial({color,roughness:0.72,metalness:0.35}),48)
+  for(const color of [0x8195a1,0xa29170,0x62768c]){
+   const mesh=new THREE.InstancedMesh(new THREE.BoxGeometry(2.1,1.1,4.6),new THREE.MeshStandardMaterial({color,roughness:0.72,metalness:0.15}),48)
    mesh.count=0;mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);mesh.frustumCulled=false
    this.fleets.push(mesh);this.group.add(mesh)
   }

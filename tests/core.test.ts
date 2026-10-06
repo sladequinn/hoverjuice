@@ -1,13 +1,13 @@
 import {test} from 'node:test'
 import assert from 'node:assert/strict'
 import {RunState,OVERCLOCK_SPEED} from '../src/dynamics'
-import {buildingId,criminalEligible,grindVenue,protectedVenue} from '../src/filter'
+import {buildingId,criminalEligible,protectedVenue} from '../src/filter'
 import {crewInvite,mercator,unproject,tileKey,nearbyTiles,spatialDistance,validTelemetry} from '../src/spatial'
 import {makeBuilding,proceduralCity} from '../src/map'
 import {Player} from '../src/vehicle'
 import {vehicleById} from '../src/data'
 import {highwayLoop} from '../src/campaign'
-import type {World} from '../src/world'
+import {World} from '../src/world'
 
 test('protected and unknown uses fail closed',()=>{
  for(const amenity of ['school','kindergarten','hospital','place_of_worship'])assert.equal(criminalEligible({amenity,shop:'convenience'}),false)
@@ -15,11 +15,6 @@ test('protected and unknown uses fail closed',()=>{
  assert.equal(criminalEligible({}),false)
  assert.equal(protectedVenue({subclass:'hospital'}),true)
  assert.equal(criminalEligible({building:'commercial',amenity:'bar'}),true)
-})
-test('brand and independent venue names are deterministic',()=>{
- assert.equal(grindVenue({brand:'Shell'}),'SHELFISH Precursor & Hydropumps')
- assert.equal(grindVenue({brand:'McDonald’s'}),"McREPULSOR'S 24/7 Nutrient Sludge")
- assert.equal(grindVenue({name:"Angelo's Pizzeria",cuisine:'pizza'}),grindVenue({name:"Angelo's Pizzeria",cuisine:'pizza'}))
 })
 test('polygon centroid ignores redundant vertices and winding',()=>{
  const a=makeBuilding([[0,0],[10,0],[10,10],[0,10]],5)!,b=makeBuilding([[0,10],[10,10],[10,0],[5,0],[0,0]],5)!
@@ -75,4 +70,25 @@ test('high-speed corner breaks Mag-Lock and preserves motion',()=>{
  const p=new Player(vehicleById('hovercedes'),'balaclava');p.placeAtNode(w,0);p.speed=60;p.edgeS=19
  p.update(0.05,{throttle:1,brake:0,steer:0,boost:false,up:false,down:false},w,true)
  assert.equal(p.mode,'free');assert.ok(p.vel.length()>40)
+})
+
+test('streamed building batches retain collision indexing and stop when a city is disposed',async()=>{
+ const city=proceduralCity('Streaming test',43.45,-80.49), world=new World(city)
+ const append=()=>{
+  const from=city.buildings.length
+  for(let i=0;i<600;i++){
+   const x=20000+(from+i)*20
+   city.buildings.push(makeBuilding([[x,0],[x+10,0],[x+10,10],[x,10]],20)!)
+  }
+  return {buildingsFrom:from,roadsFrom:city.roads.length,tiles:1}
+ }
+ const delta=append()
+ await world.appendMap(delta)
+ const last=city.buildings.at(-1)!
+ assert.equal(world.hitBuilding(last.cx,last.cz,1),city.buildings.length-1)
+ const pending=world.appendMap(append())
+ world.dispose()
+ const count=world.group.children.length
+ await pending
+ assert.equal(world.group.children.length,count)
 })

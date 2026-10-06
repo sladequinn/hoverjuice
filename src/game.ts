@@ -248,7 +248,7 @@ export class Game {
     const overlay = $('loading')
     overlay.classList.add('show')
     $('loading-city').textContent = name
-    $('loading-status').textContent = 'Opening warp gate…'
+    $('loading-status').textContent = 'Connecting to city uplink…'
     $('btn-load-cancel').style.display = this.world ? '' : 'none'
     const ctrl = new AbortController()
     let choice: 'sim' | 'cancel' | null = null
@@ -280,7 +280,7 @@ export class Game {
     if (!city) {
       overlay.classList.remove('show')
       this.loading = false
-      this.toast('Warp cancelled', 'info')
+      this.toast('City transfer cancelled', 'info')
       return
     }
     $('loading-status').textContent = `Extruding ${city.buildings.length.toLocaleString()} towers…`
@@ -338,8 +338,8 @@ export class Game {
     this.closeModal()
     this.toast(
       city.procedural
-        ? `Warped to ${name} (simulation grid, real map data unavailable)`
-        : `Warped to ${name}. ${city.landmarks.length} landmarks are on the market.`,
+        ? `Deployed to ${name} (simulation grid, real map data unavailable)`
+        : `Deployed to ${name}. ${city.landmarks.length} landmarks are on the market.`,
       city.procedural ? 'bad' : 'good',
     )
   }
@@ -713,7 +713,8 @@ export class Game {
         0,
       )
       if (delta && this.world === w) {
-        w.appendMap(delta)
+        await w.appendMap(delta)
+        if(this.world !== w)return
         void this.syncOwnership()
         this.traffic?.ensurePopulation()
         this.buildMinimap()
@@ -880,7 +881,7 @@ export class Game {
     const m = $('modal')
     m.dataset.view = view
     const body = $('modal-body')
-    const tabs: [string, string][] = [['contracts', 'Contracts'], ['market', 'Night Market'], ['garage', 'Garage'], ['masks', 'Masks'], ['holdings', 'Estate'], ['warp', 'Warp'], ['help', 'Help']]
+    const tabs: [string, string][] = [['contracts', 'Contracts'], ['market', 'Night Market'], ['garage', 'Garage'], ['masks', 'Masks'], ['holdings', 'Turf & vaults'], ['warp', 'City'], ['help', 'Help']]
     const tabBar = this.world && view !== 'win'
       ? `<nav class="tabs">${tabs.map(([id, label]) => `<button class="tab ${id === view ? 'on' : ''}" data-act="view" data-arg="${id}">${label}</button>`).join('')}<button class="tab-close" data-act="close" aria-label="Close">✕</button></nav>`
       : ''
@@ -1121,32 +1122,32 @@ export class Game {
           ${elsewhere.length ? `<h3 class="sub">Holdings in other cities</h3><ul class="plain">${elsewhere.map((h) => `<li>${esc(h.name)} <span class="muted">(${esc(h.city)})</span> <strong>+${money(h.income)}/min</strong></li>`).join('')}</ul>` : ''}`
       }
       case 'warp':
-        return `<h2>${this.world ? 'Warp Gate' : 'Choose your city'}</h2>
-          <p class="muted">Any real city on Earth, rebuilt in industrial noir from OpenStreetMap data. Your cash, garage and portfolio travel with you.</p>
+        return `<h2>${this.world ? 'City uplink' : 'Choose your district'}</h2>
+          <p class="muted">Pick a city. Take the night shift. Run cargo, dodge traffic and keep enough HJ-77 in the tank to get home.</p>
           <form id="search-form" class="search"><input name="q" placeholder="Search any city or neighbourhood…" autocomplete="off" /><button class="btn">Search</button></form>
           <div id="search-results" class="cities"></div>
-          <h3 class="sub">Hot zones</h3>
+          <h3 class="sub">Deployment zones</h3>
           <div class="cities">${CITIES.map((c) => `<button class="city-btn" data-act="warp" data-arg="${c.lat}|${c.lon}|${c.name}"><strong>${c.name}</strong><span>${c.area}</span></button>`).join('')}</div>`
       case 'help':
         return `<h2>Courier Manual</h2>
           <div class="help">
-            <div><h3>Flight</h3><ul class="plain keys">
+            <div><h3>Street handling</h3><ul class="plain keys">
               <li><kbd>W</kbd>/<kbd>S</kbd> Thrust and brake (hold S when stopped to reverse on a conduit)</li>
               <li><kbd>A</kbd>/<kbd>D</kbd> Steer, or pick the branch at the next junction in Mag-Lock</li>
               <li><kbd>E</kbd> Toggle Mag-Lock / Free Hover</li>
-              <li><kbd>Shift</kbd> Hyper-boost (Free Hover only, burns HJ-77 fast)</li>
-              <li><kbd>Shift</kbd> Boost works in Mag-Lock too; <kbd>Space</kbd> hops off the conduit</li>
+              <li><kbd>Shift</kbd> Boost in either drive mode; burns HJ-77 fast</li>
+              <li><kbd>Space</kbd> Hop off the rail</li>
               <li><kbd>V</kbd> Switch chase / top-down camera</li>
               <li><kbd>B</kbd>/<kbd>U</kbd> Bank / withdraw at a garage or owned property</li><li><kbd>Q</kbd> Burn one Cyan-ade: 15 seconds at 300 km/h, costs 25 hull</li>
             </ul></div>
             <div><h3>Business</h3><ul class="plain keys">
               <li><kbd>J</kbd> Contract board</li><li><kbd>N</kbd> Night Market map</li><li><kbd>R</kbd> Trade with a nearby dealer</li>
-              <li><kbd>G</kbd> Garage</li><li><kbd>P</kbd> Real estate</li><li><kbd>M</kbd> Warp to another city</li>
+              <li><kbd>G</kbd> Garage</li><li><kbd>P</kbd> Turf & vaults</li><li><kbd>M</kbd> Move to another city</li>
               <li><kbd>F</kbd> Refuel at a turquoise HJ-77 pump</li><li><kbd>T</kbd> Call a grav-tow to the nearest pump</li>
             </ul></div>
             <div><h3>Hoverjuice (HJ-77)</h3><p class="muted">Your repulsors drink a volatile turquoise fluid that evaporates constantly, even while parked. Run dry and you sink to a crawl.
             HJ-77 is also the precursor to the street drug Cyan-ade. Precursor contracts pay big, but the leaking canisters double your evaporation.</p></div>
-            <div><h3>Night Market</h3><p class="muted">Six dealers hide around every city. Buy contraband where it is cheap and move it where bids are high. Quotes refresh every 150 seconds; supply shocks and street gluts can make or erase a fortune. Cargo capacity depends on your current ride.</p></div>
+            <div><h3>Night Market</h3><p class="muted">Dealers operate where suitable commercial sites are available. Buy contraband where it is cheap and move it where bids are high. Quotes refresh every 150 seconds; supply shocks and street gluts can make or erase a fortune. Cargo capacity depends on your current ride.</p></div>
             <div><h3>Touch controls</h3><p class="muted">◀ ▶ steer (or choose the junction branch), <b>GO</b> thrusts, <b>BRK</b> brakes and reverses.
             Tap the <b>MAG-LOCK</b> badge to switch modes; <b>BOOST</b> burns extra HJ-77. Tap the fuel prompt at a pump to refuel.</p></div>
             <div><h3>Drive modes</h3><p class="muted"><b>Mag-Lock</b> snaps you between three rail lanes. Tap A/D to slide; hold to select a junction branch. Fast corners and hard collisions break lock. <b>Free Hover</b> carries your momentum across the road plane. Water breaks rail cohesion.</p></div>
@@ -1295,6 +1296,8 @@ export class Game {
 
   // ---------- frame ----------
 
+  private hudTimer = 0
+
   update(dt: number, input: Input) {
     const w = this.world
     if (!w) return
@@ -1353,7 +1356,7 @@ export class Game {
       if (this.routeTimer <= 0) {
         this.computeRoute()
         this.drawRoute()
-        this.routeTimer = 0.7
+        this.routeTimer = 1.5
       }
       this.streamTimer -= dt
       if (this.streamTimer <= 0) {
@@ -1382,8 +1385,8 @@ export class Game {
       this.toast('Night Market prices just shifted across the city', 'info')
     }
     this.updateMarkers(dt)
-    this.updateHud()
-    this.drawMinimap()
+    this.hudTimer -= dt
+    if (this.hudTimer <= 0) { this.updateHud(); this.drawMinimap(); this.hudTimer = 0.1 }
   }
 
   private updateMarkers(dt: number) {
@@ -1407,11 +1410,9 @@ export class Game {
     const s = this.save
     const p = this.player
     $('money').textContent = money(s.money)
-    $('income').textContent = this.incomePerMin ? `+${money(this.incomePerMin)}/min passive` : 'No properties yet'
+    $('income').textContent = this.incomePerMin ? `+${money(this.incomePerMin)}/min passive` : 'NO VAULTS · KEEP MOVING'
     $('vehicle-name').textContent = `${p.spec.name} · ${this.gang}`
     $('network-status').textContent=this.multiplayer?.status ?? 'LOCAL SAVE'
-    const venue=this.world!.city.venues.filter(v=>Math.hypot(v.x-p.pos.x,v.z-p.pos.z)<40).sort((a,b)=>Math.hypot(a.x-p.pos.x,a.z-p.pos.z)-Math.hypot(b.x-p.pos.x,b.z-p.pos.z))[0]
-    $('venue-label').textContent=venue?.name??''
     const tunnel=this.world!.isTunnel(p.pos.x,p.pos.z,p.pos.y)
     $('minimap').style.visibility=tunnel?'hidden':'visible'
     $('alt').textContent=tunnel?'GPS LOST':`${Math.round(p.pos.y)} m`
