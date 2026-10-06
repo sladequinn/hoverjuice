@@ -50,10 +50,12 @@ On touch devices, on-screen controls appear automatically: a d-pad in Mag-Lock a
 
 ## Play
 
-- **https://slade.ninja/hoverjuice/** (custom domain, after the homepage publish)
-- **https://sladequinn.github.io/hoverjuice/** (GitHub Pages project site)
+After this repo’s Pages deploy is on:
 
-Pushes to `main` build with Vite (`base` `/hoverjuice/`) and deploy via GitHub Actions. In the repo settings, set Pages source to **GitHub Actions** if the first deploy asks for it.
+- **https://sladequinn.github.io/hoverjuice/**
+- **https://slade.ninja/hoverjuice/** once the built `dist/` is also published into [sladequinn/slade.ninja](https://github.com/sladequinn/slade.ninja) under `/hoverjuice/` (that repo already owns the `slade.ninja` custom domain)
+
+Pushes to `main` run `.github/workflows/deploy-pages.yml`: Vite builds with `base` `/hoverjuice/` and deploys `dist/`. If the first run asks, set **Settings → Pages → Source: GitHub Actions**.
 
 ## Running locally
 
