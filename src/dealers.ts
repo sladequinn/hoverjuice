@@ -1,5 +1,8 @@
 import * as THREE from 'three'
 import type { World } from './world'
+import type { Gang } from './filter'
+import { vehicleById } from './data'
+import { buildVehicleMesh } from './vehicle'
 
 export interface Contraband {
   id: string
@@ -17,6 +20,10 @@ export interface Dealer {
   x: number
   z: number
   specialty: string
+  gang: Gang
+  bio: string
+  heading: number
+  y: number
   color: number
 }
 
@@ -40,7 +47,12 @@ export const CONTRABAND: Contraband[] = [
   { id: 'sunblood', name: 'Sunblood', base: 7200, unit: 'ampoule', color: 0xffc400, blurb: 'Designer immortality serum. Mostly designer.' },
 ]
 
-const DEALER_NAMES = ['Auntie Voltage', 'Mister Glass', 'Zero Cool', 'Dr. Mantis', 'Velvet Hex', 'Saint Static']
+export const SYNDICATE_LEADERS = [
+  {gang:'SHINOBI' as Gang,name:'SLADE',color:0x399fa4,body:0x334e59,chassis:'hovercedes',bio:'SHINOBI leader. Quiet deals, sharp exits.'},
+  {gang:'LIARS' as Gang,name:'WHITE LIE',color:0xd3d3c5,body:0x737b7e,chassis:'neonic',bio:'LIARS leader. Nothing he sells comes with the whole story.'},
+  {gang:'HYENAS' as Gang,name:'FASA',color:0xb69265,body:0x685342,chassis:'z150',bio:'HYENAS leader. Salvage, muscle and street leverage.'},
+  {gang:'JESTERS' as Gang,name:'FRECKLES',color:0xa34d7f,body:0x57384c,chassis:'hoverarrari',bio:'JESTERS leader. She is the clown with the keys to the market.'},
+]
 const MARKET_MS = 150_000
 
 function hash(text: string) {
@@ -60,92 +72,41 @@ function rand(text: string) {
   return (x >>> 0) / 4294967296
 }
 
-function signTexture(name: string, color: number) {
-  const canvas = document.createElement('canvas')
-  canvas.width = 512
-  canvas.height = 150
-  const g = canvas.getContext('2d')!
-  const hex = `#${color.toString(16).padStart(6, '0')}`
-  g.fillStyle = 'rgba(4,2,12,.94)'
-  g.fillRect(0, 0, canvas.width, canvas.height)
-  g.strokeStyle = hex
-  g.lineWidth = 8
-  g.shadowColor = hex
-  g.shadowBlur = 18
-  g.strokeRect(8, 8, 496, 134)
-  g.font = '900 54px Orbitron, sans-serif'
-  g.textAlign = 'center'
-  g.textBaseline = 'middle'
-  g.fillStyle = '#fff'
-  g.fillText(name.toUpperCase(), 256, 62)
-  g.font = '700 24px Rajdhani, sans-serif'
-  g.fillStyle = hex
-  g.fillText('NIGHT MARKET', 256, 112)
-  const texture = new THREE.CanvasTexture(canvas)
-  texture.colorSpace = THREE.SRGBColorSpace
-  return texture
+function dealerCar(dealer: Dealer, index: number) {
+  const leader=SYNDICATE_LEADERS[index]
+  const car=buildVehicleMesh({...vehicleById(leader.chassis),body:leader.body,glow:leader.color})
+  car.name=`dealer-car-${dealer.gang}`
+  car.position.set(dealer.x,dealer.y+0.7,dealer.z)
+  car.rotation.y=dealer.heading
+  const flame=car.getObjectByName('flame');if(flame)flame.visible=false
+  const pad=car.getObjectByName('pad');if(pad)pad.visible=false
+  return car
 }
 
-function dealerStall(dealer: Dealer) {
-  const group = new THREE.Group()
-  group.position.set(dealer.x, 0, dealer.z)
-  const dark = new THREE.MeshStandardMaterial({ color: 0x0a0714, metalness: 0.75, roughness: 0.3 })
-  const glow = new THREE.MeshBasicMaterial({ color: dealer.color })
-  const kiosk = new THREE.Mesh(new THREE.BoxGeometry(5.5, 2.6, 2.2), dark)
-  kiosk.position.y = 1.3
-  group.add(kiosk)
-  const counter = new THREE.Mesh(new THREE.BoxGeometry(5.9, 0.22, 1), glow)
-  counter.position.set(0, 1.35, 1.25)
-  group.add(counter)
-  for (const x of [-2.35, 2.35]) {
-    const post = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.08, 4.2, 8), glow)
-    post.position.set(x, 3.2, 0)
-    group.add(post)
-  }
-  const canopy = new THREE.Mesh(new THREE.BoxGeometry(6.2, 0.16, 3.4), dark)
-  canopy.position.y = 5.2
-  group.add(canopy)
-  const ring = new THREE.Mesh(
-    new THREE.TorusGeometry(6.5, 0.18, 8, 48),
-    new THREE.MeshBasicMaterial({ color: dealer.color, transparent: true, opacity: 0.65 }),
-  )
-  ring.rotation.x = Math.PI / 2
-  ring.position.y = 0.25
-  ring.name = 'dealer-ring'
-  group.add(ring)
-  const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: signTexture(dealer.name, dealer.color), transparent: true }))
-  sprite.scale.set(8.5, 2.5, 1)
-  sprite.position.y = 6.5
-  group.add(sprite)
-  const beacon = new THREE.Mesh(
-    new THREE.CylinderGeometry(0.35, 0.35, 80, 8, 1, true),
-    new THREE.MeshBasicMaterial({ color: dealer.color, transparent: true, opacity: 0.08, depthWrite: false }),
-  )
-  beacon.position.y = 40
-  group.add(beacon)
-  return group
-}
-
-/** Six deterministic physical dealers plus stable, time-sliced local market prices. */
+/** Four syndicate leaders trade from parked vehicles; no kiosks or sign textures. */
 export class DealerSystem {
   group = new THREE.Group()
   dealers: Dealer[] = []
   private world: World
-  private time = 0
 
   constructor(world: World) {
     this.world = world
     this.placeDealers()
   }
 
+  refresh() {
+    if(this.dealers.length<SYNDICATE_LEADERS.length)this.placeDealers()
+  }
+
   private placeDealers() {
     const city = this.world.city
+    const missing=SYNDICATE_LEADERS.map((leader,index)=>({leader,index})).filter(({leader})=>!this.dealers.some(d=>d.gang===leader.gang))
     const candidates = city.nodes
       .map((node, i) => ({ node, i }))
-      .filter(({ node }) => node.main && node.adj.length > 1 && this.world.eligibleAt(node.x,node.z) && Math.hypot(node.x, node.z) > 120)
+      .filter(({ node, i }) => !this.dealers.some(d=>d.node===i) && node.main && node.adj.length > 1 && this.world.eligibleAt(node.x,node.z) && Math.hypot(node.x, node.z) > 120)
       .sort((a, b) => hash(`${city.key}:${a.i}`) - hash(`${city.key}:${b.i}`))
     const chosen: typeof candidates = []
-    while (chosen.length < 6 && candidates.length) {
+    while (chosen.length < missing.length && candidates.length) {
       let best = candidates[0], bestDistance = -1
       for (const candidate of candidates.slice(0, 600)) {
         const spacing = chosen.length
@@ -160,23 +121,32 @@ export class DealerSystem {
       const index = candidates.indexOf(best)
       candidates.splice(index, 1)
     }
-    chosen.forEach(({ node, i }, index) => {
+    chosen.forEach(({ node, i }, slot) => {
+      const {leader,index}=missing[slot]
       const specialty = CONTRABAND[(index + hash(city.key)) % CONTRABAND.length]
       const adjacent = city.nodes[node.adj[0]]
       const length = adjacent ? Math.hypot(adjacent.x - node.x, adjacent.z - node.z) || 1 : 1
-      const sideX = adjacent ? (adjacent.z - node.z) / length * 10 : 0
-      const sideZ = adjacent ? -(adjacent.x - node.x) / length * 10 : 0
+      const offset=(node.width??10)/2+1.6
+      let sideX = adjacent ? (adjacent.z - node.z) / length * offset : 0
+      let sideZ = adjacent ? -(adjacent.x - node.x) / length * offset : 0
+      if(this.world.hitBuilding(node.x+sideX,node.z+sideZ,(node.y??0)+1)>=0){sideX=-sideX;sideZ=-sideZ}
+      if(this.world.hitBuilding(node.x+sideX,node.z+sideZ,(node.y??0)+1)>=0){sideX*=0.4;sideZ*=0.4}
+      if(this.world.hitBuilding(node.x+sideX,node.z+sideZ,(node.y??0)+1)>=0)return
       const dealer: Dealer = {
         id: `${city.key}:dealer:${index}`,
-        name: DEALER_NAMES[index],
+        name: leader.name,
+        gang: leader.gang,
+        bio: leader.bio,
+        heading: Math.atan2(adjacent.x-node.x,adjacent.z-node.z),
+        y: node.y??0,
         node: i,
         x: node.x + sideX,
         z: node.z + sideZ,
         specialty: specialty.id,
-        color: specialty.color,
+        color: leader.color,
       }
       this.dealers.push(dealer)
-      this.group.add(dealerStall(dealer))
+      this.group.add(dealerCar(dealer,index))
     })
   }
 
@@ -223,18 +193,6 @@ export class DealerSystem {
       }
     }
     return { dealer, dist }
-  }
-
-  update(dt: number) {
-    this.time += dt
-    this.group.children.forEach((stall, i) => {
-      const ring = stall.getObjectByName('dealer-ring')
-      if (ring) {
-        ring.rotation.z += dt * (0.45 + i * 0.04)
-        const scale = 1 + Math.sin(this.time * 2.2 + i) * 0.05
-        ring.scale.setScalar(scale)
-      }
-    })
   }
 
   dispose() {

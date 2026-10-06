@@ -401,3 +401,6 @@ body.is-touch .money {margin-right:25px;}
 body.is-touch #combat-status {font:600 9px system-ui;line-height:1.25;margin-top:4px;}
 body.is-touch .venue-label {top:calc(var(--row2) + 170px);font-size:12px;}
 body.is-touch .toast {width:calc(100% - 32px);max-width:400px;font-style:normal;text-transform:none;}
+
+.test-flight-only { display:none !important; }
+body.test-flight .test-flight-only { display:block !important; }

@@ -364,7 +364,11 @@ export class World {
   gangAt(x: number,z: number) { return this.city.zones.find(w=>pointInPoly(x,z,w.poly))?.gang ?? 'SHINOBI' }
   eligibleAt(x: number,z: number) {
     if(this.city.zones.some(w=>w.tags.landuse==='residential'&&pointInPoly(x,z,w.poly))) return false
-    const nearby=this.city.buildings.filter(b=>Math.hypot(x-b.cx,z-b.cz)<50)
+    const ids=new Set<number>()
+    for(let gx=Math.floor((x-50)/CELL);gx<=Math.floor((x+50)/CELL);gx++)
+      for(let gz=Math.floor((z-50)/CELL);gz<=Math.floor((z+50)/CELL);gz++)
+        for(const i of this.grid.get(`${gx},${gz}`)??[])ids.add(i)
+    const nearby=[...ids].map(i=>this.city.buildings[i]).filter(b=>Math.hypot(x-b.cx,z-b.cz)<50)
     return nearby.some(b=>b.eligible) && !nearby.some(b=>b.tags && ['school','kindergarten','hospital','place_of_worship','residential'].some(t=>Object.values(b.tags!).includes(t)))
   }
   private waterCount=0

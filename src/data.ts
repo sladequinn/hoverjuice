@@ -46,7 +46,7 @@ export const VEHICLES: VehicleSpec[] = [
     boost: 1.6,
     payMult: 1,
     maxAlt: 6,
-    body: 0x9baab2,
+    body: 0x788791,
     glow: 0x00f0ff,
   },
   {
@@ -65,7 +65,7 @@ export const VEHICLES: VehicleSpec[] = [
     boost: 1.55,
     payMult: 1.7,
     maxAlt: 10,
-    body: 0x7f929e,
+    body: 0x536571,
     glow: 0x00f0ff,
   },
   {
@@ -103,7 +103,7 @@ export const VEHICLES: VehicleSpec[] = [
     boost: 1.6,
     payMult: 4.6,
     maxAlt: 40,
-    body: 0xc9d4e8,
+    body: 0x8c9cab,
     glow: 0x00f0ff,
   },
   {
@@ -122,7 +122,7 @@ export const VEHICLES: VehicleSpec[] = [
     boost: 1.65,
     payMult: 7,
     maxAlt: 80,
-    body: 0x889d96,
+    body: 0x5e756d,
     glow: 0x00f0ff,
   },
   {
@@ -141,7 +141,7 @@ export const VEHICLES: VehicleSpec[] = [
     boost: 1.8,
     payMult: 10,
     maxAlt: 140,
-    body: 0x6b819b,
+    body: 0x4f657e,
     glow: 0x00f0ff,
   },
   {

@@ -1,11 +1,10 @@
 import * as THREE from 'three'
 import type { CityData } from './map'
 import { worldToLatLon } from './map'
-import { buildMask } from './character'
 import type { Player } from './vehicle'
 import { crewInvite, mercator, nearbyTiles, tileKey, unproject, validTelemetry, type Telemetry } from './spatial'
 
-interface Peer {mesh:THREE.Group; state:Telemetry|null; received:number; mask:string}
+interface Peer {mesh:THREE.Group; state:Telemetry|null; received:number}
 /** Fixed render pool; only the owning tile receives 20Hz telemetry. Halo rooms are subscriptions. */
 export class Multiplayer {
   group=new THREE.Group()
@@ -27,7 +26,7 @@ export class Multiplayer {
     this.city=privateCity
     for(let i=0;i<32;i++) {
       const mesh=new THREE.Group();mesh.add(new THREE.Mesh(this.geometry,this.material));mesh.visible=false
-      this.group.add(mesh);this.pool.push({mesh,state:null,received:0,mask:''})
+      this.group.add(mesh);this.pool.push({mesh,state:null,received:0})
     }
     if(this.host)this.status='CONNECTING'
   }
@@ -47,7 +46,6 @@ export class Multiplayer {
       if(peer.state&&data.seq<=peer.state.seq)return
       const first=!peer.state
       peer.state=data;peer.received=performance.now();peer.mesh.visible=true
-      if(peer.mask!==data.maskId){const old=peer.mesh.getObjectByName('mask');if(old){old.traverse(o=>(o as THREE.Mesh).geometry?.dispose());peer.mesh.remove(old)}const mask=buildMask(data.maskId);mask.name='mask';mask.position.set(0,0.9,1);peer.mesh.add(mask);peer.mask=data.maskId}
       peer.mesh.scale.setScalar(data.chassisId==='board'?0.6:data.chassisId==='z150'?1.4:1)
       if(first)peer.mesh.position.copy(this.local(data))
     }
@@ -86,5 +84,5 @@ export class Multiplayer {
       peer.mesh.rotation.y+=Math.atan2(Math.sin(p.rotY-peer.mesh.rotation.y),Math.cos(p.rotY-peer.mesh.rotation.y))*(1-Math.exp(-12*dt))
     }
   }
-  dispose(){this.disposed=true;for(const ws of this.sockets.values())ws.close();this.sockets.clear();this.geometry.dispose();this.material.dispose();for(const p of this.pool)p.mesh.getObjectByName('mask')?.traverse(o=>(o as THREE.Mesh).geometry?.dispose());this.peers.clear()}
+  dispose(){this.disposed=true;for(const ws of this.sockets.values())ws.close();this.sockets.clear();this.geometry.dispose();this.material.dispose();this.peers.clear()}
 }

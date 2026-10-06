@@ -25,8 +25,10 @@ Choose a preset city or use the location button. The explicitly marked simulatio
 | Input | Action |
 | --- | --- |
 | W / S | Throttle / brake, reverse when stopped |
-| A / D | Tap for a lane snap; hold to choose a junction; steer in Free Hover |
+| A / D | Tap to slide and buffer a turn for 2.5 seconds; hold to keep it queued; steer in Free Hover |
 | E | Mag-Lock / Free Hover |
+| Y | Toggle test flight; switches to Free Hover |
+| Space / C | Climb / descend while test flight is on (touch: RISE / DESCEND) |
 | Shift | Boost |
 | Space | Small rail hop |
 | Q / touch BURN | Consume one Cyan-ade for 15 seconds at 300 km/h; costs 25 hull |
@@ -58,3 +60,7 @@ Pages hosts the client only. Preset cities and browser location work; place sear
 Nominatim public service use must follow its [usage policy](https://operations.osmfoundation.org/policies/nominatim/): the maximum is one request/second **across the entire app**, results must be cached, requests must identify the app, and autocomplete/systematic POI extraction are forbidden. Search runs only on explicit form submission. Larger audiences need a suitable hosted or self-hosted Nominatim provider. Presets and browser geolocation work without place search.
 
 Map data © [OpenStreetMap contributors](https://www.openstreetmap.org/copyright), ODbL. Vector tiles supplied by [OpenFreeMap](https://openfreemap.org/).
+
+Mag-Lock now assists sharp corners by reducing speed, recentres around lane/footprint overlaps and only releases for heavy traffic impacts, water or manual input. Test flight is a session-only debugging option capped at 250 m above local road height; turning it off returns you toward street height.
+
+Gang leaders trade from parked vehicles: SHINOBI / SLADE, LIARS / WHITE LIE, HYENAS / FASA, JESTERS / FRECKLES (the female clown). Market panels and proximity prompts identify the leader and gang. Eligible commercial sites are still required.
