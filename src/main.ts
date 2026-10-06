@@ -53,7 +53,7 @@ const game = new Game(scene)
 
 // ---------- input ----------
 const keys = new Set<string>()
-const touch = { up: false, down: false, left: false, right: false, boost: false }
+const touch = { up: false, down: false, left: false, right: false, boost: false, rise: false, sink: false }
 const stick = { x: 0, y: 0, active: false }
 
 window.addEventListener('keydown', (e) => {
@@ -74,6 +74,7 @@ window.addEventListener('keydown', (e) => {
     else game.openModal(views[k])
   } else if (!open) {
     if (k === 'e') game.toggleMode()
+    if (k === 'y') game.toggleTestFlight()
     if (k === 'f') game.refuel()
     if (k === 't') game.tow()
     if (k === 'v') game.cycleCamera()
@@ -162,8 +163,8 @@ function readInput(dt: number): Input {
       brake: Math.max(kDown ? 1 : 0, dz(sy) < -0.4 ? 1 : 0),
       steer,
       boost: has('shift') || touch.boost,
-      up: has(' '),
-      down: false,
+      up: has(' ') || touch.rise,
+      down: has('c') || touch.sink,
   }
 }
 

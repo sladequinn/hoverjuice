@@ -3,7 +3,7 @@ import * as THREE from 'three'
 import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js'
 import type { VehicleSpec } from './data'
 import type { World } from './world'
-import { buildCharacter, buildMask, setCharacterMask } from './character'
+import { buildCharacter, setCharacterMask } from './character'
 
 export interface Input {
   throttle: number
@@ -32,7 +32,7 @@ function wedge(w: number, h: number, l: number, taper: number) {
 
 export function buildVehicleMesh(spec: VehicleSpec, maskId = 'balaclava') {
   const g = new THREE.Group()
-  const body = new THREE.MeshStandardMaterial({ color: spec.body, metalness: 0.22, roughness: 0.48, emissive: spec.body, emissiveIntensity: 0.12 })
+  const body = new THREE.MeshStandardMaterial({ color: spec.body, metalness: 0.22, roughness: 0.48, emissive: spec.body, emissiveIntensity: 0.025 })
   const dark = new THREE.MeshStandardMaterial({ color: 0x414b56, metalness: 0.2, roughness: 0.55 })
   const glass = new THREE.MeshStandardMaterial({ color: 0x517b8c, metalness: 0.25, roughness: 0.2, emissive: 0x14303b })
   const glow = new THREE.MeshBasicMaterial({ color: spec.glow })
@@ -122,13 +122,6 @@ export function buildVehicleMesh(spec: VehicleSpec, maskId = 'balaclava') {
   flame.visible = false
   g.add(flame)
   g.userData.halfL = halfL
-  if (spec.kind !== 'board') {
-    const portrait = buildMask(maskId)
-    portrait.name = 'cockpit-mask'
-    portrait.position.set(0, 1.3, 0.68)
-    portrait.scale.setScalar(1.5)
-    g.add(portrait)
-  }
 
   return g
 }
@@ -158,6 +151,9 @@ export class Player {
   limping = false
   impact = 0
   apex = false
+  testFlight = false
+  private turnRequest = 0
+  private turnMemory = 0
   private steerLatch = 0
   /** lateral offset from the conduit centreline in Mag-Lock (metres, + is left) */
   sway = 0
@@ -186,12 +182,7 @@ export class Player {
     this.mask = id
     const rider = this.mesh.getObjectByName('rider') as THREE.Group | undefined
     if (rider) setCharacterMask(rider, id)
-    const old = this.mesh.getObjectByName('cockpit-mask')
-    if (old) {
-      const next = buildMask(id)
-      next.name = old.name; next.position.copy(old.position); next.scale.copy(old.scale)
-      this.mesh.remove(old); this.mesh.add(next)
-    }
+
   }
 
   showRider(v: boolean) {
@@ -214,6 +205,7 @@ export class Player {
     this.edgeB = b
     this.edgeS = 0
     this.speed = 0
+    this.turnRequest = this.turnMemory = this.steerLatch = 0
     this.sway = this.swayV = 0
     this.laneIndex = 1
     this.vel.set(0, 0)
@@ -259,11 +251,13 @@ export class Player {
     this.laneIndex = Math.max(0, Math.min(2, 1 - Math.round(this.sway / 3.2)))
     this.swayV = 0
     this.mode = 'mag'
+    this.turnRequest=this.turnMemory=this.steerLatch=0
     return true
   }
 
   /** Leave the conduit. Returns true if the exit was fast enough to slingshot. */
   unsnap() {
+    this.turnRequest=this.turnMemory=this.steerLatch=0
     this.mode = 'free'
     const sling = this.speed > 12
     const v = this.speed * (sling ? 1.25 : 1)
@@ -275,17 +269,18 @@ export class Player {
     return sling
   }
 
-  private chooseNext(world: World, steer: number) {
+  private chooseNext(world: World, steer: number, edgeA = this.edgeA, edgeB = this.edgeB) {
     const nodes = world.city.nodes
-    const a = nodes[this.edgeA], b = nodes[this.edgeB]
+    const a = nodes[edgeA], b = nodes[edgeB]
     const inAng = Math.atan2(b.x - a.x, b.z - a.z)
-    const opts = b.adj.filter((c) => c !== this.edgeA)
-    if (!opts.length) return this.edgeA
+    const opts = b.adj.filter((c) => c !== edgeA)
+    if (!opts.length) return edgeA
     let best = opts[0], bestScore = -Infinity
     for (const c of opts) {
       const n = nodes[c]
       const rel = wrap(Math.atan2(n.x - b.x, n.z - b.z) - inAng)
-      const score = steer > 0.3 ? rel : steer < -0.3 ? -rel : -Math.abs(rel)
+      const requested = Math.abs(steer)>0.3 && Math.sign(rel)===Math.sign(steer) && Math.abs(rel)>0.35 && Math.abs(rel)<2.65
+      const score = requested ? 4 - Math.abs(Math.abs(rel)-Math.PI/2) : -Math.abs(rel)
       if (score > bestScore) { bestScore = score; best = c }
     }
     return best
@@ -294,12 +289,19 @@ export class Player {
   /** Returns a descriptor for the upcoming junction turn: -1 right, 0 straight, 1 left, 2 dead end. */
   nextTurn(world: World) {
     const nodes = world.city.nodes
-    const b = nodes[this.edgeB]
-    if (this.nextNode < 0) return { dir: 0, junction: false }
-    if (this.nextNode === this.edgeA) return { dir: 2, junction: false }
-    const a = nodes[this.edgeA], c = nodes[this.nextNode]
-    const rel = wrap(Math.atan2(c.x - b.x, c.z - b.z) - Math.atan2(b.x - a.x, b.z - a.z))
-    return { dir: rel > 0.45 ? 1 : rel < -0.45 ? -1 : 0, junction: b.adj.length > 2 }
+    let edgeA=this.edgeA, edgeB=this.edgeB, distance=-this.edgeS
+    for(let step=0;step<24;step++) {
+      const a=nodes[edgeA], b=nodes[edgeB]
+      distance+=Math.hypot(b.x-a.x,b.z-a.z)
+      const next=this.chooseNext(world,this.turnRequest,edgeA,edgeB)
+      if(next===edgeA)return {dir:2,junction:false}
+      const c=nodes[next]
+      const rel=wrap(Math.atan2(c.x-b.x,c.z-b.z)-Math.atan2(b.x-a.x,b.z-a.z))
+      if(b.adj.length>2 || Math.abs(rel)>0.45)return {dir:rel>0.45?1:rel< -0.45?-1:0,junction:true}
+      if(distance>140)break
+      edgeA=edgeB;edgeB=next
+    }
+    return {dir:0,junction:false}
   }
 
   update(dt: number, input: Input, world: World, hasJuice: boolean) {
@@ -311,6 +313,11 @@ export class Player {
     let burn = 0.02
 
     if (this.mode === 'mag') {
+      const oldA=this.edgeA, oldB=this.edgeB, oldS=this.edgeS, oldX=this.pos.x, oldZ=this.pos.z
+      const steer = Math.abs(input.steer)>0.5 ? Math.sign(input.steer) : 0
+      this.turnMemory=Math.max(0,this.turnMemory-dt)
+      if(steer){this.turnRequest=steer;this.turnMemory=2.5}
+      else if(!this.turnMemory)this.turnRequest=0
       const boost = !this.limping && ((input.boost && hasJuice && input.throttle > 0) || this.overclocking)
       this.boosting = boost
       const top = this.overclocking ? OVERCLOCK_SPEED : s.maxSpeed * 1.1 * cap * (boost ? s.boost : 1)
@@ -335,7 +342,7 @@ export class Player {
       this.speed *= Math.pow(0.8, dt)
       if (this.speed > top) this.speed += (top - this.speed) * Math.min(1, dt * 2)
       this.speed = this.overclocking ? OVERCLOCK_SPEED : Math.max(this.speed, 0)
-      this.nextNode = this.chooseNext(world, input.steer)
+      this.nextNode = this.chooseNext(world, this.turnRequest)
       let remaining = this.speed * dt
       const nodes = world.city.nodes
       for (let guard = 0; guard < 20; guard++) {
@@ -343,16 +350,18 @@ export class Player {
         const len = Math.hypot(b.x - a.x, b.z - a.z)
         if (this.edgeS + remaining < len) { this.edgeS += remaining; break }
         remaining -= len - this.edgeS
-        const next = this.chooseNext(world, input.steer)
+        const next = this.chooseNext(world, this.turnRequest)
         const c = nodes[next]
         const turn = Math.abs(wrap(Math.atan2(c.x-b.x,c.z-b.z)-Math.atan2(b.x-a.x,b.z-a.z)))
-        if(turn>0.6 && this.speed>38/Math.sqrt(turn)) {
-          this.pos.set(b.x,(b.y??0)+HOVER,b.z)
-          this.heading=Math.atan2(b.x-a.x,b.z-a.z)
-          this.unsnap(); this.speed=this.vel.length(); this.nextNode=-1
-          break
+        if(turn>0.35) {
+          if(this.speed>24)this.apex=true
+          // Magnetic corner assist sheds speed rather than ejecting the player.
+          const cornerSpeed=next===this.edgeA?8:Math.max(16,38/Math.sqrt(turn))
+          const before=this.speed
+          this.speed=Math.min(this.speed,cornerSpeed)
+          remaining*=this.speed/Math.max(before,0.001)
         }
-        if(turn>0.35 && this.speed>24) this.apex=true
+        if(b.adj.length>2){this.turnRequest=0;this.turnMemory=0}
         this.edgeA = this.edgeB
         this.edgeB = next
         this.edgeS = 0
@@ -365,13 +374,14 @@ export class Player {
       const diff = wrap(target - this.heading)
       this.heading += diff * Math.min(1, dt * 7)
 
-      const steer = Math.abs(input.steer)>0.5 ? Math.sign(input.steer) : 0
       if(steer && steer!==this.steerLatch) this.laneIndex=Math.max(0,Math.min(2,this.laneIndex-steer))
       this.steerLatch=steer
       const oldSway=this.sway
-      this.sway += (((1-this.laneIndex)*3.2)-this.sway)*(1-Math.exp(-18*dt))
+      const chassisHalfWidth=s.kind==='board'?0.45:s.kind==='truck'?1.3:1.05
+      const laneWidth=Math.min(3.2,Math.max(0.5,Math.min(a.width??10,b.width??10)/2-chassisHalfWidth-0.5))
+      this.sway += (((1-this.laneIndex)*laneWidth)-this.sway)*(1-Math.exp(-18*dt))
       this.swayV=(this.sway-oldSway)/Math.max(dt,0.001)
-      const lx = Math.cos(this.heading), lz = -Math.sin(this.heading)
+      const lx = Math.cos(target), lz = -Math.sin(target)
       this.pos.x = a.x + (b.x - a.x) * t + lx * this.sway
       this.pos.z = a.z + (b.z - a.z) * t + lz * this.sway
       this.bank += (Math.max(-0.7, Math.min(0.7, -diff * 1.2 - this.swayV * 0.06)) - this.bank) * Math.min(1, dt * 8)
@@ -383,7 +393,15 @@ export class Player {
       const hoverY = (a.y??0)*(1-t)+(b.y??0)*t + (hasJuice ? HOVER : 0.55) + this.hopY + Math.sin(performance.now() / 300) * 0.05
       this.pos.y += (hoverY - this.pos.y) * Math.min(1, dt * (this.hopY > 0 ? 20 : 4))
       this.vel.set(Math.sin(this.heading) * this.speed, Math.cos(this.heading) * this.speed)
-      if(world.hitBuilding(this.pos.x,this.pos.z,this.pos.y-0.5)>=0) {this.impact=this.speed;this.unsnap()}
+      if(world.hitBuilding(this.pos.x,this.pos.z,this.pos.y-0.5)>=0) {
+        const cx=a.x+(b.x-a.x)*t, cz=a.z+(b.z-a.z)*t
+        if(world.hitBuilding(cx,cz,this.pos.y-0.5)<0){
+          this.pos.x=cx;this.pos.z=cz;this.sway=this.swayV=0;this.laneIndex=1
+        } else {
+          this.impact=Math.min(12,this.speed);this.speed=0;this.vel.set(0,0)
+          this.edgeA=oldA;this.edgeB=oldB;this.edgeS=oldS;this.pos.x=oldX;this.pos.z=oldZ
+        }
+      }
       if(world.isWater(this.pos.x,this.pos.z) && world.groundHeightAt(this.pos.x,this.pos.z,this.pos.y)<0 && this.pos.y<3) this.unsnap()
     } else {
       const spd = this.vel.length()
@@ -408,7 +426,10 @@ export class Player {
       this.vel.set(fx * fwd + fz * lat, fz * fwd - fx * lat)
       this.bank += (Math.max(-0.6, Math.min(0.6, -input.steer * 0.35 - lat * 0.03)) - this.bank) * Math.min(1, dt * 5)
 
-      this.targetAlt = world.groundHeightAt(this.pos.x,this.pos.z,this.pos.y) + HOVER
+      const ground=world.groundHeightAt(this.pos.x,this.pos.z,this.pos.y)+HOVER
+      if(this.testFlight && hasJuice) {
+        this.targetAlt=Math.max(ground,Math.min(ground+250,this.targetAlt+((input.up?1:0)-(input.down?1:0))*22*dt))
+      } else this.targetAlt=ground
       const nx = this.pos.x + this.vel.x * dt
       const nz = this.pos.z + this.vel.y * dt
       const hit = world.hitBuilding(nx, nz, this.pos.y - 0.5)
@@ -434,7 +455,9 @@ export class Player {
         }
       }
       const floor = world.groundHeightAt(this.pos.x, this.pos.z, this.pos.y) + HOVER
-      const y = floor + Math.sin(performance.now() / 300) * 0.06
+      const desired=this.testFlight?Math.max(floor,this.targetAlt):floor
+      let y = desired + Math.sin(performance.now() / 300) * 0.06
+      if(y<this.pos.y && world.hitBuilding(this.pos.x,this.pos.z,y-0.5)>=0)y=this.pos.y
       this.pos.y += (y - this.pos.y) * Math.min(1, dt * 3)
       this.speed = this.vel.length()
       this.nextNode = -1

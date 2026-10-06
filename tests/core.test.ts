@@ -4,7 +4,8 @@ import {RunState,OVERCLOCK_SPEED} from '../src/dynamics'
 import {buildingId,criminalEligible,protectedVenue} from '../src/filter'
 import {crewInvite,mercator,unproject,tileKey,nearbyTiles,spatialDistance,validTelemetry} from '../src/spatial'
 import {makeBuilding,proceduralCity} from '../src/map'
-import {Player} from '../src/vehicle'
+import {Player,buildVehicleMesh} from '../src/vehicle'
+import {DealerSystem,SYNDICATE_LEADERS} from '../src/dealers'
 import {vehicleById} from '../src/data'
 import {highwayLoop} from '../src/campaign'
 import {World} from '../src/world'
@@ -63,13 +64,13 @@ test('highway circuit consists entirely of adjacent nodes and closes',()=>{
  for(let i=0;i<path.length;i++)assert.ok(w.city.nodes[path[i]].adj.includes(path[(i+1)%path.length]))
 })
 
-test('high-speed corner breaks Mag-Lock and preserves motion',()=>{
+test('high-speed corner assist keeps Mag-Lock and sheds speed',()=>{
  const city=proceduralCity('test',0,0)
  city.nodes=[{x:0,z:0,adj:[1],main:true},{x:0,z:20,adj:[0,2],main:true},{x:20,z:20,adj:[1],main:true}]
  const w={city,hitBuilding:()=>-1,isWater:()=>false,groundHeightAt:()=>0} as unknown as World
  const p=new Player(vehicleById('hovercedes'),'balaclava');p.placeAtNode(w,0);p.speed=60;p.edgeS=19
  p.update(0.05,{throttle:1,brake:0,steer:0,boost:false,up:false,down:false},w,true)
- assert.equal(p.mode,'free');assert.ok(p.vel.length()>40)
+ assert.equal(p.mode,'mag');assert.equal(p.edgeB,2);assert.ok(p.speed<38)
 })
 
 test('streamed building batches retain collision indexing and stop when a city is disposed',async()=>{
@@ -91,4 +92,68 @@ test('streamed building batches retain collision indexing and stop when a city i
  const count=world.group.children.length
  await pending
  assert.equal(world.group.children.length,count)
+})
+
+const neutral={throttle:0,brake:0,steer:0,boost:false,up:false,down:false}
+function junctionFixture(){
+ const w=fixture()
+ w.city.nodes=[
+  {x:0,z:0,adj:[1],main:true,width:7.5},
+  {x:0,z:10,adj:[0,2],main:true,width:7.5},
+  {x:0,z:20,adj:[1,3,4,5],main:true,width:7.5},
+  {x:20,z:20,adj:[2],main:true,width:7.5},
+  {x:-20,z:20,adj:[2],main:true,width:7.5},
+  {x:0,z:40,adj:[2],main:true,width:7.5}]
+ return w
+}
+test('both turn directions survive a released tap and intermediate map nodes',()=>{
+ for(const steer of [-1,1]){
+  const w=junctionFixture(),p=new Player(vehicleById('hovercedes'),'balaclava')
+  p.placeAtNode(w,0);p.speed=26
+  p.update(1/60,{...neutral,steer},w,true)
+  assert.equal(p.nextTurn(w).dir,steer)
+  for(let i=0;i<75 && p.edgeA!==2;i++)p.update(1/60,neutral,w,true)
+  assert.equal(p.mode,'mag');assert.equal(p.edgeA,2);assert.equal(p.edgeB,steer===1?3:4)
+ }
+})
+test('no turn request goes straight and lane offset fits a narrow road',()=>{
+ const w=junctionFixture(),p=new Player(vehicleById('hovercedes'),'balaclava')
+ p.placeAtNode(w,0);p.speed=26
+ for(let i=0;i<75&&p.edgeA!==2;i++)p.update(1/60,neutral,w,true)
+ assert.equal(p.edgeB,5)
+ p.speed=0
+ for(let i=0;i<30;i++)p.update(1/60,{...neutral,steer:1},w,true)
+ assert.ok(Math.abs(p.sway)<=2.2)
+})
+test('lane overlap with a footprint recentres instead of ejecting',()=>{
+ const w=junctionFixture();w.hitBuilding=(x)=>Math.abs(x)>0.5?0:-1
+ const p=new Player(vehicleById('hovercedes'),'balaclava');p.placeAtNode(w,0)
+ for(let i=0;i<12;i++)p.update(1/60,{...neutral,steer:1},w,true)
+ assert.equal(p.mode,'mag');assert.equal(p.laneIndex,1);assert.ok(Math.abs(p.pos.x)<=0.5)
+})
+test('test flight climbs, holds, descends and returns to street height when disabled',()=>{
+ const w=fixture(),p=new Player(vehicleById('board'),'balaclava');p.placeAtNode(w,0);p.unsnap();p.testFlight=true
+ for(let i=0;i<120;i++)p.update(1/60,{...neutral,up:true},w,true)
+ assert.ok(p.pos.y>30)
+ const target=p.targetAlt
+ for(let i=0;i<60;i++)p.update(1/60,neutral,w,true)
+ assert.equal(p.targetAlt,target);assert.ok(p.pos.y>30)
+ for(let i=0;i<60;i++)p.update(1/60,{...neutral,down:true},w,true)
+ assert.ok(p.pos.y<30)
+ p.testFlight=false
+ for(let i=0;i<180;i++)p.update(1/60,neutral,w,true)
+ assert.ok(p.pos.y<1.5)
+})
+test('enclosed vehicles have no cockpit head while boards keep their rider',()=>{
+ const car=buildVehicleMesh(vehicleById('neonic'))
+ assert.equal(car.getObjectByName('cockpit-mask'),undefined);assert.equal(car.getObjectByName('rider'),undefined)
+ assert.ok(buildVehicleMesh(vehicleById('board')).getObjectByName('rider'))
+})
+test('four gang leaders trade from parked cars without kiosks or sign sprites',()=>{
+ const w=new World(proceduralCity('Dealers',43.45,-80.49)),dealers=new DealerSystem(w)
+ assert.deepEqual(dealers.dealers.map(d=>[d.gang,d.name]),SYNDICATE_LEADERS.map(d=>[d.gang,d.name]))
+ dealers.refresh();assert.equal(dealers.group.children.length,4);assert.equal(dealers.dealers.length,4)
+ dealers.group.traverse(o=>{assert.notEqual(o.type,'Sprite');assert.notEqual(o.name,'cockpit-mask')})
+ for(const d of dealers.dealers)assert.ok(dealers.group.getObjectByName(`dealer-car-${d.gang}`))
+ dealers.dispose();w.dispose()
 })

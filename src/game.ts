@@ -717,6 +717,7 @@ export class Game {
         if(this.world !== w)return
         void this.syncOwnership()
         this.traffic?.ensurePopulation()
+        this.dealers?.refresh()
         this.buildMinimap()
         $('city-tag').textContent = `OSM · ${streamer.tileCount} SECTORS`
         if (this.mapOpen) this.drawFullMap()
@@ -782,6 +783,15 @@ export class Game {
     this.save.money = Math.max(0, this.save.money - fee)
     this.player.placeAtNode(w, pump.node)
     this.toast(`Grav-tow dropped you at the nearest HJ-77 pump (-${money(fee)})`, 'info')
+  }
+
+  toggleTestFlight() {
+    if(!this.world)return
+    this.player.testFlight=!this.player.testFlight
+    if(this.player.testFlight && this.player.mode==='mag')this.player.unsnap()
+    this.player.targetAlt=this.player.pos.y
+    document.body.classList.toggle('test-flight',this.player.testFlight)
+    this.toast(this.player.testFlight?'TEST FLIGHT ON · Space climbs · C descends · Y disables':'TEST FLIGHT OFF · Returning to street height','info')
   }
 
   toggleMode() {
@@ -943,6 +953,7 @@ export class Game {
         break
       }
       case 'locate-dealer': this.locateDealer(arg); break
+      case 'test-flight': this.toggleTestFlight(); this.openModal('help'); break
       case 'cheat':
         this.earn(5_000_000)
         this.persist()
@@ -1018,12 +1029,12 @@ export class Game {
             const dist = Math.hypot(candidate.x - this.actor.x, candidate.z - this.actor.z)
             return `<div class="card dealer-card" style="--dealer:#${candidate.color.toString(16).padStart(6, '0')}">
               <div class="row"><h3>${esc(candidate.name)}</h3><span>${(dist / 1000).toFixed(1)} km</span></div>
-              <p class="muted">Known for cheap ${esc(specialty.name)}. Get within 22 m to trade.</p>
+              <p class="muted">${esc(candidate.gang)} · ${esc(candidate.bio)}<br>Known for cheap ${esc(specialty.name)}. Get within 22 m to trade.</p>
               <button class="btn ghost" data-act="locate-dealer" data-arg="${candidate.id}">Set waypoint</button>
             </div>`
           }).join('') ?? ''
-          return `<h2>Night Market</h2><p class="muted">Six independent dealers work this city. Their prices refresh every few minutes; shortages spike prices and gluts crater them.</p>
-            ${cargo}<div class="grid dealers">${cards}</div>`
+          return `<h2>Night Market</h2><p class="muted">SLADE runs SHINOBI. WHITE LIE runs LIARS. FASA runs HYENAS. FRECKLES runs JESTERS. Find their parked cars to trade; prices shift with the local supply.</p>
+            ${cargo}<div class="grid dealers">${cards || '<p class="muted">No eligible dealer parking in these sectors yet. Explore more of the city.</p>'}</div>`
         }
         const event = this.dealers.event(dealer)
         const specialty = CONTRABAND.find((good) => good.id === dealer.specialty)!
@@ -1047,7 +1058,7 @@ export class Game {
           </div>`
         }).join('')
         return `<div class="market-head" style="--dealer:#${dealer.color.toString(16).padStart(6, '0')}">
-            <div><p class="kicker">Night Market // live quote</p><h2>${esc(dealer.name)}</h2><p class="muted">Specialty: ${esc(specialty.name)} · new prices in ${this.dealers.timeRemaining()}s</p></div>
+            <div><p class="kicker">${esc(dealer.gang)} // leader & dealer</p><h2>${esc(dealer.name)}</h2><p class="muted">${esc(dealer.bio)}<br>Specialty: ${esc(specialty.name)} · new prices in ${this.dealers.timeRemaining()}s</p></div>
             <strong class="market-cash">${money(s.money)}</strong>
           </div>
           ${event ? `<div class="market-event ${event.kind}"><b>${event.kind === 'shortage' ? 'SUPPLY SHOCK' : 'STREET GLUT'}</b>${esc(event.headline)}</div>` : ''}
@@ -1147,12 +1158,13 @@ export class Game {
             </ul></div>
             <div><h3>Hoverjuice (HJ-77)</h3><p class="muted">Your repulsors drink a volatile turquoise fluid that evaporates constantly, even while parked. Run dry and you sink to a crawl.
             HJ-77 is also the precursor to the street drug Cyan-ade. Precursor contracts pay big, but the leaking canisters double your evaporation.</p></div>
-            <div><h3>Night Market</h3><p class="muted">Dealers operate where suitable commercial sites are available. Buy contraband where it is cheap and move it where bids are high. Quotes refresh every 150 seconds; supply shocks and street gluts can make or erase a fortune. Cargo capacity depends on your current ride.</p></div>
+            <div><h3>Night Market</h3><p class="muted">Four gang leaders trade from parked cars where suitable commercial sites are available. Buy contraband where it is cheap and move it where bids are high. Quotes refresh every 150 seconds; supply shocks and street gluts can make or erase a fortune. Cargo capacity depends on your current ride.</p></div>
             <div><h3>Touch controls</h3><p class="muted">◀ ▶ steer (or choose the junction branch), <b>GO</b> thrusts, <b>BRK</b> brakes and reverses.
             Tap the <b>MAG-LOCK</b> badge to switch modes; <b>BOOST</b> burns extra HJ-77. Tap the fuel prompt at a pump to refuel.</p></div>
-            <div><h3>Drive modes</h3><p class="muted"><b>Mag-Lock</b> snaps you between three rail lanes. Tap A/D to slide; hold to select a junction branch. Fast corners and hard collisions break lock. <b>Free Hover</b> carries your momentum across the road plane. Water breaks rail cohesion.</p></div>
+            <div><h3>Drive modes</h3><p class="muted"><b>Mag-Lock</b> snaps you between three rail lanes. Tap A/D to slide and queue a turn for 2.5 seconds; hold to keep your turn queued. Corner assist slows you through sharp turns. Heavy ramming can break lock. <b>Free Hover</b> carries your momentum across the road plane. Water breaks rail cohesion.</p></div>
           </div>
           <div class="row test-funds"><span class="muted small">Playtesting?</span><button class="btn buy" data-act="cheat">+$5,000,000 test funds</button></div>
+          <div class="row"><button class="btn" data-act="test-flight">Test flight: ${this.player.testFlight?'ON':'OFF'} (Y)</button><span class="muted">Free Hover: Space / C climb / descend. Touch: RISE / DESCEND. Turning off restores street height.</span></div>
           <div class="row"><span class="muted">${s.deliveries} deliveries · ${money(s.earned)} earned lifetime</span><button class="btn danger ghost" data-act="reset">Reset save</button></div>`
       case 'win':
         return `<div class="win"><h1>HOVERGHINI</h1><p>From the gutter to the skyline. You own the ultimate status symbol.</p>
@@ -1366,10 +1378,9 @@ export class Game {
     }
     this.multiplayer?.update(dt,this.player)
     w.update(this.paused?0:dt)
-    this.dealers?.update(dt)
     const traffic=this.traffic?.update(this.paused?0:dt,this.actor,this.player.groundSpeed,this.run.heat)
     if(!this.paused&&traffic){
-      if(traffic.impact>0){this.run.damage(Math.min(30,traffic.impact*0.5),this.save.mask==='oni');if(this.player.mode==='mag')this.player.unsnap()}
+      if(traffic.impact>0){this.run.damage(Math.min(30,traffic.impact*0.5),this.save.mask==='oni');if(this.player.mode==='mag' && traffic.impact>22)this.player.unsnap()}
       for(let i=0;i<traffic.nearMisses;i++)this.run.chain()
       if(traffic.boxed&&this.run.limp<0){this.run.limp=15;this.toast('BOXED IN · 15 seconds reserve power','bad')}
     }
@@ -1415,7 +1426,8 @@ export class Game {
     $('network-status').textContent=this.multiplayer?.status ?? 'LOCAL SAVE'
     const tunnel=this.world!.isTunnel(p.pos.x,p.pos.z,p.pos.y)
     $('minimap').style.visibility=tunnel?'hidden':'visible'
-    $('alt').textContent=tunnel?'GPS LOST':`${Math.round(p.pos.y)} m`
+    $('alt').textContent=tunnel?'GPS LOST':`${Math.round(p.pos.y)} m${p.testFlight?' · TEST FLIGHT':''}`
+    document.body.classList.toggle('test-flight',p.testFlight && p.mode==='free')
     $('combat-status').textContent = `HULL ${Math.ceil(this.run.hull)}% · HEAT ${this.run.heat.toFixed(1)} · +FLOW ${this.run.flow.toFixed(2)}×${this.run.limp>=0 ? ' · LIMP '+Math.ceil(this.run.limp)+'s' : ''}`
     $('speed').textContent = String(Math.round(p.groundSpeed * 3.6))
     const mode = $('mode')
@@ -1465,7 +1477,7 @@ export class Game {
     const prompt = $('prompt')
     const market = this.dealers?.nearest(this.actor.x, this.actor.z)
     if (market?.dealer && market.dist < 22 && !this.paused) {
-      setHtml(prompt, `${touch ? 'Tap to trade' : '<kbd>R</kbd> Trade'} with ${esc(market.dealer.name)}`)
+      setHtml(prompt, `${touch ? 'Tap to trade' : '<kbd>R</kbd> Trade'} with ${esc(market.dealer.name)} · ${market.dealer.gang}`)
       prompt.classList.add('show')
     } else if (dist < 18 && !this.paused) {
       const need = p.spec.tank - this.juice
