@@ -1,0 +1,21 @@
+name = "hoverjuice-api"
+main = "server/api.ts"
+compatibility_date = "2026-10-01"
+
+[vars]
+ALLOWED_ORIGIN = "https://YOUR-HOVERJUICE-HOST"
+APP_CONTACT = "mailto:YOUR-CONTACT-EMAIL"
+NOMINATIM_URL = "https://nominatim.openstreetmap.org/search"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "hoverjuice-global"
+database_id = "REPLACE-WITH-YOUR-D1-DATABASE-ID"
+
+[[durable_objects.bindings]]
+name = "GEOCODER"
+class_name = "Geocoder"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["Geocoder"]

@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
     <meta name="theme-color" content="#0a0418" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
-    <title>Hoverghini: Neon Courier Tycoon</title>
+    <title>Hoverjuice | Industrial Noir</title>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@500;700;900&family=Rajdhani:wght@500;600;700&display=swap" rel="stylesheet" />
@@ -15,7 +15,7 @@
 
     <div id="hud" data-mode="mag">
       <div class="hud-tl panel">
-        <div class="brand">HOVERGHINI</div>
+        <div class="row"><img id="mask-portrait" width="44" height="44" alt="Equipped mask" /><div class="brand">HOVERJUICE</div></div><div id="network-status" class="muted small">LOCAL SAVE</div>
         <div id="money" class="money">$0</div>
         <div id="income" class="muted small income"></div>
         <div class="city"><span id="city-name"></span><span id="city-tag" class="tag"></span></div>
@@ -42,7 +42,7 @@
       <button id="contract" class="panel contract" data-tap="contracts"></button>
       <button class="menu-btn panel" data-tap="contracts" aria-label="Open menu"><span></span><span></span><span></span></button>
 
-      <div id="turn" class="turn"></div>
+      <div id="venue-label" class="venue-label"></div><div id="turn" class="turn"></div>
       <button id="prompt" class="prompt" data-tap="prompt"></button>
       <div id="toast" class="toast"></div>
 
@@ -65,17 +65,13 @@
           <div id="stick" class="stick mag-hide" aria-label="Analog stick"><div id="stick-knob"></div></div>
         </div>
         <div class="throttle">
-          <div class="alt-pad free-only">
-            <button data-touch="climb" aria-label="Climb">▲</button>
-            <button data-touch="dive" aria-label="Descend">▼</button>
-          </div>
           <div class="stack">
-            <button data-tap="exit" class="chip foot-hide">EXIT</button>
-            <button data-tap="fire" class="chip fire-btn">FIRE</button>
-            <button data-touch="boost" class="chip boost-btn"><span class="foot-hide">BOOST</span><span class="foot-only">SPRINT</span></button>
-            <button data-touch="down" class="brk foot-hide">BRK</button>
+
+            <button data-tap="overclock" class="chip">BURN</button>
+            <button data-touch="boost" class="chip boost-btn"><span>BOOST</span></button>
+            <button data-touch="down" class="brk">BRK</button>
           </div>
-          <button data-touch="up" class="gas"><span class="foot-hide">GO</span><span class="foot-only">JUMP</span></button>
+          <button data-touch="up" class="gas"><span>GO</span></button>
         </div>
       </div>
     </div>
@@ -90,13 +86,13 @@
         <button id="map-minus" aria-label="Zoom map out">−</button>
         <button id="map-plus" aria-label="Zoom map in">+</button>
       </div>
-      <div class="map-legend panel"><i class="you"></i> Courier <i class="route"></i> Route <i class="fuel"></i> HJ-77 <i class="dealer"></i> Dealer</div>
+      <div class="map-attribution">Map data © <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap contributors</a></div><div class="map-legend panel"><i class="you"></i> Courier <i class="route"></i> Route <i class="fuel"></i> HJ-77 <i class="dealer"></i> Dealer</div>
     </div>
 
     <div id="title" class="title show">
       <div class="title-inner">
-        <p class="kicker">Neon courier · Tycoon simulator</p>
-        <h1>HOVERGHINI</h1>
+        <p class="kicker">Industrial noir · Street survival</p>
+        <h1>HOVERJUICE</h1>
         <p class="lede">
           Start as a broke gutter courier on a leaky hoverboard. Run high-stakes deliveries through any real city on Earth,
           keep your repulsors wet with volatile HJ-77, buy up the skyline, and earn the ultimate status symbol.
@@ -105,7 +101,7 @@
           <button id="btn-continue" class="btn buy big" style="display: none"></button>
           <button id="btn-new" class="btn big">Choose a city</button>
         </div>
-        <p class="muted small desktop-only">W/A/S/D fly · E switch Mag-Lock / Free Hover · Shift boost · X hop off · V camera · H manual</p>
+        <p class="muted small desktop-only">W/A/S/D drive · E switch Mag-Lock / Free Hover · Shift boost · Q overclock · V camera · H manual</p>
       </div>
     </div>
 
@@ -125,7 +121,7 @@
         <button id="btn-load-sim" class="btn ghost">Use simulation grid</button>
         <button id="btn-load-cancel" class="btn ghost danger">Cancel</button>
       </div>
-      <div class="muted small">Map data © OpenStreetMap contributors</div>
+      <div class="muted small"><a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">Map data © OpenStreetMap contributors</a></div>
     </div>
 
     <script type="module" src="/src/main.ts"></script>

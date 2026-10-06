@@ -47,7 +47,7 @@ export const VEHICLES: VehicleSpec[] = [
     payMult: 1,
     maxAlt: 6,
     body: 0x1b1f2e,
-    glow: 0x19ffe6,
+    glow: 0x00f0ff,
   },
   {
     id: 'neonic',
@@ -65,8 +65,8 @@ export const VEHICLES: VehicleSpec[] = [
     boost: 1.55,
     payMult: 1.7,
     maxAlt: 10,
-    body: 0x7a2dff,
-    glow: 0xff2bd6,
+    body: 0x34383d,
+    glow: 0x00f0ff,
   },
   {
     id: 'z150',
@@ -84,8 +84,8 @@ export const VEHICLES: VehicleSpec[] = [
     boost: 1.4,
     payMult: 3.2,
     maxAlt: 18,
-    body: 0xffa600,
-    glow: 0xffd84a,
+    body: 0x575348,
+    glow: 0x00f0ff,
   },
   {
     id: 'hovercedes',
@@ -104,7 +104,7 @@ export const VEHICLES: VehicleSpec[] = [
     payMult: 4.6,
     maxAlt: 40,
     body: 0xc9d4e8,
-    glow: 0x5ad1ff,
+    glow: 0x00f0ff,
   },
   {
     id: 'goblin',
@@ -122,8 +122,8 @@ export const VEHICLES: VehicleSpec[] = [
     boost: 1.65,
     payMult: 7,
     maxAlt: 80,
-    body: 0x14532d,
-    glow: 0x7dffb0,
+    body: 0x12151c,
+    glow: 0x00f0ff,
   },
   {
     id: 'hoverarrari',
@@ -141,8 +141,8 @@ export const VEHICLES: VehicleSpec[] = [
     boost: 1.8,
     payMult: 10,
     maxAlt: 140,
-    body: 0xff1e3c,
-    glow: 0xff7a1e,
+    body: 0x1b1d2e,
+    glow: 0x00f0ff,
   },
   {
     id: 'hoverghini',
@@ -160,8 +160,8 @@ export const VEHICLES: VehicleSpec[] = [
     boost: 1.9,
     payMult: 15,
     maxAlt: 320,
-    body: 0xd4ff00,
-    glow: 0x19ffe6,
+    body: 0x7b1fa2,
+    glow: 0x00f0ff,
   },
 ]
 
@@ -175,6 +175,8 @@ export interface CityPreset {
 }
 
 export const CITIES: CityPreset[] = [
+  {name:'Toronto',area:'Downtown',lat:43.6532,lon:-79.3832},
+  {name:'Kitchener',area:'Downtown',lat:43.4516,lon:-80.4925},
   { name: 'Tokyo', area: 'Shibuya Crossing', lat: 35.6595, lon: 139.7005 },
   { name: 'New York', area: 'Midtown Manhattan', lat: 40.7549, lon: -73.984 },
   { name: 'Hong Kong', area: 'Central', lat: 22.2819, lon: 114.1582 },

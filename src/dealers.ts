@@ -142,7 +142,7 @@ export class DealerSystem {
     const city = this.world.city
     const candidates = city.nodes
       .map((node, i) => ({ node, i }))
-      .filter(({ node }) => node.main && node.adj.length > 1 && Math.hypot(node.x, node.z) > 120)
+      .filter(({ node }) => node.main && node.adj.length > 1 && this.world.eligibleAt(node.x,node.z) && Math.hypot(node.x, node.z) > 120)
       .sort((a, b) => hash(`${city.key}:${a.i}`) - hash(`${city.key}:${b.i}`))
     const chosen: typeof candidates = []
     while (chosen.length < 6 && candidates.length) {

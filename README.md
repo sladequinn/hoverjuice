@@ -1,66 +1,52 @@
-# Hoverghini
+# Hoverjuice
 
-A cyberpunk courier and tycoon simulator that turns any real-world city into a neon playground.
-Buildings and streets come live from OpenStreetMap and get rebuilt as extruded, glowing cyber towers.
+Industrial-noir hover courier prototype built with Three.js, Vite and TypeScript. Real streets and buildings stream from OpenFreeMap; the player stays vehicle-bound.
 
-You start as a broke gutter courier on a leaky hoverboard, run delivery contracts, buy up landmark
-real estate for passive income, and work your way up the garage to the ultimate status symbol: the **Hoverghini**.
+This branch is the **first playable overhaul**, not the complete online campaign. See [implementation status](docs/industrial-noir.md) for implemented systems, limitations and the remaining work.
 
-## Features
+## Run
 
-- **Any city on Earth, continuously streamed**: real OpenStreetMap vector tiles load from OpenFreeMap's global CDN,
-  are cached locally, and expand in the background as you travel. The round minimap opens into a full-city map.
-- **Dual-mode flight**
-  - **Mag-Lock** snaps you to street conduits. Hold `A`/`D` to choose the branch at the next junction.
-    Collision-free and fuel-efficient, with a HUD hint showing which way your route turns.
-  - **Free Hover** gives you inertia drifting, `Shift` hyper-boosts and altitude (`Space`/`C`). Towers are solid,
-    and higher-tier vehicles can climb over them.
-- **Hoverjuice (HJ-77)**: repulsor fuel that evaporates constantly, even when parked. Refuel at turquoise pumps (`F`)
-  or call a grav-tow (`T`). Cyan-ade precursor contracts pay big but leak into your tank.
-- **Contracts**: Parcel, Express and HJ-77 Precursor jobs with timers, speed tips and late penalties. Pay scales with your vehicle's cargo class.
-- **Garage**: Gutter Hoverboard → Neonic → Sky-Duty Z150 → Hovercedes-Benz → Repuls-Royce Goblin → Hoverarrari → Hoverghini.
-- **On foot & masks**: hop off your ride and run around as a masked courier. 19 low-poly animal masks to collect.
-- **Living streets & combat**: ambient AI hover traffic follows the real road graph. Gang drones patrol the city;
-  fire plasma on foot or from any ride and collect a bounty for each drone.
-- **Night Market**: six physical dealers are procedurally placed around every city. Trade six fictional contraband
-  types across local price differences, timed supply shocks and gluts; cargo capacity depends on your ride.
-- **Look**: Hotline Miami-style neon grade, VHS scanlines, chromatic fringe, synthwave sun, rain and neon billboards.
-- **Real estate**: buy the city's landmark towers for passive rent per minute. Holdings keep paying in every city.
-- Progress autosaves to `localStorage`.
+Node 24 recommended.
+
+```sh
+npm ci
+npm run dev
+npm run build
+npm test
+npm run check:server
+npx playwright install chromium
+npm run test:browser
+```
+
+Choose a preset city or use the location button. The explicitly marked simulation grid is available offline. Place search requires the geocoding gateway described below. Progress and local property purchases remain local to this browser.
 
 ## Controls
 
-| Key | Action |
+| Input | Action |
 | --- | --- |
-| `W` / `S` | Thrust / brake (hold `S` when stopped in Mag-Lock to reverse) |
-| `A` / `D` | Steer, or pick the junction branch in Mag-Lock |
-| `E` | Toggle Mag-Lock / Free Hover |
-| `Shift` | Boost (both modes) / sprint on foot |
-| `Space` / `C` | Climb / descend (Free Hover), hop (Mag-Lock), jump (on foot) |
-| `X` | Hop off / on your ride |
-| `V` | Chase / top-down camera |
-| `Q` | Fire plasma weapon |
-| `N` / `R` | Open the dealer map / trade with a nearby dealer |
-| Tap minimap | Open the expanded live city map |
-| `F` / `T` | Refuel at pump / grav-tow |
-| `J` `G` `K` `P` `M` `H` | Contracts, Garage, Masks, Real estate, Warp, Help |
-| Mouse wheel | Camera zoom |
+| W / S | Throttle / brake, reverse when stopped |
+| A / D | Tap for a lane snap; hold to choose a junction; steer in Free Hover |
+| E | Mag-Lock / Free Hover |
+| Shift | Boost |
+| Space | Small rail hop |
+| Q / touch BURN | Consume one Cyan-ade for 15 seconds at 300 km/h; costs 25 hull |
+| F / fuel prompt | Start fueling; press again to pay; throttle away to steal |
+| B / U | Bank / withdraw cash and cargo at a garage or owned property |
+| V | Chase / overhead camera |
+| J / N / G / K / P / M / H | Contracts / market / garage / masks / property / city / help |
+| R | Nearby dealer |
+| T | Tow to an available fuel depot |
 
-On touch devices, on-screen controls appear automatically: a d-pad in Mag-Lock and an analog stick in Free Hover and on foot. The Garage and Help tabs have a test-funds button for playtesting.
+The purple Hoverghini is awarded by a three-lap pink-slip race, gated by $10M net worth and ownership of the tallest loaded building. A contiguous highway-class road loop must exist in the loaded graph. There is no automatic substitute oval.
 
-## Running locally
+## Optional online services
 
-Requires Node.js 20+.
+- `server/rooms.ts`: PartyKit telemetry rooms. `npm run dev:rooms` starts development rooms. Configure `VITE_PARTYKIT_HOST` to enable them; unset means offline. `#toronto?crew=ironlungs` starts the matching preset and uses a shared crew room.
+- `server/schema.sql`: sparse Cloudflare D1 tables for ownership, dead drops, verified speed records and flashpoints.
+- `server/api.ts`: read-only ownership/record gateway. Set `VITE_API_BASE` after deploying it. **Global claims, transactions and leaderboard submissions are not enabled.** Never trust localStorage cash or client-supplied race times for global writes.
+- Copy `wrangler.example.toml` to `wrangler.toml`, supply the real D1 ID, application origin and contact email, apply the schema, and deploy with your Cloudflare tooling. No account, database or hosting deployment is created by this branch.
+- `server/geocoder.ts`: singleton Durable Object, query caching and an application-wide 1.1-second interval between Nominatim requests. Set `public/config.json`'s `geocoder` URL to the deployed `/api/geocode`; this runtime file allows provider changes without rebuilding the client.
 
-```bash
-npm install
-npm run dev      # http://localhost:47291
-npm run build    # type-check + production build to dist/
-```
+Nominatim public service use must follow its [usage policy](https://operations.osmfoundation.org/policies/nominatim/): the maximum is one request/second **across the entire app**, results must be cached, requests must identify the app, and autocomplete/systematic POI extraction are forbidden. Search runs only on explicit form submission. Larger audiences need a suitable hosted or self-hosted Nominatim provider. Presets and browser geolocation work without place search.
 
-## Tech
-
-Vite, TypeScript and Three.js (with UnrealBloom post-processing). No backend and no API keys:
-map geometry streams as vector tiles from OpenFreeMap and place search uses Nominatim.
-
-Map data © OpenStreetMap contributors, ODbL.
+Map data © [OpenStreetMap contributors](https://www.openstreetmap.org/copyright), ODbL. Vector tiles supplied by [OpenFreeMap](https://openfreemap.org/).
