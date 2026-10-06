@@ -1,3 +1,4 @@
+import { buildingId, criminalEligible, grindVenue, protectedVenue, syndicate, type Tags, type Gang } from './filter'
 import { LANDMARK_NAMES } from './data'
 import { VectorTile } from '@mapbox/vector-tile'
 import { PbfReader } from 'pbf'
@@ -5,6 +6,12 @@ import { PbfReader } from 'pbf'
 export type Pt = [number, number]
 
 export interface Building {
+  id?: string
+  tile?: string
+  tags?: Tags
+  eligible?: boolean
+  gang?: Gang
+  clipped?: boolean
   poly: Pt[]
   height: number
   name?: string
@@ -18,6 +25,9 @@ export interface Building {
 }
 
 export interface RoadNode {
+  y?: number
+  tunnel?: boolean
+  width?: number
   x: number
   z: number
   adj: number[]
@@ -25,6 +35,10 @@ export interface RoadNode {
 }
 
 export interface Road {
+  heights?: number[]
+  bridge?: boolean
+  tunnel?: boolean
+  name?: string
   pts: Pt[]
   width: number
   major: boolean
@@ -38,7 +52,13 @@ export interface Landmark {
   income: number
 }
 
+export interface Venue { x: number; z: number; tags: Tags; name: string }
+export interface Zone { poly: Pt[]; tags: Tags; gang: Gang }
+export interface Water { poly: Pt[]; holes: Pt[][] }
 export interface CityData {
+  venues: Venue[]
+  zones: Zone[]
+  waters: Water[]
   key: string
   name: string
   lat: number
@@ -51,6 +71,7 @@ export interface CityData {
   procedural: boolean
 }
 
+const bldId = (b: Building) => b.id!
 const RADIUS = 750
 // OpenFreeMap's planet archive currently tops out at z14; requesting z15 returns valid but empty tiles.
 const TILE_ZOOM = 14
@@ -76,7 +97,7 @@ function polyArea(poly: Pt[]) {
   return a / 2
 }
 
-function makeBuilding(poly: Pt[], height: number, name?: string): Building | null {
+export function makeBuilding(poly: Pt[], height: number, name?: string): Building | null {
   if (poly.length < 3) return null
   const area = Math.abs(polyArea(poly))
   if (area < 12) return null
@@ -86,12 +107,14 @@ function makeBuilding(poly: Pt[], height: number, name?: string): Building | nul
     minZ = Math.min(minZ, z); maxZ = Math.max(maxZ, z)
     cx += x; cz += z
   }
-  return { poly, height, name, area, cx: cx / poly.length, cz: cz / poly.length, minX, maxX, minZ, maxZ }
+  let signed=0,weightedX=0,weightedZ=0
+  for(let i=0;i<poly.length;i++){const [x,z]=poly[i],[a,b]=poly[(i+1)%poly.length];const cross=x*b-a*z;signed+=cross;weightedX+=(x+a)*cross;weightedZ+=(z+b)*cross}
+  return {poly,height,name,area,cx:Math.abs(signed)>0.001?weightedX/(3*signed):cx/poly.length,cz:Math.abs(signed)>0.001?weightedZ/(3*signed):cz/poly.length,minX,maxX,minZ,maxZ}
 }
 
-function pickLandmarks(key: string, buildings: Building[]): Landmark[] {
+function pickLandmarks(_key: string, buildings: Building[]): Landmark[] {
   const score = (b: Building) => b.height * Math.sqrt(b.area)
-  const idx = buildings.map((_, i) => i).filter((i) => buildings[i].area > 150)
+  const idx = buildings.map((_, i) => i).filter((i) => buildings[i].area > 150 && buildings[i].eligible)
   const named = idx.filter((i) => buildings[i].name).sort((a, b) => score(buildings[b]) - score(buildings[a]))
   const chosen = named.slice(0, 10)
   if (chosen.length < 10) {
@@ -114,7 +137,7 @@ function pickLandmarks(key: string, buildings: Building[]): Landmark[] {
     .map(({ i, name, s }) => {
       const t = Math.sqrt(s / maxS)
       const price = Math.round((3000 + t * t * 600000) / 100) * 100
-      return { id: `${key}:${i}`, name, building: i, price, income: Math.round(price * 0.012) }
+      return { id: bldId(buildings[i]), name, building: i, price, income: Math.round(price * 0.012) }
     })
     .sort((a, b) => a.price - b.price)
 }
@@ -180,23 +203,24 @@ export interface MapDelta {
 
 type LngLat = [number, number]
 type GeoGeometry =
+  | { type: 'Point'; coordinates: LngLat }
   | { type: 'Polygon'; coordinates: LngLat[][] }
   | { type: 'MultiPolygon'; coordinates: LngLat[][][] }
   | { type: 'LineString'; coordinates: LngLat[] }
   | { type: 'MultiLineString'; coordinates: LngLat[][] }
 
 const ROAD_CLASS: Record<string, { width: number; major: boolean }> = {
-  motorway: { width: 16, major: true },
-  trunk: { width: 14, major: true },
+  motorway: { width: 12, major: true },
+  trunk: { width: 12, major: true },
   primary: { width: 12, major: true },
   secondary: { width: 10, major: true },
-  tertiary: { width: 9, major: false },
-  minor: { width: 7, major: false },
-  service: { width: 6, major: false },
-  track: { width: 5, major: false },
+  tertiary: { width: 10, major: false },
+  minor: { width: 7.5, major: false },
+  service: { width: 7.5, major: false },
+  track: { width: 7.5, major: false },
 }
 
-function tileFor(lat: number, lon: number, z: number) {
+export function tileFor(lat: number, lon: number, z: number) {
   const n = 2 ** z
   return {
     x: Math.floor(((lon + 180) / 360) * n),
@@ -204,7 +228,7 @@ function tileFor(lat: number, lon: number, z: number) {
   }
 }
 
-function worldToLatLon(city: CityData, x: number, z: number) {
+export function worldToLatLon(city: CityData, x: number, z: number) {
   const kx = 111320 * Math.cos((city.lat * Math.PI) / 180)
   return { lat: city.lat - z / 110540, lon: city.lon + x / kx }
 }
@@ -279,19 +303,28 @@ export class MapStreamer {
     return [(lon - this.city.lon) * kx, -(lat - this.city.lat) * 110540]
   }
 
-  private node(pt: Pt) {
-    const key = `${Math.round(pt[0] * 4)},${Math.round(pt[1] * 4)}`
+  private node(pt: Pt, y = 0, tunnel = false, width = 7.5) {
+    const key = `${Math.round(pt[0] * 4)},${Math.round(pt[1] * 4)},${Math.round(y * 10)}`
     let i = this.nodeIndex.get(key)
     if (i === undefined) {
       i = this.city.nodes.length
-      this.city.nodes.push({ x: pt[0], z: pt[1], adj: [], main: true })
+      this.city.nodes.push({ x: pt[0], z: pt[1], y, tunnel, width, adj: [], main: true })
       this.nodeIndex.set(key, i)
     }
     return i
   }
 
-  private addRoad(line: LngLat[], width: number, major: boolean) {
-    const pts = line.map((p) => this.project(p))
+  private addRoad(line: LngLat[], width: number, major: boolean, tags: Tags) {
+    let pts = line.map((p) => this.project(p))
+    if (tags.brunnel || tags.bridge === 'yes' || tags.tunnel === 'yes') {
+      const dense: Pt[] = [pts[0]]
+      for (let i = 1; i < pts.length; i++) {
+        const a = pts[i - 1], b = pts[i]
+        const steps = Math.max(6, Math.ceil(Math.hypot(b[0] - a[0], b[1] - a[1]) / 10))
+        for (let j = 1; j <= steps; j++) dense.push([a[0] + (b[0] - a[0]) * j / steps, a[1] + (b[1] - a[1]) * j / steps])
+      }
+      pts = dense
+    }
     if (pts.length < 2) return
     const kept: Pt[] = [pts[0]]
     for (let i = 1; i < pts.length; i++) {
@@ -299,10 +332,17 @@ export class MapStreamer {
       if (Math.hypot(b[0] - a[0], b[1] - a[1]) > 0.3) kept.push(b)
     }
     if (kept.length < 2) return
-    this.city.roads.push({ pts: kept, width, major })
-    let prev = this.node(kept[0])
+    const bridge = tags.bridge === 'yes' || tags.brunnel === 'bridge'
+    const tunnel = tags.tunnel === 'yes' || tags.brunnel === 'tunnel'
+    const deck = bridge ? Math.max(1, Number(tags.layer) || 1) * 5 : tunnel ? -4 : 0
+    const heights = kept.map((_, i) => {
+      const t = Math.min(1, i / 3, (kept.length - 1 - i) / 3)
+      return deck * t * t * (3 - 2 * t)
+    })
+    this.city.roads.push({ pts: kept, heights, width, major, bridge, tunnel, name: String(tags.name || '') })
+    let prev = this.node(kept[0], heights[0], tunnel, width)
     for (let i = 1; i < kept.length; i++) {
-      const next = this.node(kept[i])
+      const next = this.node(kept[i], heights[i], tunnel, width)
       const edge = prev < next ? `${prev}:${next}` : `${next}:${prev}`
       if (!this.roadSegments.has(edge)) {
         this.roadSegments.add(edge)
@@ -315,6 +355,27 @@ export class MapStreamer {
 
   private parse(data: Uint8Array, x: number, y: number) {
     const tile = new VectorTile(new PbfReader(data))
+    const sourceTile = `${TILE_ZOOM}_${x}_${y}`
+    for (const layerName of ['poi', 'landuse', 'water']) {
+      const layer = tile.layers[layerName]
+      if (!layer) continue
+      for (let i = 0; i < layer.length; i++) {
+        const f = layer.feature(i), tags = { ...f.properties } as Tags
+        const geo = f.toGeoJSON(x, y, TILE_ZOOM).geometry as GeoGeometry
+        if (layerName === 'poi' && geo.type === 'Point') {
+          const [vx, vz] = this.project(geo.coordinates)
+          // OpenMapTiles encodes amenities in class/subclass, not necessarily amenity.
+          tags.amenity ||= tags.subclass || tags.class || ''
+          this.city.venues.push({ x: vx, z: vz, tags, name: grindVenue(tags) })
+        }
+        const polygons = geo.type === 'Polygon' ? [geo.coordinates] : geo.type === 'MultiPolygon' ? geo.coordinates : []
+        for (const rings of polygons) {
+          const poly = rings[0].slice(0, -1).map(p => this.project(p))
+          if (layerName === 'water') this.city.waters.push({ poly, holes: rings.slice(1).map(r => r.slice(0, -1).map(p => this.project(p))) })
+          else { tags.landuse ||= tags.class || ''; this.city.zones.push({ poly, tags, gang: syndicate(tags) }) }
+        }
+      }
+    }
     const bLayer = tile.layers.building
     if (bLayer) for (let i = 0; i < bLayer.length; i++) {
       const f = bLayer.feature(i)
@@ -331,7 +392,23 @@ export class MapStreamer {
         if (!outer) continue
         const pts = outer.slice(0, -1).map((p) => this.project(p))
         const b = makeBuilding(pts, Math.min(Math.max(h, 4), 700), String(props.name ?? '') || undefined)
-        if (b) this.city.buildings.push(b)
+        if (b) {
+          const ll = worldToLatLon(this.city, b.cx, b.cz)
+          b.id = buildingId(ll.lat, ll.lon); b.tile = sourceTile; b.tags = { ...props }
+          // Clipped footprints do not have canonical centroids: never persist claims against them.
+          b.clipped = f.loadGeometry().some(r => r.some(p => p.x <= 0 || p.y <= 0 || p.x >= f.extent || p.y >= f.extent))
+          for (const zone of this.city.zones) if (pointInPoly(b.cx, b.cz, zone.poly)) {
+            b.gang = zone.gang
+            if (zone.tags.landuse === 'residential' || protectedVenue(zone.tags)) b.tags.landuse = String(zone.tags.landuse || zone.tags.class)
+          }
+          for (const venue of this.city.venues) if (pointInPoly(venue.x, venue.z, b.poly)) {
+            if (protectedVenue(venue.tags)) b.tags.amenity = String(venue.tags.amenity)
+            else if (!protectedVenue(b.tags)) Object.assign(b.tags, venue.tags)
+          }
+          b.eligible = !b.clipped && ['commercial','industrial','retail','warehouse'].includes(String(b.tags.building)) && criminalEligible(b.tags)
+          if (b.eligible) b.name = grindVenue(b.tags)
+          this.city.buildings.push(b)
+        }
       }
     }
 
@@ -342,7 +419,7 @@ export class MapStreamer {
       if (!cls) continue
       const geo = f.toGeoJSON(x, y, TILE_ZOOM).geometry as GeoGeometry
       const lines = geo.type === 'LineString' ? [geo.coordinates] : geo.type === 'MultiLineString' ? geo.coordinates : []
-      for (const line of lines) this.addRoad(line, cls.width, cls.major)
+      for (const line of lines) this.addRoad(line, cls.width, cls.major, f.properties as Tags)
     }
   }
 
@@ -378,6 +455,7 @@ export class MapStreamer {
       })
       if (!tiles) throw new Error('Map tile network unavailable')
       finalizeGraph(this.city.nodes)
+      this.city.landmarks=pickLandmarks(this.city.key,this.city.buildings)
       let extent = RADIUS
       for (const n of this.city.nodes) extent = Math.max(extent, Math.abs(n.x), Math.abs(n.z))
       this.city.radius = extent + 300
@@ -401,7 +479,7 @@ export async function fetchCity(
   signal: AbortSignal,
 ): Promise<CityData> {
   const key = cityKey(lat, lon)
-  const city: CityData = { key, name, lat, lon, radius: RADIUS, buildings: [], roads: [], nodes: [], landmarks: [], procedural: false }
+  const city: CityData = { key, name, lat, lon, radius: RADIUS, buildings: [], roads: [], nodes: [], landmarks: [], venues: [], zones: [], waters: [], procedural: false }
   onStatus('Connecting to the global OpenStreetMap tile network…')
   const streamer = new MapStreamer(city, await tileTemplate(signal))
   streamers.set(city, streamer)
@@ -413,7 +491,7 @@ export async function fetchCity(
   return city
 }
 
-/** Offline fallback: a synthetic neon grid city. */
+/** Explicit offline simulation; never published to global persistence. */
 export function proceduralCity(name: string, lat: number, lon: number): CityData {
   const r = rng(Math.floor(Math.abs(lat * 1000 + lon * 7000)) + 17)
   const step = 110
@@ -425,9 +503,11 @@ export function proceduralCity(name: string, lat: number, lon: number): CityData
   for (let i = 0; i <= n; i++)
     for (let j = 0; j <= n; j++) nodes.push({ x: off + i * step, z: off + j * step, adj: [], main: true })
   const link = (a: number, b: number, major: boolean) => {
+    nodes[a].width = Math.max(nodes[a].width ?? 0, major ? 12 : 7.5)
+    nodes[b].width = Math.max(nodes[b].width ?? 0, major ? 12 : 7.5)
     nodes[a].adj.push(b)
     nodes[b].adj.push(a)
-    roads.push({ pts: [[nodes[a].x, nodes[a].z], [nodes[b].x, nodes[b].z]], width: major ? 12 : 8, major })
+    roads.push({ pts: [[nodes[a].x, nodes[a].z], [nodes[b].x, nodes[b].z]], width: major ? 12 : 7.5, major })
   }
   for (let i = 0; i <= n; i++)
     for (let j = 0; j <= n; j++) {
@@ -450,17 +530,25 @@ export function proceduralCity(name: string, lat: number, lon: number): CityData
           if (bld) buildings.push(bld)
         }
     }
+  for (const b of buildings) {
+    b.id = `sim_${buildingId(lat - b.cz / 110540, lon + b.cx / (111320 * Math.cos(lat * Math.PI / 180)))}`
+    b.tags = { building: 'commercial' }; b.eligible = true; b.gang = 'SHINOBI'
+  }
   finalizeGraph(nodes)
   const key = cityKey(lat, lon) + ':sim'
-  return { key, name, lat, lon, radius: RADIUS, buildings, roads, nodes, landmarks: pickLandmarks(key, buildings), procedural: true }
+  return { key, name, lat, lon, radius: RADIUS, buildings, roads, nodes, venues: [], zones: [], waters: [], landmarks: pickLandmarks(key, buildings), procedural: true }
 }
 
 export interface GeoResult { name: string; area: string; lat: number; lon: number }
 
+let geocoderConfig:Promise<{geocoder?:string}>|undefined
 export async function geocode(q: string): Promise<GeoResult[]> {
-  const url = `https://nominatim.openstreetmap.org/search?format=json&limit=6&q=${encodeURIComponent(q)}`
+  geocoderConfig??=fetch('/config.json').then(r=>r.ok?r.json():{}).catch(()=>({}))
+  const config=await geocoderConfig
+  const endpoint=config.geocoder??'/api/geocode'
+  const url = `${endpoint}${endpoint.includes('?')?'&':'?'}q=${encodeURIComponent(q)}`
   const res = await fetch(url, { headers: { Accept: 'application/json' } })
-  if (!res.ok) throw new Error(`HTTP ${res.status}`)
+  if (!res.ok) throw new Error(`Place search unavailable (${res.status}). Choose a preset or use your location.`)
   const data: { display_name: string; lat: string; lon: string; name?: string }[] = await res.json()
   return data.map((d) => {
     const parts = d.display_name.split(',').map((s) => s.trim())

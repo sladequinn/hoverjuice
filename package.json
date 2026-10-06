@@ -1,15 +1,23 @@
 {
-  "name": "hoverghini",
+  "name": "hoverjuice",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.2.0",
   "type": "module",
   "scripts": {
     "dev": "vite --host 0.0.0.0 --port 47291",
     "build": "tsc && vite build",
-    "preview": "vite preview --host 0.0.0.0 --port 47291"
+    "preview": "vite preview --host 0.0.0.0 --port 47291",
+    "test": "node --import tsx --test tests/*.test.ts",
+    "test:browser": "node tests/smoke.cjs",
+    "check:server": "tsc -p server/tsconfig.json",
+    "dev:rooms": "partykit dev"
   },
   "devDependencies": {
+    "@cloudflare/workers-types": "^5.20261006.1",
+    "@playwright/test": "^1.51.1",
     "@types/three": "^0.186.0",
+    "partykit": "^0.0.115",
+    "tsx": "^4.23.15",
     "typescript": "~6.0.2",
     "vite": "^8.3.0"
   },

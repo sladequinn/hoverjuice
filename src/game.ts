@@ -1,11 +1,15 @@
+import { Campaign } from './campaign'
+import { ParticlePool } from './particles'
+import { Multiplayer } from './multiplayer'
+import { OwnershipClient } from './persistence'
+import { RunState } from './dynamics'
 import * as THREE from 'three'
 import { CITIES, CONTRACT_TYPES, JUICE_PRICE, VEHICLES, vehicleById, type ContractType } from './data'
 import { fetchCity, geocode, proceduralCity, streamerFor, type CityData } from './map'
 import { Player, type Input } from './vehicle'
-import { Character, MASKS, buildMask, type FootInput } from './character'
+import { MASKS, buildMask, validMask } from './character'
 import { World } from './world'
 import { TrafficSystem } from './traffic'
-import { CombatSystem } from './combat'
 import { CONTRABAND, DealerSystem } from './dealers'
 
 const SAVE_KEY = 'hoverghini.save.v1'
@@ -31,6 +35,12 @@ interface SaveData {
   masks: string[]
   mask: string
   cam: 'chase' | 'top'
+  coldOpenDone:boolean
+  hull:number
+  heat:number
+  notoriety:number
+  vaultCash: number
+  vaultCargo: Record<string, number>
   contraband: Record<string, number>
 }
 
@@ -66,10 +76,10 @@ function defaultSave(): SaveData {
     deliveries: 0,
     earned: 0,
     won: false,
-    masks: ['none', 'rooster', 'pig'],
-    mask: 'rooster',
+    masks: ['balaclava'],
+    mask: 'balaclava',
     cam: 'chase',
-    contraband: {},
+    contraband: {}, coldOpenDone:false, hull:100,heat:0,notoriety:0,vaultCash: 0, vaultCargo: {},
   }
 }
 
@@ -119,14 +129,21 @@ class Heap {
 }
 
 export class Game {
+  multiplayer: Multiplayer | null = null
+  ownership = new OwnershipClient()
+  particles=new ParticlePool()
+  private fueling:{x:number;z:number;litres:number;limit:number}|null=null
+  private slicks:{x:number;z:number;life:number}[]=[]
+  campaign:Campaign|null=null
+  private introMessage=0
+  run = new RunState()
+  private garageNode = 0
+  private collisionCooldown = 0
   save = loadSave()
   world: World | null = null
   traffic: TrafficSystem | null = null
-  combat: CombatSystem | null = null
   dealers: DealerSystem | null = null
   player: Player
-  character: Character
-  onFoot = false
   juice = 0
   scene: THREE.Scene
   paused = true
@@ -145,7 +162,6 @@ export class Game {
   private arrow: THREE.Mesh
   private minimapBase: HTMLCanvasElement | null = null
   private mmScale = 0.2
-  private pityTimer = 0
   private toastTimer = 0
   private thumbs = new Map<string, string>()
   private streamTimer = 0
@@ -156,20 +172,22 @@ export class Game {
 
   constructor(scene: THREE.Scene) {
     this.scene = scene
+    scene.add(this.particles.mesh)
+    this.save.mask = validMask(this.save.mask)
+    this.save.masks = [...new Set(["balaclava", ...this.save.masks.map(validMask)])]
     this.player = new Player(vehicleById(this.save.current), this.save.mask)
+    this.run.hull=this.save.hull;this.run.heat=this.save.heat;this.run.notoriety=this.save.notoriety
     this.juice = this.player.spec.tank
     scene.add(this.player.mesh)
-    this.character = new Character(this.save.mask)
-    scene.add(this.character.mesh)
 
     this.beacon = new THREE.Group()
     const beam = new THREE.Mesh(
       new THREE.CylinderGeometry(3, 3, 400, 16, 1, true),
-      new THREE.MeshBasicMaterial({ color: 0xffe14d, transparent: true, opacity: 0.18, depthWrite: false, side: THREE.DoubleSide }),
+      new THREE.MeshBasicMaterial({ color: 0xff9d00, transparent: true, opacity: 0.18, depthWrite: false, side: THREE.DoubleSide }),
     )
     beam.position.y = 200
     beam.name = 'beam'
-    const ring = new THREE.Mesh(new THREE.TorusGeometry(10, 0.5, 8, 48), new THREE.MeshBasicMaterial({ color: 0xffe14d }))
+    const ring = new THREE.Mesh(new THREE.TorusGeometry(10, 0.5, 8, 48), new THREE.MeshBasicMaterial({ color: 0xff9d00 }))
     ring.rotation.x = Math.PI / 2
     ring.position.y = 0.6
     ring.name = 'ring'
@@ -179,7 +197,7 @@ export class Game {
 
     this.arrow = new THREE.Mesh(
       new THREE.ConeGeometry(0.3, 1.1, 4),
-      new THREE.MeshBasicMaterial({ color: 0xffe14d }),
+      new THREE.MeshBasicMaterial({ color: 0xff9d00 }),
     )
     this.arrow.geometry.rotateX(Math.PI / 2)
     this.arrow.visible = false
@@ -187,11 +205,11 @@ export class Game {
   }
 
   get actor() {
-    return this.onFoot ? this.character.pos : this.player.pos
+    return this.player.pos
   }
 
   get actorHeading() {
-    return this.onFoot ? this.character.heading : this.player.heading
+    return this.player.heading
   }
 
   get hasSave() {
@@ -199,6 +217,7 @@ export class Game {
   }
 
   persist() {
+    this.save.hull=this.run.hull;this.save.heat=this.run.heat;this.save.notoriety=this.run.notoriety
     localStorage.setItem(SAVE_KEY, JSON.stringify(this.save))
   }
 
@@ -223,6 +242,7 @@ export class Game {
 
   async warp(name: string, lat: number, lon: number) {
     if (this.loading) return
+    this.settleFuel(false)
     this.loading = true
     this.paused = true
     const overlay = $('loading')
@@ -266,16 +286,13 @@ export class Game {
     $('loading-status').textContent = `Extruding ${city.buildings.length.toLocaleString()} towers…`
     await new Promise((r) => setTimeout(r, 30))
 
+    if(this.campaign){this.scene.remove(this.campaign.boss);this.campaign.dispose();this.campaign=null}
+    if(this.multiplayer){this.scene.remove(this.multiplayer.group);this.multiplayer.dispose();this.multiplayer=null}
     if (this.world) {
       if (this.traffic) {
         this.scene.remove(this.traffic.group)
         this.traffic.dispose()
         this.traffic = null
-      }
-      if (this.combat) {
-        this.scene.remove(this.combat.group)
-        this.combat.dispose()
-        this.combat = null
       }
       if (this.dealers) {
         this.scene.remove(this.dealers.group)
@@ -287,10 +304,10 @@ export class Game {
     }
     this.world = new World(city)
     this.scene.add(this.world.group)
+    if(!city.procedural){this.multiplayer=new Multiplayer(city);this.scene.add(this.multiplayer.group)}
+    void this.syncOwnership()
     this.traffic = new TrafficSystem(this.world)
     this.scene.add(this.traffic.group)
-    this.combat = new CombatSystem(this.world)
-    this.scene.add(this.combat.group)
     this.dealers = new DealerSystem(this.world)
     this.scene.add(this.dealers.group)
     this.marketEpoch = this.dealers.epoch
@@ -298,9 +315,10 @@ export class Game {
 
     const main = city.nodes.map((n, i) => ({ n, i })).filter(({ n }) => n.main && n.adj.length > 0)
     main.sort((a, b) => Math.hypot(a.n.x, a.n.z) - Math.hypot(b.n.x, b.n.z))
-    const pumps = this.world.pumps
-    const spawn = main.find(({ n }) => pumps.every((p) => Math.hypot(p.x - n.x, p.z - n.z) > 40)) ?? main[0]
-    this.player.placeAtNode(this.world, spawn?.i ?? 0)
+    this.garageNode = main[0]?.i ?? 0
+    this.player.placeAtNode(this.world, this.garageNode)
+    this.campaign=new Campaign(this.world);this.scene.add(this.campaign.boss)
+    if(!this.save.coldOpenDone){this.campaign.coldOpen(this.player);this.introMessage=2;this.save.coldOpenDone=true}
     this.juice = Math.max(this.juice, this.player.spec.tank * 0.6)
     this.active = null
     this.waypoint = null
@@ -311,6 +329,8 @@ export class Game {
     this.persist()
 
     overlay.classList.remove('show')
+    this.maskThumbs()
+    $<HTMLImageElement>('mask-portrait').src=this.thumbs.get(this.save.mask)!
     $('hud').classList.add('show')
     $('city-name').textContent = city.name
     $('city-tag').textContent = city.procedural ? 'SIM GRID' : `OSM · ${streamerFor(city)?.tileCount ?? 0} SECTORS`
@@ -343,12 +363,15 @@ export class Game {
     const spec = this.player.spec
     this.offers = []
     for (let k = 0; k < 4; k++) {
-      const type = k === 3 || Math.random() < 0.18 ? CONTRACT_TYPES[2] : Math.random() < 0.35 ? CONTRACT_TYPES[1] : CONTRACT_TYPES[0]
-      const src = near.length ? near : pool
+      let type = k === 3 || Math.random() < 0.18 ? CONTRACT_TYPES[2] : Math.random() < 0.35 ? CONTRACT_TYPES[1] : CONTRACT_TYPES[0]
+      const safePool = type.id === 'cyanade' ? pool.filter(i=>w.eligibleAt(w.city.nodes[i].x,w.city.nodes[i].z)) : pool
+      if(type.id === 'cyanade' && safePool.length<2) continue
+      const safeNear = near.filter(i=>safePool.includes(i))
+      const src = safeNear.length ? safeNear : safePool
       const from = src[Math.floor(Math.random() * src.length)]
       let to = from, dist = 0
       for (let tries = 0; tries < 40; tries++) {
-        const cand = pool[Math.floor(Math.random() * pool.length)]
+        const cand = safePool[Math.floor(Math.random() * safePool.length)]
         const d = Math.hypot(w.city.nodes[cand].x - w.city.nodes[from].x, w.city.nodes[cand].z - w.city.nodes[from].z)
         if (d > 350 && d < 1300) { to = cand; dist = d; break }
         if (d > dist) { to = cand; dist = d }
@@ -417,7 +440,7 @@ export class Game {
         this.toast(`Package secured. ${c.time}s on the clock.`, 'info')
       } else {
         const late = c.remaining < 0
-        const pay = Math.round(late ? c.pay * 0.4 : c.pay + Math.max(0, c.remaining) * c.pay * 0.004)
+        const pay = Math.round(late ? c.pay * 0.4 : c.pay + Math.max(0, c.remaining) * c.pay * 0.004 * this.run.flow)
         this.earn(pay)
         this.save.deliveries++
         this.active = null
@@ -445,7 +468,7 @@ export class Game {
       })
     }
     let start = -1
-    if (this.player.mode === 'mag' && !this.onFoot) start = this.player.edgeB
+    if (this.player.mode === 'mag') start = this.player.edgeB
     else {
       let bd = Infinity
       nodes.forEach((n, i) => {
@@ -492,7 +515,7 @@ export class Game {
     const pts: THREE.Vector3[] = []
     for (const i of this.route) pts.push(new THREE.Vector3(w.city.nodes[i].x, 0.35, w.city.nodes[i].z))
     const geo = new THREE.BufferGeometry().setFromPoints(pts)
-    this.routeLine = new THREE.Line(geo, new THREE.LineBasicMaterial({ color: 0xffe14d, transparent: true, opacity: 0.9 }))
+    this.routeLine = new THREE.Line(geo, new THREE.LineBasicMaterial({ color: 0xff9d00, transparent: true, opacity: 0.9 }))
     this.scene.add(this.routeLine)
   }
 
@@ -521,18 +544,24 @@ export class Game {
     if (dist > 18) return
     const need = this.player.spec.tank - this.juice
     if (need < 0.5) { this.toast('Tank is already full.'); return }
-    const afford = Math.min(need, this.save.money / JUICE_PRICE)
-    if (afford < 1) {
-      if (this.pityTimer > 0) { this.toast('You’re broke. The attendant already helped you once, come back later.', 'bad'); return }
-      const free = this.player.spec.tank * 0.3
-      this.juice = Math.min(this.player.spec.tank, this.juice + free)
-      this.pityTimer = 90
-      this.toast('Broke? The attendant slips you a free splash of HJ-77.', 'info')
-      return
-    }
-    this.juice += afford
-    this.save.money -= afford * JUICE_PRICE
-    this.toast(`Pumped ${afford.toFixed(1)} L of HJ-77 for ${money(afford * JUICE_PRICE)}`, 'good')
+    if(this.fueling){this.settleFuel(false);return}
+    if(!this.player.parked){this.toast('Stop at the pump to refuel','info');return}
+    const pump=w.nearestPump(this.player.pos.x,this.player.pos.z).pump!
+    this.fueling={x:pump.x,z:pump.z,litres:0,limit:need}
+    this.toast('Fueling HJ-77. F to pay. Throttle to pump-and-dash.','info')
+  }
+
+  private settleFuel(theft:boolean){
+    const fuel=this.fueling;if(!fuel)return
+    this.fueling=null
+    const cost=fuel.litres*JUICE_PRICE
+    if(theft||cost>this.save.money){
+      this.run.heat=Math.min(5,this.run.heat+1)
+      this.slicks.push({x:this.player.pos.x,z:this.player.pos.z,life:12})
+      if(this.slicks.length>16)this.slicks.shift()
+      this.toast('PUMP-AND-DASH · +1 HEAT · ignited HJ-77 slick','bad')
+    }else{this.save.money-=cost;this.toast(`Paid ${money(cost)} for ${fuel.litres.toFixed(1)} L`,'good')}
+    this.persist()
   }
 
   promptAction() {
@@ -543,39 +572,8 @@ export class Game {
       this.openModal('market')
       return
     }
-    if (this.onFoot) { this.toggleVehicle(); return }
     if (w.nearestPump(this.player.pos.x, this.player.pos.z).dist <= 18) this.refuel()
     else if (this.juice <= 0) this.tow()
-  }
-
-  toggleVehicle() {
-    const w = this.world
-    if (!w || this.paused) return
-    const p = this.player, c = this.character
-    if (this.onFoot) {
-      if (c.pos.distanceTo(p.pos) > 5.5) { this.toast('Walk back to your ride to hop on', 'info'); return }
-      this.onFoot = false
-      c.mesh.visible = false
-      p.showRider(true)
-      this.routeTimer = 0
-      return
-    }
-    if (!p.parked) { this.toast('Slow down and drop low to hop off', 'bad'); return }
-    const side = p.spec.kind === 'board' ? 1.3 : 2.6
-    const rx = -Math.cos(p.heading), rz = Math.sin(p.heading)
-    let x = p.pos.x + rx * side, z = p.pos.z + rz * side
-    if (w.hitBuilding(x, z, 0.5) >= 0) { x = p.pos.x - rx * side; z = p.pos.z - rz * side }
-    p.speed = 0
-    p.vel.set(0, 0)
-    c.pos.set(x, w.groundHeightAt(x, z, p.pos.y), z)
-    c.vel.set(0, 0)
-    c.heading = p.heading
-    c.mesh.visible = true
-    c.update(0, { moveX: 0, moveY: 0, sprint: false, jump: false }, w, p.heading)
-    p.showRider(false)
-    this.onFoot = true
-    this.routeTimer = 0
-    this.toast(`On foot. ${isTouch() ? 'Stick to run, JUMP to leap' : 'WASD to run, Space to jump, X to hop back on'}`, 'info')
   }
 
   cycleCamera() {
@@ -642,15 +640,52 @@ export class Game {
     this.toast(`Night Market waypoint: ${dealer.name}`, 'info')
   }
 
-  fireWeapon() {
-    if (this.paused || !this.world || this.juice <= 0) return
-    if (this.combat?.fire(this.actor, this.actorHeading, this.onFoot)) {
-      this.juice = Math.max(0, this.juice - (this.onFoot ? 0.025 : 0.06))
+  overclock() {
+    if(this.paused || !(this.save.contraband.cyanade>0)) {this.toast('Carry one Cyan-ade to overclock', 'info');return}
+    if(!this.run.burn()) {this.toast('Overclock unavailable: hull or coils depleted','bad');return}
+    this.save.contraband.cyanade--;this.persist()
+    this.toast('OVERCLOCK · 300 km/h · 15 seconds · −25 hull','info')
+  }
+
+  get gang(){return this.save.mask==='liar'?'LIARS':this.save.mask==='oni'?'HYENAS':this.save.mask==='jester'?'JESTERS':'SHINOBI'}
+  get netWorth(){return this.save.money+this.save.vaultCash+this.save.owned.reduce((sum,id)=>sum+vehicleById(id).price,0)+this.save.holdings.reduce((sum,h)=>sum+h.income/0.012,0)}
+  challenge(){
+    if(!this.world||!this.campaign)return
+    const tallest=this.world.city.buildings.reduce((a,b)=>a.height>b.height?a:b)
+    if(this.netWorth<10000000||!this.save.holdings.some(h=>h.id===tallest.id)){this.toast('Pink slip locked: $10M net worth and the tallest building required','info');return}
+    if(!this.campaign.challenge(this.player)){this.toast('No contiguous highway circuit loaded. Explore more sectors.','info');return}
+    this.closeModal();this.toast('SCANNER CHALLENGE · three laps · winner takes the Hoverghini','info')
+  }
+
+  private bust() {
+    if(!this.world)return
+    this.save.contraband={}; this.active=null
+    this.save.money=Math.max(0,this.save.money-250)
+    this.player.placeAtNode(this.world,this.garageNode)
+    this.juice=Math.max(this.juice,this.player.spec.tank*0.25)
+    this.run.repair();this.persist()
+    this.toast('IMPOUNDED · cargo confiscated · $250 fee · stash untouched','bad')
+  }
+
+  stash(withdraw=false) {
+    if(!this.world || !this.player.parked)return
+    const p=this.player.pos,n=this.world.city.nodes[this.garageNode]
+    const owned=this.save.holdings.some(h=>{const b=this.world!.city.buildings.find(b=>b.id===h.id);return b&&Math.hypot(p.x-b.cx,p.z-b.cz)<40})
+    if(!owned&&Math.hypot(p.x-n.x,p.z-n.z)>15){this.toast('Return to your garage or an owned property','info');return}
+    if(withdraw){
+      this.save.money+=this.save.vaultCash;this.save.vaultCash=0
+      let room=this.cargoCapacity-this.cargoUsed
+      for(const [id,q] of Object.entries(this.save.vaultCargo)){const take=Math.min(room,q);this.save.contraband[id]=(this.save.contraband[id]??0)+take;this.save.vaultCargo[id]-=take;room-=take}
+      this.persist();this.toast('Vault withdrawal complete. Excess cargo stays banked.','good');return
     }
+    this.save.vaultCash+=this.save.money;this.save.money=0
+    for(const [id,q] of Object.entries(this.save.contraband)) this.save.vaultCargo[id]=(this.save.vaultCargo[id]??0)+q
+    this.save.contraband={};this.run.heat=0;this.persist();this.toast('Cash and cargo banked in your stash vault','good')
   }
 
   toggleMap(force?: boolean) {
     if (!this.world) return
+    if(this.world.isTunnel(this.actor.x,this.actor.z,this.actor.y)){this.toast('GPS unavailable inside tunnel','info');return}
     this.mapOpen = force ?? !this.mapOpen
     $('map-overlay').classList.toggle('show', this.mapOpen)
     this.paused = this.mapOpen
@@ -679,8 +714,8 @@ export class Game {
       )
       if (delta && this.world === w) {
         w.appendMap(delta)
+        void this.syncOwnership()
         this.traffic?.ensurePopulation()
-        this.combat?.ensurePopulation()
         this.buildMinimap()
         $('city-tag').textContent = `OSM · ${streamer.tileCount} SECTORS`
         if (this.mapOpen) this.drawFullMap()
@@ -706,8 +741,9 @@ export class Game {
     if (!this.save.masks.includes(id)) return
     this.save.mask = id
     this.player.setMask(id)
-    this.character.setMask(id)
     this.persist()
+    this.maskThumbs()
+    $<HTMLImageElement>('mask-portrait').src=this.thumbs.get(id)!
     this.openModal('masks')
   }
 
@@ -738,7 +774,7 @@ export class Game {
 
   tow() {
     const w = this.world
-    if (!w || this.paused || this.onFoot) return
+    if (!w || this.paused) return
     const fee = Math.round(30 * this.player.spec.payMult)
     const { pump } = w.nearestPump(this.player.pos.x, this.player.pos.z)
     if (!pump) return
@@ -750,12 +786,9 @@ export class Game {
   toggleMode() {
     const w = this.world
     if (!w || this.paused) return
-    if (this.onFoot) { this.toast('Hop back on your ride first', 'info'); return }
     if (this.player.mode === 'mag') {
       const sling = this.player.unsnap()
       this.toast(sling ? 'SLINGSHOT! Launched off the conduit into FREE HOVER' : `FREE HOVER: inertia drifting, ${isTouch() ? 'BOOST' : 'Shift'} to hyper-boost`, sling ? 'good' : 'info')
-    } else if (this.player.pos.y > 12) {
-      this.toast('Drop below 12 m to Mag-Lock onto a conduit', 'bad')
     } else if (this.player.snap(w)) {
       this.toast(`MAG-LOCK engaged: conduit riding, ${isTouch() ? '◀ ▶' : 'A/D'} picks the branch`, 'info')
     } else {
@@ -767,6 +800,7 @@ export class Game {
   // ---------- garage & real estate ----------
 
   buyVehicle(id: string) {
+    if(id==='hoverghini'){this.challenge();return}
     const v = vehicleById(id)
     if (this.save.owned.includes(id) || this.save.money < v.price) return
     this.save.money -= v.price
@@ -800,7 +834,7 @@ export class Game {
     const w = this.world
     if (!w) return
     const l = w.city.landmarks.find((x) => x.id === id)
-    if (!l || this.save.holdings.some((h) => h.id === id) || this.save.money < l.price) return
+    if (!l || this.ownership.ownership.has(id) || !w.city.buildings[l.building].eligible || this.save.holdings.some((h) => h.id === id) || this.save.money < l.price) return
     this.save.money -= l.price
     this.save.holdings.push({ id, name: l.name, city: w.city.name, cityKey: w.city.key, building: l.building, income: l.income })
     this.refreshOwned()
@@ -824,10 +858,19 @@ export class Game {
     return this.save.holdings.reduce((s, h) => s + h.income, 0)
   }
 
+  private ownershipBusy=false
+  private async syncOwnership(){
+    const w=this.world;if(!w||w.city.procedural||this.ownershipBusy)return
+    this.ownershipBusy=true
+    try{await this.ownership.load(w.city.buildings.map(b=>b.tile).filter((t):t is string=>Boolean(t)));if(this.world===w)this.refreshOwned()}
+    finally{this.ownershipBusy=false}
+  }
   private refreshOwned() {
     const w = this.world
     if (!w) return
-    w.setOwned(this.save.holdings.filter((h) => h.cityKey === w.city.key).map((h) => h.building))
+    const claims=this.save.holdings.map(h=>({building:w.city.buildings.findIndex(b=>b.id===h.id),gang:'SHINOBI'})).filter(c=>c.building>=0)
+    for(const row of this.ownership.ownership.values()){const building=w.city.buildings.findIndex(b=>b.id===row.buildingId);if(building>=0)claims.push({building,gang:row.gang})}
+    w.setTurf(claims)
   }
 
   // ---------- modals ----------
@@ -883,6 +926,9 @@ export class Game {
       }
       case 'view': this.openModal(arg); break
       case 'close': this.closeModal(); break
+      case 'challenge': this.challenge(); break
+      case 'stash': this.stash(); break
+      case 'withdraw': this.stash(true); break
       case 'buy-mask': this.buyMask(arg); break
       case 'equip-mask': this.equipMask(arg); break
       case 'buy-good': {
@@ -1007,7 +1053,7 @@ export class Game {
           ${cargo}<div class="market-table">${rows}</div>`
       }
       case 'garage': {
-        const max = { speed: 95, tank: 120, pay: 15, alt: 320 }
+        const max = { speed: 95, tank: 120, pay: 15 }
         const bar = (v: number, m: number) => `<div class="bar"><i style="width:${Math.min(100, (v / m) * 100)}%"></i></div>`
         const cards = VEHICLES.map((v) => {
           const owned = s.owned.includes(v.id)
@@ -1017,7 +1063,7 @@ export class Game {
             ? '<button class="btn" disabled>Riding</button>'
             : owned
               ? `<button class="btn" data-act="select-vehicle" data-arg="${v.id}">Ride this</button>`
-              : `<button class="btn ${afford ? 'buy' : ''}" data-act="buy-vehicle" data-arg="${v.id}" ${afford ? '' : 'disabled'}>Buy ${money(v.price)}</button>`
+              : v.id==='hoverghini' ? '<button class="btn" data-act="challenge">Pink-slip challenge</button>' : `<button class="btn ${afford ? 'buy' : ''}" data-act="buy-vehicle" data-arg="${v.id}" ${afford ? '' : 'disabled'}>Buy ${money(v.price)}</button>`
           return `<div class="card vehicle ${current ? 'current' : ''} ${v.id === 'hoverghini' ? 'goal' : ''}">
             <div class="swatch" style="--c:#${v.body.toString(16).padStart(6, '0')};--g:#${v.glow.toString(16).padStart(6, '0')}"></div>
             <h3>${v.name}</h3><p class="muted">${v.tagline}</p>
@@ -1025,11 +1071,10 @@ export class Game {
               <label>Top speed <span>${Math.round(v.maxSpeed * 3.6)} km/h</span></label>${bar(v.maxSpeed, max.speed)}
               <label>HJ-77 tank <span>${v.tank} L</span></label>${bar(v.tank, max.tank)}
               <label>Cargo pay <span>×${v.payMult}</span></label>${bar(v.payMult, max.pay)}
-              <label>Max altitude <span>${v.maxAlt} m</span></label>${bar(v.maxAlt, max.alt)}
               <label>Evaporation <span>${v.evap.toFixed(3)} L/s</span></label>
             </div>${btn}</div>`
         }).join('')
-        return `<h2>Garage</h2><p class="muted">From gutter deck to Hoverghini. Bigger rides unlock richer cargo classes, but drink more HJ-77.</p>
+        return `<h2>Garage</h2><p>Net worth ${money(this.netWorth)} · Notoriety ${this.run.notoriety} · Vault ${money(s.vaultCash)}</p><div class="row"><button class="btn" data-act="stash">Bank cash & cargo (B)</button><button class="btn" data-act="withdraw">Withdraw (U)</button></div><p class="muted">From gutter deck to Hoverghini. Bigger rides unlock richer cargo classes, but drink more HJ-77.</p>
           <div class="row test-funds"><span class="muted small">Playtesting?</span><button class="btn buy" data-act="cheat">+$5,000,000 test funds</button></div>
           <div class="grid">${cards}</div>`
       }
@@ -1048,7 +1093,7 @@ export class Game {
             <img src="${this.thumbs.get(m.id)}" alt="${m.name} mask" width="96" height="96" />
             <h3>${m.name}</h3><p class="muted small">${m.blurb}</p>${btn}</div>`
         }).join('')
-        return `<h2>Masks</h2><p class="muted">Every courier needs a face for the job. Your mask shows on the board and when you're on foot.</p>
+        return `<h2>Masks</h2><p class="muted">Every courier needs a face for the job. Your mask stays visible on your ride.</p>
           <div class="grid masks">${cards}</div>`
       }
       case 'holdings': {
@@ -1077,7 +1122,7 @@ export class Game {
       }
       case 'warp':
         return `<h2>${this.world ? 'Warp Gate' : 'Choose your city'}</h2>
-          <p class="muted">Any real city on Earth, rebuilt as neon from OpenStreetMap data. Your cash, garage and portfolio travel with you.</p>
+          <p class="muted">Any real city on Earth, rebuilt in industrial noir from OpenStreetMap data. Your cash, garage and portfolio travel with you.</p>
           <form id="search-form" class="search"><input name="q" placeholder="Search any city or neighbourhood…" autocomplete="off" /><button class="btn">Search</button></form>
           <div id="search-results" class="cities"></div>
           <h3 class="sub">Hot zones</h3>
@@ -1091,10 +1136,8 @@ export class Game {
               <li><kbd>E</kbd> Toggle Mag-Lock / Free Hover</li>
               <li><kbd>Shift</kbd> Hyper-boost (Free Hover only, burns HJ-77 fast)</li>
               <li><kbd>Shift</kbd> Boost works in Mag-Lock too; <kbd>Space</kbd> hops off the conduit</li>
-              <li><kbd>Space</kbd>/<kbd>C</kbd> Climb and descend (Free Hover; ceiling depends on vehicle)</li>
-              <li><kbd>X</kbd> Hop off / on your ride. On foot: <kbd>WASD</kbd> run, <kbd>Shift</kbd> sprint, <kbd>Space</kbd> jump</li>
               <li><kbd>V</kbd> Switch chase / top-down camera</li>
-              <li><kbd>Q</kbd> Fire plasma weapon (works on foot or from your ride)</li>
+              <li><kbd>B</kbd>/<kbd>U</kbd> Bank / withdraw at a garage or owned property</li><li><kbd>Q</kbd> Burn one Cyan-ade: 15 seconds at 300 km/h, costs 25 hull</li>
             </ul></div>
             <div><h3>Business</h3><ul class="plain keys">
               <li><kbd>J</kbd> Contract board</li><li><kbd>N</kbd> Night Market map</li><li><kbd>R</kbd> Trade with a nearby dealer</li>
@@ -1105,8 +1148,8 @@ export class Game {
             HJ-77 is also the precursor to the street drug Cyan-ade. Precursor contracts pay big, but the leaking canisters double your evaporation.</p></div>
             <div><h3>Night Market</h3><p class="muted">Six dealers hide around every city. Buy contraband where it is cheap and move it where bids are high. Quotes refresh every 150 seconds; supply shocks and street gluts can make or erase a fortune. Cargo capacity depends on your current ride.</p></div>
             <div><h3>Touch controls</h3><p class="muted">◀ ▶ steer (or choose the junction branch), <b>GO</b> thrusts, <b>BRK</b> brakes and reverses.
-            Tap the <b>MAG-LOCK</b> badge to switch modes; <b>BOOST</b> and ▲ ▼ altitude appear in Free Hover. Tap the fuel prompt at a pump to refuel.</p></div>
-            <div><h3>Flight modes</h3><p class="muted"><b>Mag-Lock</b> snaps you to street conduits on an elastic tether: steer to swing across the lane, corners fling you wide, and leaving the conduit at speed slingshots you into Free Hover. <b>Free Hover</b> unlocks drifting, boosting and altitude, but towers are solid.</p></div>
+            Tap the <b>MAG-LOCK</b> badge to switch modes; <b>BOOST</b> burns extra HJ-77. Tap the fuel prompt at a pump to refuel.</p></div>
+            <div><h3>Drive modes</h3><p class="muted"><b>Mag-Lock</b> snaps you between three rail lanes. Tap A/D to slide; hold to select a junction branch. Fast corners and hard collisions break lock. <b>Free Hover</b> carries your momentum across the road plane. Water breaks rail cohesion.</p></div>
           </div>
           <div class="row test-funds"><span class="muted small">Playtesting?</span><button class="btn buy" data-act="cheat">+$5,000,000 test funds</button></div>
           <div class="row"><span class="muted">${s.deliveries} deliveries · ${money(s.earned)} earned lifetime</span><button class="btn danger ghost" data-act="reset">Reset save</button></div>`
@@ -1128,9 +1171,9 @@ export class Game {
     c.width = c.height = size
     const g = c.getContext('2d')!
     const o = size / 2
-    g.fillStyle = '#07071a'
+    g.fillStyle = '#08090c'
     g.fillRect(0, 0, size, size)
-    g.fillStyle = '#1b1640'
+    g.fillStyle = '#343b44'
     for (const b of w.city.buildings) {
       g.beginPath()
       b.poly.forEach(([x, z], i) => (i ? g.lineTo(o + x * this.mmScale, o + z * this.mmScale) : g.moveTo(o + x * this.mmScale, o + z * this.mmScale)))
@@ -1138,7 +1181,7 @@ export class Game {
     }
     g.lineCap = 'round'
     for (const r of w.city.roads) {
-      g.strokeStyle = r.major ? '#ff2bd6' : '#1fb8c9'
+      g.strokeStyle = r.major ? '#a57738' : '#435057'
       g.lineWidth = Math.max(1, r.width * this.mmScale * 0.8)
       g.beginPath()
       r.pts.forEach(([x, z], i) => (i ? g.lineTo(o + x * this.mmScale, o + z * this.mmScale) : g.moveTo(o + x * this.mmScale, o + z * this.mmScale)))
@@ -1173,7 +1216,7 @@ export class Game {
     const fit = Math.min(cv.width, cv.height) / base.width
     const scale = fit * this.mapZoom
     const px = o + this.actor.x * this.mmScale, pz = o + this.actor.z * this.mmScale
-    g.fillStyle = '#05030d'
+    g.fillStyle = '#08090c'
     g.fillRect(0, 0, cv.width, cv.height)
     g.save()
     g.translate(cv.width / 2, cv.height / 2)
@@ -1183,9 +1226,9 @@ export class Game {
     for (const p of w.pumps) this.mapDot(g, p.x, p.z, '#19ffe6', 6 / scale)
     for (const dealer of this.dealers?.dealers ?? []) this.mapDot(g, dealer.x, dealer.z, `#${dealer.color.toString(16).padStart(6, '0')}`, 7 / scale)
     const t = this.target()
-    if (t) this.mapDot(g, t.x, t.z, '#ffe14d', 9 / scale)
+    if (t) this.mapDot(g, t.x, t.z, '#ff9d00', 9 / scale)
     if (this.route.length > 1) {
-      g.strokeStyle = '#ffe14d'
+      g.strokeStyle = '#ff9d00'
       g.lineWidth = 4 / scale
       g.beginPath()
       this.route.forEach((i, n) => {
@@ -1226,11 +1269,11 @@ export class Game {
       g.arc((x - px) * this.mmScale, (z - pz) * this.mmScale, r / zoom * dpr, 0, Math.PI * 2)
       g.fill()
     }
-    for (const h of this.save.holdings) if (h.cityKey === w.city.key) { const b = w.city.buildings[h.building]; if (b) dot(b.cx, b.cz, '#ffc400', 3) }
+    for (const h of this.save.holdings) if (h.cityKey === w.city.key) { const b = w.city.buildings.find(b=>b.id===h.id); if (b) dot(b.cx, b.cz, '#ff9d00', 3) }
     for (const p of w.pumps) dot(p.x, p.z, '#19ffe6', 3.5)
     for (const dealer of this.dealers?.dealers ?? []) dot(dealer.x, dealer.z, `#${dealer.color.toString(16).padStart(6, '0')}`, 4.5)
     if (this.route.length > 1) {
-      g.strokeStyle = '#ffe14d'
+      g.strokeStyle = '#ff9d00'
       g.lineWidth = 2.5 / zoom * dpr
       g.beginPath()
       g.moveTo(0, 0)
@@ -1238,7 +1281,7 @@ export class Game {
       g.stroke()
     }
     const t = this.target()
-    if (t) dot(t.x, t.z, this.active?.stage === 'dropoff' ? '#ffe14d' : '#ff2bd6', 6)
+    if (t) dot(t.x, t.z, this.active?.stage === 'dropoff' ? '#ff9d00' : '#00f0ff', 6)
     g.restore()
     g.fillStyle = '#fff'
     g.beginPath()
@@ -1252,7 +1295,7 @@ export class Game {
 
   // ---------- frame ----------
 
-  update(dt: number, input: Input, foot: FootInput, camYaw: number) {
+  update(dt: number, input: Input) {
     const w = this.world
     if (!w) return
     if (this.toastTimer > 0) {
@@ -1261,26 +1304,47 @@ export class Game {
     }
     if (!this.paused) {
       const spec = this.player.spec
-      if (this.onFoot) {
-        this.character.update(dt, foot, w, camYaw)
-        this.player.update(dt, IDLE, w, this.juice > 0)
-      } else this.player.update(dt, input, w, this.juice > 0)
-      const leak = this.active?.stage === 'dropoff' ? this.active.type.leak : 0
+      if(this.introMessage>0){this.introMessage-=dt;if(this.introMessage<=0){this.player.heading+=0.6;this.toast('BURNER: Get off the fucking rail before you get liquefied, kid.','info')}}
+      this.campaign?.update(dt,this.player)
+      if(this.campaign?.intro || this.campaign?.racing){const boss=this.campaign.boss;this.particles.emit(boss.position.x,boss.position.y,boss.position.z)}
+      if(this.campaign?.racing&&this.campaign.target){const t=this.campaign.target;this.waypoint={x:t.x,z:t.z,label:`PINK SLIP · LAP ${this.campaign.lap+1}/3`}}
+      if(this.campaign?.result){
+        if(this.campaign.result==='win'){if(!this.save.owned.includes('hoverghini'))this.save.owned.push('hoverghini');this.save.won=true;this.persist();this.openModal('win')}
+        else this.toast('The Hoverghini keeps its pink slip. Race lost.','bad')
+        this.campaign.result=null;this.waypoint=null
+      }
+      if(this.fueling){
+        if(input.throttle>0.1||Math.hypot(this.player.pos.x-this.fueling.x,this.player.pos.z-this.fueling.z)>18)this.settleFuel(true)
+        else {const amount=Math.min(dt*4,this.fueling.limit-this.fueling.litres,this.player.spec.tank-this.juice);this.juice+=amount;this.fueling.litres+=amount;if(this.fueling.litres>=this.fueling.limit-0.01)this.settleFuel(false)}
+      }
+      const p=this.player
+      const tunnel=w.isTunnel(p.pos.x,p.pos.z,p.pos.y)
+      this.run.update(dt,this.cargoUsed+(this.active?.type.id==='cyanade'&&this.active.stage==='dropoff'?1:0),tunnel,w.gangAt(p.pos.x,p.pos.z)!==this.gang,this.save.mask==='balaclava')
+      p.overclocking=this.run.overclock>0; p.limping=this.run.limp>=0
+      this.player.update(dt, input, w, this.juice > 0)
+      this.collisionCooldown=Math.max(0,this.collisionCooldown-dt)
+      if(p.impact>3 && !this.collisionCooldown) { this.run.damage(Math.min(45,p.impact*0.65),this.save.mask==='oni'); this.collisionCooldown=0.6 }
+      if(p.apex) this.run.chain()
+      if(this.run.limp===0) this.bust()
+      const garage=w.city.nodes[this.garageNode]
+      if(p.groundSpeed<3 && Math.hypot(p.pos.x-garage.x,p.pos.z-garage.z)<12) { this.run.heat=0; if(this.run.limp>=0)this.run.repair() }
+      if(tunnel) this.route=[]
+
+      const leak = this.save.mask==='respirator' ? 0 : this.active?.stage === 'dropoff' ? this.active.type.leak : 0
       const magEff = this.player.mode === 'mag' ? 0.7 : 1
-      this.juice -= (spec.evap * (1 + leak) + spec.burn * this.player.lastBurn * magEff) * dt
+      this.juice -= (spec.evap * (1 + leak) / this.run.flow + spec.burn * this.player.lastBurn * magEff) * dt
       if (this.juice <= 0 && this.juice + dt * spec.evap > 0) this.toast(`HJ-77 depleted! Crawl to a pump or ${isTouch() ? 'tap the prompt' : 'press T'} for a tow.`, 'bad')
       this.juice = Math.max(0, this.juice)
       this.updateContract(dt)
       this.offerTimer -= dt
       if (this.offerTimer <= 0 && !this.active) this.generateOffers()
-      this.pityTimer = Math.max(0, this.pityTimer - dt)
       this.incomeTimer += dt
       if (this.incomeTimer >= 1) {
         this.earn((this.incomePerMin / 60) * this.incomeTimer)
         this.incomeTimer = 0
       }
       this.saveTimer += dt
-      if (this.saveTimer > 10) { this.persist(); this.saveTimer = 0 }
+      if (this.saveTimer > 10) { this.persist(); void this.syncOwnership(); this.saveTimer = 0 }
       if (this.waypoint && Math.hypot(this.waypoint.x - this.actor.x, this.waypoint.z - this.actor.z) < 40) {
         this.toast(`Arrived at ${this.waypoint.label}`, 'good')
         this.waypoint = null
@@ -1297,21 +1361,21 @@ export class Game {
         void this.streamMap()
       }
     }
-    w.update(dt)
+    this.multiplayer?.update(dt,this.player)
+    w.update(this.paused?0:dt)
     this.dealers?.update(dt)
-    this.traffic?.update(dt, this.actor)
-    this.combat?.update(
-      this.paused ? 0 : dt,
-      this.actor,
-      (amount) => {
-        this.earn(amount)
-        this.toast(`Gang drone neutralized · +${money(amount)}`, 'good')
-      },
-      () => {
-        this.juice = Math.max(0, this.juice - 2.5)
-        this.toast('Hostile plasma hit · HJ-77 containment damaged', 'bad')
-      },
-    )
+    const traffic=this.traffic?.update(this.paused?0:dt,this.actor,this.player.groundSpeed,this.run.heat)
+    if(!this.paused&&traffic){
+      if(traffic.impact>0){this.run.damage(Math.min(30,traffic.impact*0.5),this.save.mask==='oni');if(this.player.mode==='mag')this.player.unsnap()}
+      for(let i=0;i<traffic.nearMisses;i++)this.run.chain()
+      if(traffic.boxed&&this.run.limp<0){this.run.limp=15;this.toast('BOXED IN · 15 seconds reserve power','bad')}
+    }
+    if(!this.paused){
+      if(this.player.boosting)this.particles.emit(this.actor.x-Math.sin(this.player.heading)*2,this.actor.y,this.actor.z-Math.cos(this.player.heading)*2)
+      for(const slick of this.slicks){slick.life-=dt;this.particles.emit(slick.x+(Math.random()-0.5)*5,0.4,slick.z+(Math.random()-0.5)*5);if(Math.hypot(this.actor.x-slick.x,this.actor.z-slick.z)<3)this.run.hull=Math.max(0,this.run.hull-dt*2)}
+      this.slicks=this.slicks.filter(s=>s.life>0)
+      this.particles.update(dt)
+    }
     if (this.dealers && this.marketEpoch !== this.dealers.epoch) {
       this.marketEpoch = this.dealers.epoch
       if ($('modal').dataset.view === 'market') this.openModal('market')
@@ -1327,14 +1391,14 @@ export class Game {
     this.beacon.visible = !!t
     this.arrow.visible = !!t
     if (!t) return
-    const color = this.active ? (this.active.stage === 'pickup' ? 0xff2bd6 : 0xffe14d) : 0x19ffe6
+    const color = this.active ? (this.active.stage === 'pickup' ? 0x00f0ff : 0xff9d00) : 0x19ffe6
     this.beacon.position.set(t.x, 0, t.z)
     this.beacon.children.forEach((c) => ((c as THREE.Mesh).material as THREE.MeshBasicMaterial).color.setHex(color))
     this.beacon.getObjectByName('ring')!.rotation.z += dt
     ;(this.arrow.material as THREE.MeshBasicMaterial).color.setHex(color)
     const p = this.actor
     const ang = Math.atan2(t.x - p.x, t.z - p.z)
-    const y = p.y + (this.onFoot || this.player.spec.kind === 'board' ? 2.6 : 3.2)
+    const y = p.y + (this.player.spec.kind === 'board' ? 2.6 : 3.2)
     this.arrow.position.set(p.x + Math.sin(ang) * 3, y, p.z + Math.cos(ang) * 3)
     this.arrow.lookAt(t.x, y, t.z)
   }
@@ -1344,15 +1408,19 @@ export class Game {
     const p = this.player
     $('money').textContent = money(s.money)
     $('income').textContent = this.incomePerMin ? `+${money(this.incomePerMin)}/min passive` : 'No properties yet'
-    $('vehicle-name').textContent = p.spec.name
-    $('combat-status').textContent = this.combat ? `${this.combat.remaining} HOSTILES` : ''
-    const foot = this.onFoot
-    $('speed').textContent = String(Math.round((foot ? this.character.speed : p.groundSpeed) * 3.6))
-    $('alt').textContent = `${Math.round(this.actor.y)} m`
+    $('vehicle-name').textContent = `${p.spec.name} · ${this.gang}`
+    $('network-status').textContent=this.multiplayer?.status ?? 'LOCAL SAVE'
+    const venue=this.world!.city.venues.filter(v=>Math.hypot(v.x-p.pos.x,v.z-p.pos.z)<40).sort((a,b)=>Math.hypot(a.x-p.pos.x,a.z-p.pos.z)-Math.hypot(b.x-p.pos.x,b.z-p.pos.z))[0]
+    $('venue-label').textContent=venue?.name??''
+    const tunnel=this.world!.isTunnel(p.pos.x,p.pos.z,p.pos.y)
+    $('minimap').style.visibility=tunnel?'hidden':'visible'
+    $('alt').textContent=tunnel?'GPS LOST':`${Math.round(p.pos.y)} m`
+    $('combat-status').textContent = `HULL ${Math.ceil(this.run.hull)}% · HEAT ${this.run.heat.toFixed(1)} · +FLOW ${this.run.flow.toFixed(2)}×${this.run.limp>=0 ? ' · LIMP '+Math.ceil(this.run.limp)+'s' : ''}`
+    $('speed').textContent = String(Math.round(p.groundSpeed * 3.6))
     const mode = $('mode')
-    setHtml(mode, foot ? 'ON FOOT' : p.mode === 'mag' ? 'MAG-LOCK' : 'FREE HOVER')
-    mode.className = `mode ${foot ? 'foot' : p.mode}`
-    $('hud').dataset.mode = foot ? 'foot' : p.mode
+    setHtml(mode, p.mode === 'mag' ? 'MAG-LOCK' : 'FREE HOVER')
+    mode.className = `mode ${p.mode}`
+    $('hud').dataset.mode = p.mode
     const touch = isTouch()
     const pct = this.juice / p.spec.tank
     const fill = $('juice-fill')
@@ -1362,7 +1430,7 @@ export class Game {
     $('boost').classList.toggle('on', p.boosting)
 
     const turn = $('turn')
-    if (p.mode === 'mag' && !foot) {
+    if (p.mode === 'mag') {
       const nt = p.nextTurn(this.world!)
       const hint = this.routeHint()
       const arrows = ['⮕', '⬆', '⬅']
@@ -1394,17 +1462,13 @@ export class Game {
 
     const { dist } = this.world!.nearestPump(p.pos.x, p.pos.z)
     const prompt = $('prompt')
-    const nearRide = foot && this.character.pos.distanceTo(p.pos) < 5.5
     const market = this.dealers?.nearest(this.actor.x, this.actor.z)
     if (market?.dealer && market.dist < 22 && !this.paused) {
       setHtml(prompt, `${touch ? 'Tap to trade' : '<kbd>R</kbd> Trade'} with ${esc(market.dealer.name)}`)
       prompt.classList.add('show')
-    } else if (foot) {
-      setHtml(prompt, nearRide ? `${touch ? 'Tap to hop on' : '<kbd>X</kbd> Hop on'} your ${p.spec.name}` : '')
-      prompt.classList.toggle('show', nearRide && !this.paused)
     } else if (dist < 18 && !this.paused) {
       const need = p.spec.tank - this.juice
-      setHtml(prompt, need > 0.5 ? `${touch ? '⛽ Tap to refuel' : '<kbd>F</kbd> Refuel'} ${need.toFixed(0)} L · ${money(need * JUICE_PRICE)}` : 'Tank full')
+      setHtml(prompt, this.fueling ? `Fueling ${this.fueling.litres.toFixed(1)} L · F to pay / throttle to steal` : need > 0.5 ? `${touch ? '⛽ Tap to refuel' : '<kbd>F</kbd> Refuel'} ${need.toFixed(0)} L · ${money(need * JUICE_PRICE)}` : 'Tank full')
       prompt.classList.add('show')
     } else if (this.juice <= 0 && !this.paused) {
       setHtml(prompt, `${touch ? 'Tap to call' : '<kbd>T</kbd> Call'} grav-tow (${money(30 * p.spec.payMult)})`)
@@ -1413,7 +1477,6 @@ export class Game {
   }
 }
 
-const IDLE: Input = { throttle: 0, brake: 0, steer: 0, boost: false, up: false, down: false }
 
 const isTouch = () => document.body.classList.contains('is-touch')
 

@@ -1,3 +1,6 @@
+import { crewInvite } from './spatial'
+import { CITIES } from './data'
+import { installHeightFog } from './materials'
 import './style.css'
 import * as THREE from 'three'
 import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js'
@@ -5,21 +8,21 @@ import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js'
 import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js'
 import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js'
 import { $, Game } from './game'
-import { createRetroPass, createSky, Rain } from './fx'
+import { createSky, Rain } from './fx'
 import type { Input } from './vehicle'
-import type { FootInput } from './character'
 
+installHeightFog()
 const canvas = $<HTMLCanvasElement>('scene')
-const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance' })
+const renderer = new THREE.WebGLRenderer({ canvas, stencil: true, antialias: true, powerPreference: 'high-performance' })
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.75))
 renderer.setSize(window.innerWidth, window.innerHeight)
-renderer.toneMapping = THREE.NeutralToneMapping
-renderer.toneMappingExposure = 1.05
+renderer.toneMapping = THREE.ACESFilmicToneMapping
+renderer.toneMappingExposure = 0.85
 
 const scene = new THREE.Scene()
-scene.fog = new THREE.FogExp2(0x2a0838, 0.0017)
-scene.add(new THREE.HemisphereLight(0xff7ad0, 0x00c8ff, 1.1))
-const sun = new THREE.DirectionalLight(0xffb0e0, 1.5)
+scene.fog = new THREE.FogExp2(0x1b1d2e, 0.0012)
+scene.add(new THREE.HemisphereLight(0x8c98aa, 0x12151c, 1.6))
+const sun = new THREE.DirectionalLight(0xff9d00, 1.5)
 sun.position.set(40, 80, -30)
 scene.add(sun)
 const sky = createSky()
@@ -32,23 +35,20 @@ camera.position.set(0, 30, -40)
 
 const composer = new EffectComposer(renderer)
 composer.addPass(new RenderPass(scene, camera))
-const bloom = new UnrealBloomPass(new THREE.Vector2(window.innerWidth, window.innerHeight), 0.75, 0.5, 0.45)
+const bloom = new UnrealBloomPass(new THREE.Vector2(window.innerWidth, window.innerHeight), 0.45, 0.3, 0.88)
 composer.addPass(bloom)
 composer.addPass(new OutputPass())
-const retro = createRetroPass()
-composer.addPass(retro)
 
 function resize() {
   camera.aspect = window.innerWidth / window.innerHeight
   camera.updateProjectionMatrix()
   renderer.setSize(window.innerWidth, window.innerHeight)
   composer.setSize(window.innerWidth, window.innerHeight)
-  retro.uniforms.uRes.value.set(window.innerWidth, window.innerHeight)
 }
 window.addEventListener('resize', resize)
 resize()
 
-const coarse = window.matchMedia('(pointer: coarse)')
+const coarse = window.matchMedia('(pointer: coarse), (max-width: 760px)')
 const syncTouch = () => document.body.classList.toggle('is-touch', coarse.matches || 'ontouchstart' in window)
 syncTouch()
 coarse.addEventListener('change', syncTouch)
@@ -58,7 +58,7 @@ const game = new Game(scene)
 
 // ---------- input ----------
 const keys = new Set<string>()
-const touch = { up: false, down: false, left: false, right: false, boost: false, climb: false, dive: false }
+const touch = { up: false, down: false, left: false, right: false, boost: false }
 const stick = { x: 0, y: 0, active: false }
 
 window.addEventListener('keydown', (e) => {
@@ -81,10 +81,11 @@ window.addEventListener('keydown', (e) => {
     if (k === 'e') game.toggleMode()
     if (k === 'f') game.refuel()
     if (k === 't') game.tow()
-    if (k === 'x') game.toggleVehicle()
     if (k === 'v') game.cycleCamera()
-    if (k === 'q') game.fireWeapon()
+    if (k === 'q') game.overclock()
     if (k === 'r') game.openDealer()
+    if (k === 'b') game.stash()
+    if (k === 'u') game.stash(true)
   }
   if ([' ', 'arrowup', 'arrowdown'].includes(k)) e.preventDefault()
 })
@@ -105,10 +106,9 @@ document.querySelectorAll<HTMLElement>('[data-tap]').forEach((el) =>
     const a = el.dataset.tap!
     if (a === 'mode') game.toggleMode()
     else if (a === 'prompt') game.promptAction()
-    else if (a === 'exit') game.toggleVehicle()
     else if (a === 'cam') game.cycleCamera()
     else if (a === 'map') game.toggleMap()
-    else if (a === 'fire') game.fireWeapon()
+    else if (a === 'overclock') game.overclock()
     else game.openModal(a)
   }),
 )
@@ -151,7 +151,7 @@ stickEl.addEventListener('pointerup', releaseStick)
 stickEl.addEventListener('pointercancel', releaseStick)
 
 let smoothSteer = 0
-function readInput(dt: number): { vehicle: Input; foot: FootInput } {
+function readInput(dt: number): Input {
   const has = (...k: string[]) => k.some((x) => keys.has(x))
   const keySteer = (has('a', 'arrowleft') || touch.left ? 1 : 0) - (has('d', 'arrowright') || touch.right ? 1 : 0)
   const free = game.player.mode === 'free'
@@ -163,20 +163,12 @@ function readInput(dt: number): { vehicle: Input; foot: FootInput } {
   const kUp = has('w', 'arrowup') || touch.up
   const kDown = has('s', 'arrowdown') || touch.down
   return {
-    vehicle: {
       throttle: Math.max(kUp ? 1 : 0, dz(sy) > 0 ? dz(sy) : 0),
       brake: Math.max(kDown ? 1 : 0, dz(sy) < -0.4 ? 1 : 0),
       steer,
       boost: has('shift') || touch.boost,
-      up: has(' ') || touch.climb,
-      down: has('c', 'control') || touch.dive,
-    },
-    foot: {
-      moveX: stick.active ? dz(sx) : (has('d', 'arrowright') ? 1 : 0) - (has('a', 'arrowleft') ? 1 : 0),
-      moveY: stick.active ? dz(sy) : (kUp ? 1 : 0) - (kDown ? 1 : 0),
-      sprint: has('shift') || touch.boost,
-      jump: has(' ') || touch.up,
-    },
+      up: has(' '),
+      down: false,
   }
 }
 
@@ -229,17 +221,16 @@ function unblock(from: THREE.Vector3, to: THREE.Vector3) {
 
 function updateCamera(dt: number) {
   const p = game.player
-  const foot = game.onFoot
   const subject = game.actor
   const top = game.save.cam === 'top'
-  const speed = foot ? game.character.speed : p.groundSpeed
+  const speed = p.groundSpeed
 
-  let targetYaw = foot ? game.character.heading : p.heading
-  if (!foot && p.mode === 'free' && p.vel.length() > 8) {
+  let targetYaw = p.heading
+  if (p.mode === 'free' && p.vel.length() > 8) {
     const va = Math.atan2(p.vel.x, p.vel.y)
     targetYaw = p.heading + Math.max(-0.35, Math.min(0.35, wrap(va - p.heading))) * 0.6
   }
-  const yawRate = top ? (foot ? 0 : 1.2) : foot ? (speed > 1 ? 1.6 : 0) : 4.5
+  const yawRate = top ? 1.2 : 4.5
   camYaw += wrap(targetYaw - camYaw) * Math.min(1, dt * yawRate)
   if (game.paused) orbit += dt * 0.15
   else orbit *= Math.pow(0.02, dt)
@@ -249,25 +240,22 @@ function updateCamera(dt: number) {
   let dist: number, height: number
   if (top) {
     dist = 7 * zoom
-    height = (foot ? 15 : kind === 'truck' ? 38 : 28) * zoom + speed * 0.25
-    dist = (foot ? 4 : 7) * zoom
-  } else if (foot) {
-    dist = 5.5 * zoom
-    height = 2.6 * zoom
+    height = (kind === 'truck' ? 38 : 28) * zoom + speed * 0.25
+    dist = 7 * zoom
   } else {
     dist = (kind === 'board' ? 8 : kind === 'truck' ? 14 : 10) * zoom * (1 + speed / 140)
     height = (kind === 'board' ? 4 : kind === 'truck' ? 6 : 4.5) * zoom + dist * 0.15
   }
-  camTarget.set(subject.x, subject.y + (foot ? 1.4 : 1.2), subject.z)
+  camTarget.set(subject.x, subject.y + 1.2, subject.z)
   camPos.set(camTarget.x - Math.sin(yaw) * dist, camTarget.y + height, camTarget.z - Math.cos(yaw) * dist)
   if (!top) unblock(camTarget, camPos)
   camera.position.lerp(camPos, Math.min(1, dt * 9))
-  const lead = top ? 3 : foot ? 2 : 6
-  const heading = foot ? game.character.heading : p.heading
+  const lead = top ? 3 : 6
+  const heading = p.heading
   lookAt.lerp(new THREE.Vector3(camTarget.x + Math.sin(heading) * lead, camTarget.y, camTarget.z + Math.cos(heading) * lead), Math.min(1, dt * 8))
   camera.lookAt(lookAt)
   const baseFov = camera.aspect < 1 ? 62 + (1 - camera.aspect) * 30 : 62
-  const fov = (top ? baseFov - 8 : baseFov) + (p.boosting && !foot ? 12 : 0) + speed * 0.08
+  const fov = (top ? baseFov - 8 : baseFov) + (p.boosting ? 12 : 0) + speed * 0.08
   camera.fov += (fov - camera.fov) * Math.min(1, dt * 4)
   camera.updateProjectionMatrix()
 }
@@ -278,7 +266,7 @@ function frame() {
   const dt = Math.min((now - last) / 1000, 0.05)
   last = now
   const input = readInput(dt)
-  game.update(dt, input.vehicle, input.foot, camYaw)
+  game.update(dt, input)
 
   if (game.world) updateCamera(dt)
   else {
@@ -288,9 +276,11 @@ function frame() {
   }
   sky.position.copy(camera.position)
   rain.update(dt, camera.position)
-  retro.uniforms.uTime.value = now / 1000
-  retro.uniforms.uAberration.value = game.player.boosting && !game.onFoot ? 0.006 : 0.0018
   composer.render()
   requestAnimationFrame(frame)
 }
 requestAnimationFrame(frame)
+
+const invite=crewInvite(location.hash)
+const invitedCity=CITIES.find(c=>c.name.toLowerCase().replace(/ /g,'-')===invite.city.toLowerCase())
+if(invitedCity){title.classList.remove('show');void game.warp(invitedCity.name,invitedCity.lat,invitedCity.lon)}
