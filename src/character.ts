@@ -1,4 +1,5 @@
 import * as THREE from 'three'
+import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js'
 
 export interface MaskSpec { id: string; name: string; price: number; blurb: string }
 export const MASKS: MaskSpec[] = [
@@ -17,7 +18,7 @@ function mat(color: number, emissive = false) {
   if (!m) {
     m = emissive
       ? new THREE.MeshBasicMaterial({ color })
-      : new THREE.MeshStandardMaterial({ color, roughness: 0.55, metalness: 0.05, flatShading: true })
+      : new THREE.MeshStandardMaterial({ color, roughness: 0.55, metalness: 0.05, flatShading: false })
     mats.set(key, m)
   }
   return m
@@ -33,7 +34,7 @@ function part(g: THREE.Group, geo: THREE.BufferGeometry, color: number, pos: V3,
   return m
 }
 const sphere = (r: number, d = 1) => new THREE.IcosahedronGeometry(r, d)
-const box = (w: number, h: number, d: number) => new THREE.BoxGeometry(w, h, d)
+const box = (w: number, h: number, d: number) => new RoundedBoxGeometry(w, h, d, 1, Math.min(w,h,d)*0.18)
 const cyl = (rt: number, rb: number, h: number, s = 8) => new THREE.CylinderGeometry(rt, rb, h, s)
 
 function eyes(g: THREE.Group, color: number, y: number, z: number, spread = 0.08, r = 0.035) {
@@ -44,7 +45,7 @@ function eyes(g: THREE.Group, color: number, y: number, z: number, spread = 0.08
 export function buildMask(id: string) {
   const g = new THREE.Group()
   const white = ['oni', 'liar', 'jester'].includes(id)
-  part(g, sphere(0.23), white ? 0xd1d0c7 : 0x12151c, [0, 0, 0], [0, 0, 0], [1, 1.15, 0.8])
+  part(g, sphere(0.23), white ? 0xe2ddd0 : 0x53616a, [0, 0, 0], [0, 0, 0], [1, 1.15, 0.8])
   eyes(g, id === 'glitcher' ? 0x00f0ff : 0x08090c, 0.04, 0.19, 0.085, 0.045)
   if (id === 'glitcher') part(g, box(0.37, 0.085, 0.045), 0x00f0ff, [0, 0.04, 0.2], [0, 0, 0], [1, 1, 1], true)
   if (id === 'respirator') {
@@ -58,7 +59,7 @@ export function buildMask(id: string) {
   }
   return g
 }
-const JEANS = 0x1b1d2e, JACKET = 0x12151c, SLEEVE = 0x484a47, skinTone = 0xba9680
+const JEANS = 0x48586a, JACKET = 0xa5adb0, SLEEVE = 0xcaa76c, skinTone = 0xba9680
 /** Low-poly courier with pivoting limbs. Feet at y=0, facing +z. */
 export function buildCharacter(maskId: string) {
   const root = new THREE.Group()
@@ -81,6 +82,9 @@ export function buildCharacter(maskId: string) {
   const torso = new THREE.Mesh(box(0.42, 0.56, 0.24), mat(JACKET))
   torso.position.y = 1.18
   body.add(torso)
+  // Reflective shoulder/back strip stays readable from the chase camera.
+  part(body, box(0.43, 0.045, 0.255), 0xcadcd9, [0, 1.36, 0], [0,0,0], [1,1,1], true)
+  part(body, box(0.3, 0.36, 0.14), 0x697a86, [0, 1.18, -0.19])
   const stripe = new THREE.Mesh(box(0.43, 0.06, 0.25), mat(SLEEVE))
   stripe.position.y = 0.95
   body.add(stripe)

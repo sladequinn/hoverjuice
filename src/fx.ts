@@ -9,7 +9,7 @@ export function createSky() {
 export class Rain {
   mesh: THREE.LineSegments
   private pos: Float32Array
-  private count = 1400
+  private count = 500
   private span = 90
   private height = 60
 
@@ -20,7 +20,7 @@ export class Rain {
     geo.setAttribute('position', new THREE.BufferAttribute(this.pos, 3))
     this.mesh = new THREE.LineSegments(
       geo,
-      new THREE.LineBasicMaterial({ color: 0x9fe8ff, transparent: true, opacity: 0.35, depthWrite: false }),
+      new THREE.LineBasicMaterial({ color: 0x9fe8ff, transparent: true, opacity: 0.16, depthWrite: false }),
     )
     this.mesh.frustumCulled = false
   }

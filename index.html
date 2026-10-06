@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
-    <meta name="theme-color" content="#0a0418" />
+    <meta name="theme-color" content="#0c1117" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <title>Hoverjuice | Industrial Noir</title>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
@@ -25,7 +25,7 @@
         <div class="row">
           <div class="speedo"><span id="speed" class="speed">0</span><span class="unit">km/h</span></div>
           <div class="right">
-            <button id="mode" class="mode mag" data-tap="mode" title="Toggle flight mode (E)">MAG-LOCK</button>
+            <button id="mode" class="mode mag" data-tap="mode" title="Toggle drive mode (E)">MAG-LOCK</button>
             <div class="muted small alt">ALT <span id="alt">0 m</span> · <span id="boost" class="boost">BOOST</span></div>
           </div>
         </div>
@@ -42,7 +42,7 @@
       <button id="contract" class="panel contract" data-tap="contracts"></button>
       <button class="menu-btn panel" data-tap="contracts" aria-label="Open menu"><span></span><span></span><span></span></button>
 
-      <div id="venue-label" class="venue-label"></div><div id="turn" class="turn"></div>
+      <div id="turn" class="turn"></div>
       <button id="prompt" class="prompt" data-tap="prompt"></button>
       <div id="toast" class="toast"></div>
 
@@ -50,8 +50,8 @@
         <button data-tap="contracts" title="Contracts (J)"><b>J</b>Contracts</button>
         <button data-tap="market" title="Night Market (N)"><b>N</b>Market</button>
         <button data-tap="garage" title="Garage (G)"><b>G</b>Garage</button>
-        <button data-tap="holdings" title="Real estate (P)"><b>P</b>Estate</button>
-        <button data-tap="warp" title="Warp (M)"><b>M</b>Warp</button>
+        <button data-tap="holdings" title="Turf and vaults (P)"><b>P</b>Turf</button>
+        <button data-tap="warp" title="City uplink (M)"><b>M</b>City</button>
         <button data-tap="masks" title="Masks (K)"><b>K</b>Masks</button>
         <button data-tap="help" title="Help (H)"><b>H</b>Help</button>
       </nav>
@@ -91,15 +91,16 @@
 
     <div id="title" class="title show">
       <div class="title-inner">
-        <p class="kicker">Industrial noir · Street survival</p>
-        <h1>HOVERJUICE</h1>
-        <p class="lede">
-          Start as a broke gutter courier on a leaky hoverboard. Run high-stakes deliveries through any real city on Earth,
-          keep your repulsors wet with volatile HJ-77, buy up the skyline, and earn the ultimate status symbol.
-        </p>
+        <div class="title-status"><span>HJ–77 / COURIER NETWORK</span><span>NIGHT SHIFT · 001</span></div>
+        <p class="kicker">The city runs on borrowed fuel.</p>
+        <h1>HOVER<span>JUICE</span></h1>
+        <p class="title-statement">MAKE THE DROP.<br>MAKE IT HOME.</p>
+        <p class="lede">One board. An empty account. A tank that won't last the night.
+          Move hot cargo through real streets, outrun the Heat and build a garage worth coming back to.</p>
+        <div class="title-brief"><span><b>01</b> RUN CARGO</span><span><b>02</b> KEEP YOUR HULL</span><span><b>03</b> CLAIM YOUR TURF</span></div>
         <div class="title-actions">
           <button id="btn-continue" class="btn buy big" style="display: none"></button>
-          <button id="btn-new" class="btn big">Choose a city</button>
+          <button id="btn-new" class="btn big">Start a night shift ↗</button>
         </div>
         <p class="muted small desktop-only">W/A/S/D drive · E switch Mag-Lock / Free Hover · Shift boost · Q overclock · V camera · H manual</p>
       </div>

@@ -16,8 +16,21 @@ const assert=require('node:assert/strict');
   await page.goto('http://127.0.0.1:47291');
   assert.ok(await page.locator('script[type="module"]').getAttribute('src').then(src=>src.startsWith('/assets/')&&src.endsWith('.js')),'Page must load compiled JavaScript');
   assert.ok(await page.locator('link[rel="stylesheet"]').count(),'Page must include compiled CSS');
+  mkdirSync('.test-artifacts',{recursive:true});
+  await page.screenshot({path:'.test-artifacts/home-desktop.png'});
+  await page.setViewportSize({width:390,height:844});
+  await page.screenshot({path:'.test-artifacts/home-mobile.png'});
+  await page.setViewportSize({width:1440,height:900});
+  assert.equal(await page.locator('#venue-label').count(),0);
   await page.evaluate(()=>{document.getElementById('title').classList.remove('show');return window.hoverghini.warp('Test City',43.45,-80.49)});
   await page.waitForTimeout(1000);
+  if(process.env.BENCHMARK){
+    const timing=await page.evaluate(async()=>{
+      const samples=[];let previous=performance.now();
+      for(let i=0;i<90;i++)await new Promise(resolve=>requestAnimationFrame(now=>{samples.push(now-previous);previous=now;resolve()}));
+      samples.sort((a,b)=>a-b);return {medianMs:samples[45],p95Ms:samples[85],buildings:window.hoverghini.world.city.buildings.length};
+    });console.log('Software WebGL frame timing:',JSON.stringify(timing));
+  }
   const state=await page.evaluate(()=>{
    const g=window.hoverghini;g.introMessage=0;g.campaign.intro=0;
    const input={throttle:1,brake:0,steer:0,boost:false,up:false,down:false};
