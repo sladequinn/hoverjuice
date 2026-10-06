@@ -48,6 +48,15 @@ real estate for passive income, and work your way up the garage to the ultimate 
 
 On touch devices, on-screen controls appear automatically: a d-pad in Mag-Lock and an analog stick in Free Hover and on foot. The Garage and Help tabs have a test-funds button for playtesting.
 
+## Play
+
+After this repo’s Pages deploy is on:
+
+- **https://sladequinn.github.io/hoverjuice/**
+- **https://slade.ninja/hoverjuice/** once the built `dist/` is also published into [sladequinn/slade.ninja](https://github.com/sladequinn/slade.ninja) under `/hoverjuice/` (that repo already owns the `slade.ninja` custom domain)
+
+Pushes to `main` run `.github/workflows/deploy-pages.yml`: Vite builds with `base` `/hoverjuice/` and deploys `dist/`. If the first run asks, set **Settings → Pages → Source: GitHub Actions**.
+
 ## Running locally
 
 Requires Node.js 20+.

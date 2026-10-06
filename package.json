@@ -3,6 +3,7 @@
   "private": true,
   "version": "0.1.0",
   "type": "module",
+  "homepage": "https://slade.ninja/hoverjuice/",
   "scripts": {
     "dev": "vite --host 0.0.0.0 --port 47291",
     "build": "tsc && vite build",
