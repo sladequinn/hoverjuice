@@ -317,6 +317,7 @@ export class Game {
     main.sort((a, b) => Math.hypot(a.n.x, a.n.z) - Math.hypot(b.n.x, b.n.z))
     this.garageNode = main[0]?.i ?? 0
     this.player.placeAtNode(this.world, this.garageNode)
+    this.player.unsnap()
     this.campaign=new Campaign(this.world);this.scene.add(this.campaign.boss)
     if(!this.save.coldOpenDone){this.campaign.coldOpen(this.player);this.introMessage=2;this.save.coldOpenDone=true}
     this.juice = Math.max(this.juice, this.player.spec.tank * 0.6)
@@ -662,6 +663,7 @@ export class Game {
     this.save.contraband={}; this.active=null
     this.save.money=Math.max(0,this.save.money-250)
     this.player.placeAtNode(this.world,this.garageNode)
+    this.player.unsnap()
     this.juice=Math.max(this.juice,this.player.spec.tank*0.25)
     this.run.repair();this.persist()
     this.toast('IMPOUNDED · cargo confiscated · $250 fee · stash untouched','bad')
@@ -1159,9 +1161,9 @@ export class Game {
             <div><h3>Hoverjuice (HJ-77)</h3><p class="muted">Your repulsors drink a volatile turquoise fluid that evaporates constantly, even while parked. Run dry and you sink to a crawl.
             HJ-77 is also the precursor to the street drug Cyan-ade. Precursor contracts pay big, but the leaking canisters double your evaporation.</p></div>
             <div><h3>Night Market</h3><p class="muted">Four gang leaders trade from parked cars where suitable commercial sites are available. Buy contraband where it is cheap and move it where bids are high. Quotes refresh every 150 seconds; supply shocks and street gluts can make or erase a fortune. Cargo capacity depends on your current ride.</p></div>
-            <div><h3>Touch controls</h3><p class="muted">◀ ▶ steer (or choose the junction branch), <b>GO</b> thrusts, <b>BRK</b> brakes and reverses.
-            Tap the <b>MAG-LOCK</b> badge to switch modes; <b>BOOST</b> burns extra HJ-77. Tap the fuel prompt at a pump to refuel.</p></div>
-            <div><h3>Drive modes</h3><p class="muted"><b>Mag-Lock</b> snaps you between three rail lanes. Tap A/D to slide and queue a turn for 2.5 seconds; hold to keep your turn queued. Corner assist slows you through sharp turns. Heavy ramming can break lock. <b>Free Hover</b> carries your momentum across the road plane. Water breaks rail cohesion.</p></div>
+            <div><h3>Touch controls</h3><p class="muted">Use the analog stick in either mode: sideways steers or queues a junction turn, forward thrusts, back brakes. <b>GO</b> and <b>BRAKE</b> also control speed.
+            Start in Free Hover. Use the lower <b>MAG-LOCK / UNLOCK</b> button to switch modes; <b>BOOST</b> burns extra HJ-77. <b>BURN</b> appears only when carrying Cyan-ade. Tap the fuel prompt at a pump to refuel.</p></div>
+            <div><h3>Drive modes</h3><p class="muted"><b>Mag-Lock</b> snaps you between three rail lanes. Tap A/D to slide and queue a turn for 6 seconds; hold to keep your turn queued. Corner assist slows you through sharp turns. Heavy ramming can break lock. <b>Free Hover</b> carries your momentum across the road plane. Water breaks rail cohesion.</p></div>
           </div>
           <div class="row test-funds"><span class="muted small">Playtesting?</span><button class="btn buy" data-act="cheat">+$5,000,000 test funds</button></div>
           <div class="row"><button class="btn" data-act="test-flight">Test flight: ${this.player.testFlight?'ON':'OFF'} (Y)</button><span class="muted">Free Hover: Space / C climb / descend. Touch: RISE / DESCEND. Turning off restores street height.</span></div>
@@ -1434,6 +1436,12 @@ export class Game {
     setHtml(mode, p.mode === 'mag' ? 'MAG-LOCK' : 'FREE HOVER')
     mode.className = `mode ${p.mode}`
     $('hud').dataset.mode = p.mode
+    const lock = $('touch-mode')
+    lock.setAttribute('aria-pressed', String(p.mode === 'mag'))
+    lock.textContent = p.mode === 'mag' ? 'UNLOCK' : 'MAG-LOCK'
+    const burn = $('touch-burn') as HTMLButtonElement
+    burn.hidden = !(s.contraband.cyanade > 0)
+    burn.disabled = this.run.overclock > 0 || this.run.limp >= 0
     const touch = isTouch()
     const pct = this.juice / p.spec.tank
     const fill = $('juice-fill')

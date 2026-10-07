@@ -8,7 +8,7 @@ const assert=require('node:assert/strict');
  try{
   await new Promise((resolve,reject)=>{const timeout=setTimeout(()=>reject(new Error('Vite startup timeout')),10000);server.stdout.on('data',d=>{if(d.toString().includes('Local:')){clearTimeout(timeout);resolve()}});server.on('error',reject);server.on('exit',code=>{if(code)reject(new Error('Vite exited '+code))})});
   browser=await chromium.launch({headless:true,args:['--no-sandbox','--use-gl=angle','--use-angle=swiftshader','--enable-webgl']});
-  const page=await browser.newPage({viewport:{width:1440,height:900}}),errors=[];
+  const page=await browser.newPage({viewport:{width:1440,height:900},hasTouch:true}),errors=[];
   page.on('pageerror',e=>errors.push(e.message));page.on('console',m=>{if(m.type()==='error'&&!m.text().includes('503 (Service Unavailable)'))errors.push(m.text())});
   await page.route('https://tiles.openfreemap.org/**',r=>r.fulfill({status:503,body:'offline fixture'}));
   await page.route('https://fonts.googleapis.com/**',r=>r.fulfill({body:''}));
@@ -24,6 +24,20 @@ const assert=require('node:assert/strict');
   assert.equal(await page.locator('#venue-label').count(),0);
   await page.evaluate(()=>{document.getElementById('title').classList.remove('show');return window.hoverghini.warp('Test City',43.45,-80.49)});
   await page.waitForTimeout(1000);
+  assert.equal(await page.evaluate(()=>window.hoverghini.player.mode),'free');
+  await page.setViewportSize({width:390,height:844});
+  assert.ok(await page.locator('#stick').isVisible());
+  await page.evaluate(()=>{const g=window.hoverghini;g.save.contraband.cyanade=0;g.updateHud()});
+  assert.equal(await page.locator('#touch-burn').isVisible(),false);
+  await page.locator('#touch-mode').click();
+  assert.equal(await page.evaluate(()=>window.hoverghini.player.mode),'mag');
+  assert.ok(await page.locator('#stick').isVisible());
+  await page.locator('#touch-mode').click();
+  assert.equal(await page.evaluate(()=>window.hoverghini.player.mode),'free');
+  await page.evaluate(()=>{const g=window.hoverghini;g.save.contraband.cyanade=1;g.updateHud()});
+  assert.ok(await page.locator('#touch-burn').isVisible());
+  await page.screenshot({path:'.test-artifacts/touch-driving.png'});
+  await page.setViewportSize({width:1440,height:900});
   if(process.env.BENCHMARK){
     const timing=await page.evaluate(async()=>{
       const samples=[];let previous=performance.now();
