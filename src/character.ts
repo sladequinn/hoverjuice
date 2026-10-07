@@ -79,8 +79,16 @@ export function buildCharacter(maskId: string) {
   }
   const legL = limb(0.1, 0.9, 0.82, 0.15, JEANS, 0x151515)
   const legR = limb(-0.1, 0.9, 0.82, 0.15, JEANS, 0x151515)
+  for(const leg of [legL,legR]){
+    for(const child of [...leg.children]){(child as THREE.Mesh).geometry.dispose();leg.remove(child)}
+    leg.position.y=.78
+    part(leg,box(.15,.4,.15),JEANS,[0,-.2,0])
+    const knee=new THREE.Group();knee.position.y=-.4;knee.rotation.x=1.0;leg.add(knee)
+    part(knee,box(.14,.4,.14),JEANS,[0,-.2,0])
+    part(knee,box(.17,.12,.25),0x192329,[0,-.4,.045])
+  }
   const torso = new THREE.Mesh(box(0.42, 0.56, 0.24), mat(JACKET))
-  torso.position.y = 1.18
+  torso.position.y = 1.08
   body.add(torso)
   // Reflective shoulder/back strip stays readable from the chase camera.
   part(body, box(0.43, 0.045, 0.255), 0xcadcd9, [0, 1.36, 0], [0,0,0], [1,1,1], true)
@@ -91,8 +99,8 @@ export function buildCharacter(maskId: string) {
   const letter = new THREE.Mesh(box(0.1, 0.12, 0.02), mat(SLEEVE))
   letter.position.set(0.1, 1.3, 0.125)
   body.add(letter)
-  const armL = limb(0.28, 1.42, 0.62, 0.12, SLEEVE, skinTone)
-  const armR = limb(-0.28, 1.42, 0.62, 0.12, SLEEVE, skinTone)
+  const armL = limb(0.28, 1.42, 0.62, 0.12, SLEEVE, 0x252e35)
+  const armR = limb(-0.28, 1.42, 0.62, 0.12, SLEEVE, 0x252e35)
   const neck = new THREE.Mesh(cyl(0.06, 0.07, 0.1), mat(skinTone))
   neck.position.y = 1.5
   body.add(neck)

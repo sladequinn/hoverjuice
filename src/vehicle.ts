@@ -55,8 +55,10 @@ export function buildVehicleMesh(spec: VehicleSpec, maskId = 'balaclava') {
       add(new THREE.BoxGeometry(0.8, 0.04, 2.15), glow, 0, -0.08, 0)
       const rider = buildCharacter(maskId)
       const u = rider.userData
-      u.legL.rotation.set(-0.35, 0, 0.1)
-      u.legR.rotation.set(0.25, 0, -0.1)
+      u.legL.rotation.set(-0.5, 0, 0.1)
+      u.legL.position.z=.23
+      u.legR.rotation.set(-0.5, 0, -0.1)
+      u.legR.position.z=-.23
       u.armL.rotation.set(-0.4, 0, 0.35)
       u.armR.rotation.set(0.2, 0, -0.3)
       rider.rotation.y = 0.9
@@ -69,13 +71,17 @@ export function buildVehicleMesh(spec: VehicleSpec, maskId = 'balaclava') {
     case 'compact': {
       add(new RoundedBoxGeometry(2.02,0.52,4.35,1,0.13),body,0,0.28,0)
       add(wedge(1.83,0.25,1.35,0.55),body,0,0.64,1.38)
-      add(wedge(1.55,0.5,1.85,0.6),glass,0,0.89,-0.08)
-      add(new THREE.BoxGeometry(1.5,0.07,0.86),body,0,1.12,-0.54)
+      const cabin=new THREE.BoxGeometry(1.65,.48,2.05)
+      const cp=cabin.attributes.position
+      for(let i=0;i<cp.count;i++)if(cp.getY(i)>0){cp.setX(i,cp.getX(i)*.75);cp.setZ(i,cp.getZ(i)*.48-.12)}
+      cabin.computeVertexNormals()
+      add(cabin,glass,0,.88,-.08)
+      add(new THREE.BoxGeometry(1.25,.045,.98),body,0,1.13,-.2)
       add(new RoundedBoxGeometry(1.85,0.24,0.88,1,0.06),body,0,0.61,-1.55)
       add(new THREE.BoxGeometry(1.84,0.19,0.15),dark,0,0.28,-2.23)
       add(new THREE.BoxGeometry(1.75,0.06,0.06),new THREE.MeshBasicMaterial({color:0xd85131}),0,0.58,-2.2)
       for(const side of [-1,1]){
-        add(new RoundedBoxGeometry(0.36,0.55,2.55,1,0.1),dark,side*1.03,0.15,-0.25)
+        add(new RoundedBoxGeometry(0.25,0.42,2.7,1,0.09),dark,side*.99,0.22,-0.25)
         add(new THREE.CylinderGeometry(0.2,0.2,0.5,12),dark,side*0.87,0.15,-1.85).rotation.x=Math.PI/2
         add(new THREE.TorusGeometry(0.13,0.035,5,12),glow,side*0.87,0.15,-2.12).rotation.y=Math.PI
         add(new THREE.BoxGeometry(0.5,0.075,0.05),new THREE.MeshBasicMaterial({color:0xe7cf9b}),side*0.61,0.56,2.19)

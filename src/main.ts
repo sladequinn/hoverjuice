@@ -1,3 +1,4 @@
+import { renderGaragePreview } from './menu-scene'
 import { crewInvite } from './spatial'
 import { CITIES } from './data'
 import './style.css'
@@ -33,12 +34,14 @@ scene.add(fill, fill.target)
 let renderScale = Math.min(window.devicePixelRatio, 1.25, Math.sqrt(1600000 / (innerWidth * innerHeight)))
 let slowFrames = 0
 
+let renderTitle: (() => void) | undefined
 function resize() {
   camera.aspect = window.innerWidth / window.innerHeight
   camera.updateProjectionMatrix()
   renderer.setSize(window.innerWidth, window.innerHeight)
   renderScale = Math.min(window.devicePixelRatio, 1.25, Math.sqrt(1600000 / (innerWidth * innerHeight)))
   renderer.setPixelRatio(renderScale)
+  renderTitle?.()
 }
 window.addEventListener('resize', resize)
 resize()
@@ -174,6 +177,8 @@ window.addEventListener('wheel', (e) => { zoom = Math.min(2.5, Math.max(0.5, zoo
 
 // ---------- title ----------
 const title = $('title')
+renderTitle = () => { if(title.classList.contains('show')) renderGaragePreview(renderer, innerWidth, innerHeight) }
+renderTitle()
 const cont = $('btn-continue')
 if (game.hasSave) {
   cont.style.display = ''

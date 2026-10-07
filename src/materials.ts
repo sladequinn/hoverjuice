@@ -50,3 +50,17 @@ export function asphaltMaterial(color = 0x08090c) {
   mat.customProgramCacheKey=()=> 'hj-asphalt-art-v2'
   return mat
 }
+
+export function pavingMaterial() {
+  const mat=new THREE.MeshStandardMaterial({color:0x30383b,roughness:.96,side:THREE.DoubleSide})
+  mat.onBeforeCompile=shader=>{
+    worldVarying(shader)
+    shader.fragmentShader=shader.fragmentShader.replace('#include <map_fragment>',`#include <map_fragment>
+      vec2 slab=abs(fract(vHJWorld.xz/2.0)-0.5);
+      float joint=smoothstep(0.478,0.495,max(slab.x,slab.y));
+      diffuseColor.rgb*=mix(0.86,1.07,hjHash(floor(vHJWorld.xz/2.0)))*(1.0-joint*.3);
+    `)
+  }
+  mat.customProgramCacheKey=()=> 'hj-paving-1'
+  return mat
+}
