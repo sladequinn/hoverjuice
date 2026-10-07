@@ -2,7 +2,7 @@ import * as THREE from 'three'
 
 export function createSky() {
   const g = new THREE.Group()
-  g.add(new THREE.Mesh(new THREE.SphereGeometry(3000, 24, 12), new THREE.MeshBasicMaterial({ color: 0x08090c, side: THREE.BackSide, fog: false, depthWrite: false })))
+  g.add(new THREE.Mesh(new THREE.SphereGeometry(3000, 24, 12), new THREE.MeshBasicMaterial({ color: 0x18232f, side: THREE.BackSide, fog: false, depthWrite: false })))
   return g
 }
 

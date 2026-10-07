@@ -14,7 +14,7 @@ renderer.toneMapping = THREE.ACESFilmicToneMapping
 renderer.toneMappingExposure = 1.0
 
 const scene = new THREE.Scene()
-scene.fog = new THREE.FogExp2(0x18212b, 0.0022)
+scene.fog = new THREE.FogExp2(0x263441, 0.0045)
 scene.add(new THREE.HemisphereLight(0xc8dcf0, 0x4b535e, 2.2))
 const sun = new THREE.DirectionalLight(0xffce91, 2.0)
 sun.position.set(40, 80, -30)
@@ -50,6 +50,7 @@ coarse.addEventListener('change', syncTouch)
 
 const game = new Game(scene)
 ;(window as unknown as { hoverghini: Game }).hoverghini = game
+;(window as unknown as {hoverjuiceRenderStats:()=>unknown}).hoverjuiceRenderStats=()=>({calls:renderer.info.render.calls,triangles:renderer.info.render.triangles,geometries:renderer.info.memory.geometries,textures:renderer.info.memory.textures,pixelRatio:renderer.getPixelRatio()})
 
 // ---------- input ----------
 const keys = new Set<string>()

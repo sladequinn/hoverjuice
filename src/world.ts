@@ -1,10 +1,11 @@
 import { GANGS } from './filter'
+import {softDisc} from './art'
 import * as THREE from 'three'
 import { ShapeUtils } from 'three'
 import { pointInPoly, type CityData, type MapDelta, type Pt } from './map'
 
 import { asphaltMaterial, facadeMaterial } from './materials'
-const TINTS = [0x484b4e, 0x373b40, 0x1b1d2e, 0x535550]
+const TINTS = [0x555f65, 0x5e6666, 0x454b59, 0x6c655a]
 const CELL = 40
 
 export interface Pump {
@@ -133,13 +134,13 @@ export class World {
       ranges.push({bi,start:roofStart,count:roofPos.length/3-roofStart})
     })
 
-    buckets.forEach((bk) => {
+    buckets.forEach((bk,style) => {
       const geo = new THREE.BufferGeometry()
       geo.setAttribute('position', new THREE.Float32BufferAttribute(bk.pos, 3))
       geo.setAttribute('uv', new THREE.Float32BufferAttribute(bk.uv, 2))
       geo.setAttribute('color', new THREE.Float32BufferAttribute(bk.col, 3))
       geo.computeVertexNormals()
-      this.group.add(new THREE.Mesh(geo, facadeMaterial()))
+      this.group.add(new THREE.Mesh(geo, facadeMaterial(style)))
     })
 
     const roofGeo = new THREE.BufferGeometry()
@@ -189,6 +190,8 @@ export class World {
   private buildRoads(from = 0) {
     const tunnelWalls:number[] = [], tunnelCaps:number[] = [], tunnelCuts:number[] = []
     const pos: number[] = [], line: number[] = [], lineMajor: number[] = [], shoulders: number[] = []
+    const paint:number[]=[],sidewalks:number[]=[]
+    const lamps:{x:number;y:number;z:number;heading:number}[]=[]
     const pillars: THREE.Matrix4[] = []
     for (let ri = from; ri < this.city.roads.length; ri++) {
       const road = this.city.roads[ri]
@@ -210,8 +213,10 @@ export class World {
         pos.push(x1 + nx, y1 + 0.05, z1 + nz, x2 - nx, y2 + 0.05, z2 - nz, x1 - nx, y1 + 0.05, z1 - nz)
         // Batching concrete verge strips makes the road readable without more per-road objects.
         for(const side of [-1,1]) {
-          const ox=nx/w*0.45*side, oz=nz/w*0.45*side
+          const ox=nx/w*0.18*side, oz=nz/w*0.18*side
           const ax=x1+nx*side, az=z1+nz*side, bx=x2+nx*side, bz=z2+nz*side
+          const sx=nx/w*2.8*side,sz=nz/w*2.8*side
+          sidewalks.push(ax,y1+0.13,az,bx,y2+0.13,bz,bx+sx,y2+0.13,bz+sz,ax,y1+0.13,az,bx+sx,y2+0.13,bz+sz,ax+sx,y1+0.13,az+sz)
           shoulders.push(ax,y1+0.09,az,bx,y2+0.09,bz,bx+ox,y2+0.09,bz+oz,ax,y1+0.09,az,bx+ox,y2+0.09,bz+oz,ax+ox,y1+0.09,az+oz)
         }
         if (road.bridge) {
@@ -221,11 +226,18 @@ export class World {
             nextPillar+=25
           }
         }
+        if(!road.tunnel && len>8 && lamps.length<1000){const side=ri%2?1:-1;lamps.push({x:(x1+x2)/2+nx/w*(w+0.8)*side,y:(y1+y2)/2,z:(z1+z2)/2+nz/w*(w+0.8)*side,heading:Math.atan2(nx*side,nz*side)})}
         distance+=len
         if(road.tunnel) {
           tunnelCuts.push(x1+nx,0.02,z1+nz,x2+nx,0.02,z2+nz,x2-nx,0.02,z2-nz,x1+nx,0.02,z1+nz,x2-nx,0.02,z2-nz,x1-nx,0.02,z1-nz)
           for(const side of [-1,1])tunnelWalls.push(x1+nx*side,y1,z1+nz*side,x2+nx*side,y2,z2+nz*side,x2+nx*side,0.1,z2+nz*side,x1+nx*side,y1,z1+nz*side,x2+nx*side,0.1,z2+nz*side,x1+nx*side,0.1,z1+nz*side)
           if(y1<=-3.5&&y2<=-3.5)tunnelCaps.push(x1+nx,0.1,z1+nz,x2+nx,0.1,z2+nz,x2-nx,0.1,z2-nz,x1+nx,0.1,z1+nz,x2-nx,0.1,z2-nz,x1-nx,0.1,z1-nz)
+        }
+        for(let at=6;at<len-6;at+=12)for(const side of [-1,1]){
+          const a=at/len,b=Math.min(at+3,len-6)/len,offset=w*0.48*side,ux=nx/w,uz=nz/w
+          const ax=x1+(x2-x1)*a+ux*offset,az=z1+(z2-z1)*a+uz*offset,bx=x1+(x2-x1)*b+ux*offset,bz=z1+(z2-z1)*b+uz*offset
+          const ay=y1+(y2-y1)*a+0.07,by=y1+(y2-y1)*b+0.07,r=0.045
+          paint.push(ax-ux*r,ay,az-uz*r,bx-ux*r,by,bz-uz*r,bx+ux*r,by,bz+uz*r,ax-ux*r,ay,az-uz*r,bx+ux*r,by,bz+uz*r,ax+ux*r,ay,az+uz*r)
         }
         const target = road.major ? lineMajor : line
         target.push(x1, y1 + 0.12, z1, x2, y2 + 0.12, z2)
@@ -248,10 +260,14 @@ export class World {
     const geo = new THREE.BufferGeometry()
     geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3))
     geo.computeVertexNormals()
-    this.group.add(new THREE.Mesh(geo, asphaltMaterial(0x202832)))
+    const roadMat=asphaltMaterial(0x28343e);roadMat.polygonOffset=true;roadMat.polygonOffsetFactor=-2;roadMat.polygonOffsetUnits=-2
+    const ribbon=new THREE.Mesh(geo,roadMat);ribbon.renderOrder=3;this.group.add(ribbon)
+    if(sidewalks.length){const geo=new THREE.BufferGeometry();geo.setAttribute('position',new THREE.Float32BufferAttribute(sidewalks,3));geo.computeVertexNormals();const mesh=new THREE.Mesh(geo,new THREE.MeshStandardMaterial({color:0x4b5358,roughness:0.97,side:THREE.DoubleSide}));mesh.renderOrder=3;this.group.add(mesh)}
+    if(paint.length){const geo=new THREE.BufferGeometry();geo.setAttribute('position',new THREE.Float32BufferAttribute(paint,3));const mesh=new THREE.Mesh(geo,new THREE.MeshBasicMaterial({color:0x8b8d7e,side:THREE.DoubleSide,polygonOffset:true,polygonOffsetFactor:-3,polygonOffsetUnits:-3}));mesh.renderOrder=4;this.group.add(mesh)}
+    this.addStreetLights(lamps)
     if(shoulders.length){
       const verge=new THREE.BufferGeometry();verge.setAttribute('position',new THREE.Float32BufferAttribute(shoulders,3));verge.computeVertexNormals()
-      this.group.add(new THREE.Mesh(verge,new THREE.MeshStandardMaterial({color:0x626968,roughness:0.95,side:THREE.DoubleSide})))
+      this.group.add(new THREE.Mesh(verge,new THREE.MeshStandardMaterial({color:0x444b4f,roughness:0.95,side:THREE.DoubleSide})))
     }
     if(pillars.length) {
       const mesh=new THREE.InstancedMesh(new THREE.BoxGeometry(1,1,1),new THREE.MeshStandardMaterial({color:0x484b4e,roughness:0.9}),pillars.length)
@@ -262,8 +278,21 @@ export class World {
       g.setAttribute('position', new THREE.Float32BufferAttribute(arr, 3))
       return new THREE.LineSegments(g, new THREE.LineBasicMaterial({ color, transparent: true, opacity }))
     }
-    this.group.add(mk(line, 0x00f0ff, 0.6))
-    this.group.add(mk(lineMajor, 0x00f0ff, 0.65))
+    this.group.add(mk(line, 0x00a4b6, 0.24))
+    this.group.add(mk(lineMajor, 0x00b9c9, 0.34))
+  }
+
+  private addStreetLights(lamps:{x:number;y:number;z:number;heading:number}[]) {
+    if(!lamps.length)return
+    const pole=new THREE.InstancedMesh(new THREE.BoxGeometry(0.22,5.6,0.22),new THREE.MeshStandardMaterial({color:0x454c50,roughness:0.8}),lamps.length)
+    const head=new THREE.InstancedMesh(new THREE.BoxGeometry(0.65,0.16,1.8),new THREE.MeshBasicMaterial({color:0xffc174}),lamps.length)
+    const pool=new THREE.InstancedMesh(new THREE.PlaneGeometry(18,25),new THREE.MeshBasicMaterial({color:0xffb35b,map:softDisc,transparent:true,opacity:0.4,depthWrite:false,blending:THREE.AdditiveBlending}),lamps.length)
+    const obj=new THREE.Object3D()
+    lamps.forEach((l,i)=>{
+      obj.position.set(l.x,l.y+2.8,l.z);obj.rotation.set(0,l.heading,0);obj.updateMatrix();pole.setMatrixAt(i,obj.matrix)
+      obj.position.y=l.y+5.6;obj.updateMatrix();head.setMatrixAt(i,obj.matrix)
+      obj.position.set(l.x-Math.sin(l.heading)*3,l.y+0.16,l.z-Math.cos(l.heading)*3);obj.rotation.set(-Math.PI/2,0,-l.heading);obj.updateMatrix();pool.setMatrixAt(i,obj.matrix)
+    });this.group.add(pole,head,pool)
   }
 
   private placePumps() {
@@ -282,8 +311,8 @@ export class World {
     if(!chosen.length)return
     const pillarGeo = new THREE.CylinderGeometry(0.5, 0.7, 2.5, 8)
     const pillarMat = new THREE.MeshBasicMaterial({ color: 0x19ffe6 })
-    const ringGeo = new THREE.TorusGeometry(4, 0.08, 6, 32)
-    const ringMat = new THREE.MeshBasicMaterial({ color: 0x19ffe6, transparent: true, opacity: 0.8 })
+    const ringGeo = new THREE.TorusGeometry(1.3, 0.035, 6, 24)
+    const ringMat = new THREE.MeshBasicMaterial({ color: 0x19ffe6, transparent: true, opacity: 0.45 })
     const beamMat = new THREE.MeshBasicMaterial({ color: 0x19ffe6, transparent: true, opacity: 0.12, depthWrite: false })
     for (const p of chosen) {
       const i = p.node, n = { ...this.city.nodes[i], x: p.x, z: p.z }

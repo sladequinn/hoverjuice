@@ -1,5 +1,7 @@
 import { OVERCLOCK_SPEED } from './dynamics'
 import * as THREE from 'three'
+import {softDisc} from './art'
+import {mergeGeometries} from 'three/examples/jsm/utils/BufferGeometryUtils.js'
 import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js'
 import type { VehicleSpec } from './data'
 import type { World } from './world'
@@ -45,14 +47,18 @@ export function buildVehicleMesh(spec: VehicleSpec, maskId = 'balaclava') {
   let halfW = 1, halfL = 2
   switch (spec.kind) {
     case 'board': {
-      add(wedge(0.85, 0.18, 2.3, 0.45), body, 0, 0, 0)
+      const deck=wedge(0.85,0.18,2.3,0.45),vertices=deck.getAttribute('position')
+      for(let i=0;i<vertices.count;i++)vertices.setX(i,vertices.getX(i)*(1-0.35*Math.pow(Math.abs(vertices.getZ(i))/1.15,3)))
+      deck.computeVertexNormals();add(deck,body)
+      add(new THREE.BoxGeometry(0.46,0.03,1.3),dark,0,0.11,0)
+      for(const z of [-0.7,0.7])add(new THREE.CylinderGeometry(0.25,0.18,0.18,10),dark,0,-0.14,z)
       add(new THREE.BoxGeometry(0.8, 0.04, 2.15), glow, 0, -0.08, 0)
       const rider = buildCharacter(maskId)
       const u = rider.userData
       u.legL.rotation.set(-0.35, 0, 0.1)
       u.legR.rotation.set(0.25, 0, -0.1)
-      u.armL.rotation.set(-0.2, 0, 0.9)
-      u.armR.rotation.set(-0.2, 0, -0.9)
+      u.armL.rotation.set(-0.4, 0, 0.35)
+      u.armR.rotation.set(0.2, 0, -0.3)
       rider.rotation.y = 0.9
       rider.position.y = 0.1
       rider.name = 'rider'
@@ -61,13 +67,21 @@ export function buildVehicleMesh(spec: VehicleSpec, maskId = 'balaclava') {
       break
     }
     case 'compact': {
-      add(new RoundedBoxGeometry(2.1, 0.8, 4.6, 1, 0.18), body, 0, 0.4, 0)
-      add(wedge(1.5, 0.6, 1.7, 0.5), glass, 0, 1.05, -0.2)
-      add(new THREE.BoxGeometry(1.9, 0.08, 0.1), glow, 0, 0.55, 1.82)
-      add(new THREE.BoxGeometry(1.9, 0.08, 0.1), new THREE.MeshBasicMaterial({ color: 0xff1e3c }), 0, 0.55, -1.82)
-      add(new THREE.BoxGeometry(0.3, 0.3, 0.3), dark, 0.6, 0.95, -1.5).rotation.z = 0.4
-      halfW = 0.9; halfL = 1.8
-      break
+      add(new RoundedBoxGeometry(2.02,0.52,4.35,1,0.13),body,0,0.28,0)
+      add(wedge(1.83,0.25,1.35,0.55),body,0,0.64,1.38)
+      add(wedge(1.55,0.5,1.85,0.6),glass,0,0.89,-0.08)
+      add(new THREE.BoxGeometry(1.5,0.07,0.86),body,0,1.12,-0.54)
+      add(new RoundedBoxGeometry(1.85,0.24,0.88,1,0.06),body,0,0.61,-1.55)
+      add(new THREE.BoxGeometry(1.84,0.19,0.15),dark,0,0.28,-2.23)
+      add(new THREE.BoxGeometry(1.75,0.06,0.06),new THREE.MeshBasicMaterial({color:0xd85131}),0,0.58,-2.2)
+      for(const side of [-1,1]){
+        add(new RoundedBoxGeometry(0.36,0.55,2.55,1,0.1),dark,side*1.03,0.15,-0.25)
+        add(new THREE.CylinderGeometry(0.2,0.2,0.5,12),dark,side*0.87,0.15,-1.85).rotation.x=Math.PI/2
+        add(new THREE.TorusGeometry(0.13,0.035,5,12),glow,side*0.87,0.15,-2.12).rotation.y=Math.PI
+        add(new THREE.BoxGeometry(0.5,0.075,0.05),new THREE.MeshBasicMaterial({color:0xe7cf9b}),side*0.61,0.56,2.19)
+        add(new THREE.BoxGeometry(0.045,0.06,1.65),body,side*0.79,0.76,-0.1)
+      }
+      halfW=1.12;halfL=2.25;break
     }
     case 'truck': {
       add(new THREE.BoxGeometry(2.4, 1.7, 2.2), body, 0, 1.0, 2.4)
@@ -104,14 +118,22 @@ export function buildVehicleMesh(spec: VehicleSpec, maskId = 'balaclava') {
       break
     }
   }
+  const batches=new Map<THREE.Material,THREE.BufferGeometry[]>()
+  for(const child of [...g.children])if(child instanceof THREE.Mesh){
+    child.updateMatrix();const geo=(child.geometry.index?child.geometry.toNonIndexed():child.geometry.clone()).applyMatrix4(child.matrix)
+    const material=child.material as THREE.Material,list=batches.get(material)??[];list.push(geo);batches.set(material,list);child.geometry.dispose();g.remove(child)
+  }
+  for(const [material,geometries] of batches){const merged=mergeGeometries(geometries);if(merged)g.add(new THREE.Mesh(merged,material));geometries.forEach(geo=>geo.dispose())}
   const pad = new THREE.Mesh(
-    new THREE.CircleGeometry(1, 24),
-    new THREE.MeshBasicMaterial({ color: spec.glow, transparent: true, opacity: 0.35, blending: THREE.AdditiveBlending, depthWrite: false }),
+    new THREE.PlaneGeometry(2, 2),
+    new THREE.MeshBasicMaterial({ color: spec.glow, map:softDisc, transparent: true, opacity: 0.08, blending: THREE.AdditiveBlending, depthWrite: false }),
   )
   pad.rotation.x = -Math.PI / 2
   pad.scale.set(halfW * 1.6, halfL * 1.2, 1)
   pad.name = 'pad'
   g.add(pad)
+  const shadow=new THREE.Mesh(new THREE.PlaneGeometry(2,2),new THREE.MeshBasicMaterial({color:0x000000,map:softDisc,transparent:true,opacity:0.6,depthWrite:false}))
+  shadow.name='contact-shadow';shadow.rotation.x=-Math.PI/2;shadow.scale.set(halfW*1.3,halfL*1.15,1);g.add(shadow)
   const flame = new THREE.Mesh(
     new THREE.ConeGeometry(halfW * 0.5, 3, 12, 1, true),
     new THREE.MeshBasicMaterial({ color: spec.glow, transparent: true, opacity: 0.7, blending: THREE.AdditiveBlending, depthWrite: false }),
@@ -477,7 +499,8 @@ export class Player {
     const pad = this.mesh.getObjectByName('pad') as THREE.Mesh | undefined
     if (pad) {
       pad.position.y = -this.pos.y + 0.15
-      ;(pad.material as THREE.MeshBasicMaterial).opacity = (hasJuice ? 0.14 + Math.random() * 0.05 : 0.04) * (this.spec.kind === 'board' ? 0.25 : 1)
+      const shadow=this.mesh.getObjectByName('contact-shadow');if(shadow)shadow.position.y=pad.position.y-0.01
+      ;(pad.material as THREE.MeshBasicMaterial).opacity = (hasJuice ? 0.055 + Math.random() * 0.015 : 0.04) * (this.spec.kind === 'board' ? 0.25 : 1)
     }
   }
 }
