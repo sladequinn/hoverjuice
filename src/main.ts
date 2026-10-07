@@ -94,12 +94,17 @@ window.addEventListener('blur', () => keys.clear())
 
 document.querySelectorAll<HTMLElement>('[data-touch]').forEach((el) => {
   const k = el.dataset.touch as keyof typeof touch
-  const on = (e: Event) => { e.preventDefault(); touch[k] = true; el.classList.add('held') }
-  const off = (e: Event) => { e.preventDefault(); touch[k] = false; el.classList.remove('held') }
-  el.addEventListener('pointerdown', on)
-  el.addEventListener('pointerup', off)
-  el.addEventListener('pointerleave', off)
-  el.addEventListener('pointercancel', off)
+  let pointer = -1
+  const off = () => { pointer = -1; touch[k] = false; el.classList.remove('held') }
+  el.addEventListener('pointerdown', (e) => {
+    e.preventDefault()
+    if (pointer !== -1) return
+    pointer = e.pointerId; el.setPointerCapture(pointer)
+    touch[k] = true; el.classList.add('held')
+  })
+  for (const event of ['pointerup', 'pointercancel', 'lostpointercapture'])
+    el.addEventListener(event, (e) => { if ((e as PointerEvent).pointerId === pointer) off() })
+  window.addEventListener('blur', off)
 })
 document.querySelectorAll<HTMLElement>('[data-tap]').forEach((el) =>
   el.addEventListener('click', () => {
@@ -134,6 +139,7 @@ function moveStick(e: PointerEvent) {
 }
 stickEl.addEventListener('pointerdown', (e) => {
   e.preventDefault()
+  if (stickId !== -1) return
   stickId = e.pointerId
   stickEl.setPointerCapture(e.pointerId)
   stick.active = true
@@ -149,6 +155,10 @@ const releaseStick = (e: PointerEvent) => {
 }
 stickEl.addEventListener('pointerup', releaseStick)
 stickEl.addEventListener('pointercancel', releaseStick)
+stickEl.addEventListener('lostpointercapture', releaseStick)
+window.addEventListener('blur', () => {
+  stickId = -1; stick.active = false; stick.x = stick.y = 0; knob.style.transform = ''
+})
 
 let smoothSteer = 0
 function readInput(dt: number): Input {
@@ -159,7 +169,7 @@ function readInput(dt: number): Input {
   const sx = stick.active ? stick.x : 0
   const sy = stick.active ? stick.y : 0
   const dz = (v: number) => (Math.abs(v) < 0.12 ? 0 : (v - Math.sign(v) * 0.12) / 0.88)
-  const steer = stick.active ? -Math.sign(sx) * Math.pow(Math.abs(dz(sx)), 1.4) : smoothSteer
+  const steer = stick.active ? -Math.sign(sx) * Math.pow(Math.abs(dz(sx)), free ? 1.4 : 1) : smoothSteer
   const kUp = has('w', 'arrowup') || touch.up
   const kDown = has('s', 'arrowdown') || touch.down
   return {

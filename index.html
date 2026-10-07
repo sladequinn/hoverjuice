@@ -58,20 +58,17 @@
 
       <div class="touch">
         <div class="left-pad">
-          <div class="steer mag-only">
-            <button data-touch="left" aria-label="Steer left">◀</button>
-            <button data-touch="right" aria-label="Steer right">▶</button>
-          </div>
-          <div id="stick" class="stick mag-hide" aria-label="Analog stick"><div id="stick-knob"></div></div>
+          <div id="stick" class="stick" aria-label="Analog steering and throttle"><div id="stick-knob"></div></div>
         </div>
         <div class="throttle">
           <div class="stack">
 
             <button data-touch="rise" class="chip test-flight-only">RISE</button>
             <button data-touch="sink" class="chip test-flight-only">DESCEND</button>
-            <button data-tap="overclock" class="chip">BURN</button>
+            <button id="touch-burn" data-tap="overclock" class="chip" hidden>BURN</button>
+            <button id="touch-mode" data-tap="mode" class="chip lock-btn" aria-pressed="false">MAG-LOCK</button>
             <button data-touch="boost" class="chip boost-btn"><span>BOOST</span></button>
-            <button data-touch="down" class="brk">BRK</button>
+            <button data-touch="down" class="brk" aria-label="Brake">BRAKE</button>
           </div>
           <button data-touch="up" class="gas"><span>GO</span></button>
         </div>

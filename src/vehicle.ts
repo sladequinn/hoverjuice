@@ -344,9 +344,9 @@ export class Player {
 
     if (this.mode === 'mag') {
       const oldA=this.edgeA, oldB=this.edgeB, oldS=this.edgeS, oldX=this.pos.x, oldZ=this.pos.z
-      const steer = Math.abs(input.steer)>0.5 ? Math.sign(input.steer) : 0
+      const steer = Math.abs(input.steer)>(this.steerLatch ? 0.22 : 0.32) ? Math.sign(input.steer) : 0
       this.turnMemory=Math.max(0,this.turnMemory-dt)
-      if(steer){this.turnRequest=steer;this.turnMemory=2.5}
+      if(steer){this.turnRequest=steer;this.turnMemory=6}
       else if(!this.turnMemory)this.turnRequest=0
       const boost = !this.limping && ((input.boost && hasJuice && input.throttle > 0) || this.overclocking)
       this.boosting = boost
@@ -382,7 +382,8 @@ export class Player {
         remaining -= len - this.edgeS
         const next = this.chooseNext(world, this.turnRequest)
         const c = nodes[next]
-        const turn = Math.abs(wrap(Math.atan2(c.x-b.x,c.z-b.z)-Math.atan2(b.x-a.x,b.z-a.z)))
+        const signedTurn = wrap(Math.atan2(c.x-b.x,c.z-b.z)-Math.atan2(b.x-a.x,b.z-a.z))
+        const turn = Math.abs(signedTurn)
         if(turn>0.35) {
           if(this.speed>24)this.apex=true
           // Magnetic corner assist sheds speed rather than ejecting the player.
@@ -391,7 +392,8 @@ export class Player {
           this.speed=Math.min(this.speed,cornerSpeed)
           remaining*=this.speed/Math.max(before,0.001)
         }
-        if(b.adj.length>2){this.turnRequest=0;this.turnMemory=0}
+        // A junction on the wrong side must not swallow the queued turn.
+        if(b.adj.length>2 && turn>0.35 && Math.sign(signedTurn)===this.turnRequest){this.turnRequest=0;this.turnMemory=0}
         this.edgeA = this.edgeB
         this.edgeB = next
         this.edgeS = 0

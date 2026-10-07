@@ -189,3 +189,24 @@ test('scaled vehicle envelopes fit the minimum carriageway and shadows stay at g
   assert.ok(Math.abs(p.pos.y+pad.position.y*p.mesh.scale.y-.15)<.001)
  }
 })
+
+test('moderate analog input survives a wrong-side junction and takes the requested exit',()=>{
+ for(const steer of [-0.4,0.4]){
+  const w=junctionFixture(),p=new Player(vehicleById('hovercedes'),'balaclava')
+  // An earlier branch on the opposite side must not cancel the later request.
+  w.city.nodes.push({x:-Math.sign(steer)*20,z:10,adj:[1],main:true,width:7.5})
+  w.city.nodes[1].adj.push(6)
+  p.placeAtNode(w,0);p.speed=26
+  p.update(1/60,{...neutral,steer},w,true)
+  for(let i=0;i<90&&p.edgeA!==2;i++)p.update(1/60,neutral,w,true)
+  assert.equal(p.edgeA,2);assert.equal(p.edgeB,steer>0?3:4)
+ }
+})
+test('queued turns last through a slow approach but expire when unused',()=>{
+ const w=junctionFixture(),p=new Player(vehicleById('hovercedes'),'balaclava')
+ p.placeAtNode(w,0);p.update(1/60,{...neutral,steer:0.4},w,true)
+ for(let i=0;i<240;i++)p.update(1/60,neutral,w,true)
+ assert.equal(p.nextTurn(w).dir,1)
+ for(let i=0;i<150;i++)p.update(1/60,neutral,w,true)
+ assert.equal(p.nextTurn(w).dir,0)
+})

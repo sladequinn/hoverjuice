@@ -423,3 +423,23 @@ body.is-touch #combat-status{position:absolute;left:8px;right:8px;bottom:4px;mar
 .title{justify-content:flex-start;background:linear-gradient(90deg,rgba(8,14,19,.97),rgba(8,14,19,.88) 35%,rgba(8,14,19,.08) 75%)}
 .title-inner{max-width:600px;padding:0 28px}.title h1{font-size:clamp(40px,5.3vw,76px)}.title-statement{font-size:32px}.lede{font-size:1rem;max-width:440px}.title-status{margin-bottom:24px}.title-brief{gap:16px;font-size:10px}
 @media(max-width:760px){.title{align-items:flex-end;padding:24px 20px;background:linear-gradient(0deg,rgba(8,14,19,.98),rgba(8,14,19,.9) 48%,rgba(8,14,19,0) 85%)}.title-inner{padding:0 16px}.title-status{margin-bottom:16px}.title h1{font-size:42px}.title-statement{font-size:26px;margin:14px 0}.lede{font-size:.9rem}.title-brief{margin-top:16px;padding-top:12px;font-size:9px;gap:10px}.title-actions{margin:18px 0 0}}
+
+/* Thumb controls: a permanent stick and a compact right-hand driving cluster. */
+.touch [hidden]{display:none!important}
+body.is-touch .touch{padding:0 16px;gap:12px}
+.touch .throttle{display:grid!important;grid-template-columns:68px 70px;gap:8px!important;align-items:end}
+.touch .stack{display:contents!important}
+.touch .chip{width:68px;height:42px;font-size:.62rem}
+.touch .lock-btn{grid-column:1 / 3;width:146px;height:38px;border-color:#60727b;color:#c8d3d6}
+.touch .lock-btn[aria-pressed='true']{border-color:#00d8e8;color:#00e4ef;background:#10343c}
+.touch .boost-btn{grid-column:1;grid-row:3;height:48px}
+.touch .brk{grid-column:1;grid-row:4;width:68px;height:40px;font-size:.65rem}
+.touch .gas{grid-column:2;grid-row:3 / 5;width:70px;height:96px!important}
+.touch #touch-burn{grid-column:1 / 3;width:146px;height:34px;color:#00e4ef}
+.touch button:disabled{opacity:.4}
+body.is-touch #mode{pointer-events:none}
+@media(max-width:360px){body.is-touch .touch{padding:0 10px}.stick{width:120px;height:120px}}
+body.is-touch .prompt{bottom:calc(244px + env(safe-area-inset-bottom));max-width:calc(100% - 32px);white-space:normal;text-align:center}
+body.is-touch .toast{bottom:calc(306px + env(safe-area-inset-bottom))}
+body.is-touch.test-flight .prompt{bottom:calc(330px + env(safe-area-inset-bottom))}
+body.is-touch.test-flight .toast{bottom:calc(388px + env(safe-area-inset-bottom))}
