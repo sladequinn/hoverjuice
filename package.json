@@ -15,6 +15,7 @@
   "devDependencies": {
     "@cloudflare/workers-types": "^5.20261006.1",
     "@playwright/test": "^1.51.1",
+    "@types/clipper-lib": "^6.4.0",
     "@types/three": "^0.186.0",
     "partykit": "^0.0.115",
     "tsx": "^4.23.15",
@@ -23,6 +24,7 @@
   },
   "dependencies": {
     "@mapbox/vector-tile": "^3.0.0",
+    "clipper-lib": "^6.4.2",
     "pbf": "^5.1.2",
     "three": "^0.186.1"
   }

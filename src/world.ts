@@ -1,3 +1,4 @@
+import {PavementLayout,appendPavement} from './pavement'
 import {fitStreetWidths,streetJunctions,streetCorner,streetKey} from './streets'
 import { GANGS } from './filter'
 import {softDisc} from './art'
@@ -62,10 +63,18 @@ export class World {
     }
     if(this.disposed)return
     fitStreetWidths(this.city)
-    this.streets.traverse(obj=>{if(obj instanceof THREE.Mesh || obj instanceof THREE.LineSegments){obj.geometry.dispose();for(const mat of Array.isArray(obj.material)?obj.material:[obj.material])mat.dispose()}})
-    this.streets.clear()
-    this.roadGrid.clear()
-    this.buildRoads()
+    const oldStreets=this.streets
+    const replacement=new THREE.Group()
+    const roadGrid=new Map<string,{road:number;edge:number}[]>()
+    for(const _ of this.buildRoadBatches(0,replacement,roadGrid)){
+      void _
+      await new Promise<void>(resolve=>setTimeout(resolve,0))
+      if(this.disposed)return
+    }
+    if(this.disposed)return
+    this.group.remove(oldStreets)
+    oldStreets.traverse(obj=>{if(obj instanceof THREE.Mesh || obj instanceof THREE.LineSegments){obj.geometry.dispose();for(const mat of Array.isArray(obj.material)?obj.material:[obj.material])mat.dispose()}})
+    this.streets=replacement;this.roadGrid=roadGrid;this.group.add(replacement)
     this.buildWater()
     this.placePumps()
     this.indexBuildings(delta.buildingsFrom)
@@ -74,9 +83,12 @@ export class World {
   private buildGround() {
     const size = this.city.procedural ? this.city.radius * 6 : 40000
     const ground = new THREE.Mesh(new THREE.PlaneGeometry(size, size), asphaltMaterial(0x191f23))
+    ground.name="terrain-backdrop"
     ground.position.y = 0
     ground.renderOrder = 2
     const material=ground.material as THREE.MeshStandardMaterial
+    // A 40 km, two-triangle backdrop must not occlude centimetre-raised streets.
+    material.depthWrite=false
     material.stencilWrite=true;material.stencilRef=1;material.stencilFunc=THREE.NotEqualStencilFunc
     material.stencilFail=THREE.KeepStencilOp;material.stencilZFail=THREE.KeepStencilOp;material.stencilZPass=THREE.KeepStencilOp
     ground.rotation.x = -Math.PI / 2
@@ -211,19 +223,23 @@ export class World {
     }
   }
 
-  private buildRoads(from = 0) {
+  private buildRoads(){for(const _ of this.buildRoadBatches(0,this.streets,this.roadGrid))void _}
+
+  private *buildRoadBatches(from:number,group:THREE.Group,roadGrid:Map<string,{road:number;edge:number}[]>) {
     const junctions=streetJunctions(this.city.roads)
+    const paving=new PavementLayout(this.city)
     const tunnelWalls:number[] = [], tunnelCaps:number[] = [], tunnelCuts:number[] = []
-    const pos: number[] = [], line: number[] = [], lineMajor: number[] = [], shoulders: number[] = []
+    const pos: number[] = [], line: number[] = [], lineMajor: number[] = []
     const paint:number[]=[],sidewalks:number[]=[]
-    const lamps:{x:number;y:number;z:number;heading:number}[]=[]
+    const lamps=paving.lamps
     const pillars: THREE.Matrix4[] = []
     for (let ri = from; ri < this.city.roads.length; ri++) {
+      if((ri-from)%16===0)yield
       const road = this.city.roads[ri]
       for(let edge=1;edge<road.pts.length;edge++) {
         const a=road.pts[edge-1],b=road.pts[edge],pad=road.width
         for(let x=Math.floor((Math.min(a[0],b[0])-pad)/CELL);x<=Math.floor((Math.max(a[0],b[0])+pad)/CELL);x++)for(let z=Math.floor((Math.min(a[1],b[1])-pad)/CELL);z<=Math.floor((Math.max(a[1],b[1])+pad)/CELL);z++){
-          const key=`${x},${z}`,arr=this.roadGrid.get(key)??[];arr.push({road:ri,edge});this.roadGrid.set(key,arr)
+          const key=`${x},${z}`,arr=roadGrid.get(key)??[];arr.push({road:ri,edge});roadGrid.set(key,arr)
         }
       }
       const w = road.width / 2
@@ -240,21 +256,19 @@ export class World {
         const lB=streetCorner([x2,z2],y2,dX,dZ,w,1,branchesB,false),rB=streetCorner([x2,z2],y2,dX,dZ,w,-1,branchesB,false)
         pos.push(lA[0],y1+.05,lA[1],lB[0],y2+.05,lB[1],rB[0],y2+.05,rB[1],lA[0],y1+.05,lA[1],rB[0],y2+.05,rB[1],rA[0],y1+.05,rA[1])
         const pavement=road.sidewalkWidth??1.1
-        if(pavement>0.05)for(const side of [-1,1]) {
-          const first=junctions.get(streetKey([x1,z1],y1))??[],last=junctions.get(streetKey([x2,z2],y2))??[]
-          const cutA=first.length>2?Math.min(len*.45,Math.max(...first.map(b=>b.width))/2+.25):0
-          const cutB=last.length>2?Math.min(len*.45,Math.max(...last.map(b=>b.width))/2+.25):0
-          const dx=(x2-x1)/len,dz=(z2-z1)/len
-          const a:Pt=[x1+dx*cutA,z1+dz*cutA],b:Pt=[x2-dx*cutB,z2-dz*cutB]
-          const ay=y1+(y2-y1)*cutA/len,by=y2-(y2-y1)*cutB/len
-          const [ax,az]=streetCorner(a,ay,dx,dz,w,side,cutA?[]:first,true)
-          const [bx,bz]=streetCorner(b,by,dx,dz,w,side,cutB?[]:last,false)
-          const [cx,cz]=streetCorner(a,ay,dx,dz,w+pavement,side,cutA?[]:first,true)
-          const [ex,ez]=streetCorner(b,by,dx,dz,w+pavement,side,cutB?[]:last,false)
-          sidewalks.push(ax,ay+.2,az,bx,by+.2,bz,ex,by+.2,ez,ax,ay+.2,az,ex,by+.2,ez,cx,ay+.2,cz)
-          sidewalks.push(ax,ay+.05,az,bx,by+.05,bz,bx,by+.2,bz,ax,ay+.05,az,bx,by+.2,bz,ax,ay+.2,az)
-          const ox=-dz*.1*side,oz=dx*.1*side
-          shoulders.push(ax,ay+.21,az,bx,by+.21,bz,bx+ox,by+.21,bz+oz,ax,ay+.21,az,bx+ox,by+.21,bz+oz,ax+ox,ay+.21,az+oz)
+        if(pavement>.25 && road.width>=2.5 && !road.bridge && !road.tunnel)for(const side of [-1,1]) {
+          const a:Pt=[x1,z1],b:Pt=[x2,z2]
+          const innerA=streetCorner(a,y1,dX,dZ,w,side,branchesA,true),innerB=streetCorner(b,y2,dX,dZ,w,side,branchesB,false)
+          const outerA=streetCorner(a,y1,dX,dZ,w+pavement,side,branchesA,true),outerB=streetCorner(b,y2,dX,dZ,w+pavement,side,branchesB,false)
+          const polygons=paving.cut([innerA,innerB,outerB,outerA],(y1+y2)/2)
+          const heightAt=(p:Pt)=>y1+(y2-y1)*Math.max(0,Math.min(1,((p[0]-x1)*dX+(p[1]-z1)*dZ)/len))
+          appendPavement(sidewalks,polygons,heightAt)
+          // World-distance stations, not one lamp for every short MVT segment.
+          const phase=((-(x1*dX+z1*dZ))%32+32)%32
+          for(let at=phase;at<len;at+=32){
+            const x=x1+dX*at-dZ*(w+pavement*.6)*side,z=z1+dZ*at+dX*(w+pavement*.6)*side
+            paving.addLamp({x,y:heightAt([x,z]),z,heading:Math.atan2(-dZ*side,dX*side)},polygons)
+          }
         }
         if (road.bridge) {
           while(nextPillar<=distance+len){
@@ -263,7 +277,7 @@ export class World {
             nextPillar+=25
           }
         }
-        if(!road.tunnel && pavement>.5 && len>8 && lamps.length<1000){const side=ri%2?1:-1;lamps.push({x:(x1+x2)/2+nx/w*(w+pavement*.65)*side,y:(y1+y2)/2,z:(z1+z2)/2+nz/w*(w+pavement*.65)*side,heading:Math.atan2(nx*side,nz*side)})}
+
         distance+=len
         if(road.tunnel) {
           tunnelCuts.push(x1+nx,0.02,z1+nz,x2+nx,0.02,z2+nz,x2-nx,0.02,z2-nz,x1+nx,0.02,z1+nz,x2-nx,0.02,z2-nz,x1-nx,0.02,z1-nz)
@@ -287,45 +301,42 @@ export class World {
     }
     for(const arr of [tunnelWalls,tunnelCaps])if(arr.length){
       const g=new THREE.BufferGeometry();g.setAttribute('position',new THREE.Float32BufferAttribute(arr,3));g.computeVertexNormals()
-      this.streets.add(new THREE.Mesh(g,new THREE.MeshStandardMaterial({color:0x4b4f4d,roughness:0.9,side:THREE.DoubleSide})))
+      group.add(new THREE.Mesh(g,new THREE.MeshStandardMaterial({color:0x4b4f4d,roughness:0.9,side:THREE.DoubleSide})))
     }
     if(tunnelCuts.length){
       const g=new THREE.BufferGeometry();g.setAttribute('position',new THREE.Float32BufferAttribute(tunnelCuts,3))
       const m=new THREE.MeshBasicMaterial({side:THREE.DoubleSide,colorWrite:false,depthWrite:false,depthTest:false,stencilWrite:true,stencilRef:1,stencilFunc:THREE.AlwaysStencilFunc,stencilZPass:THREE.ReplaceStencilOp})
-      const cut=new THREE.Mesh(g,m);cut.renderOrder=1;this.streets.add(cut)
+      const cut=new THREE.Mesh(g,m);cut.renderOrder=1;group.add(cut)
     }
     const geo = new THREE.BufferGeometry()
     geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3))
     geo.computeVertexNormals()
     const roadMat=asphaltMaterial(0x28343e);roadMat.polygonOffset=true;roadMat.polygonOffsetFactor=-2;roadMat.polygonOffsetUnits=-2
-    const ribbon=new THREE.Mesh(geo,roadMat);ribbon.renderOrder=3;this.streets.add(ribbon)
-    if(sidewalks.length){const geo=new THREE.BufferGeometry();geo.setAttribute('position',new THREE.Float32BufferAttribute(sidewalks,3));geo.computeVertexNormals();const mesh=new THREE.Mesh(geo,pavingMaterial());mesh.renderOrder=3;this.streets.add(mesh)}
-    if(paint.length){const geo=new THREE.BufferGeometry();geo.setAttribute('position',new THREE.Float32BufferAttribute(paint,3));const mesh=new THREE.Mesh(geo,new THREE.MeshBasicMaterial({color:0x8b8d7e,side:THREE.DoubleSide,polygonOffset:true,polygonOffsetFactor:-3,polygonOffsetUnits:-3}));mesh.renderOrder=4;this.streets.add(mesh)}
-    this.addStreetLights(lamps)
-    if(shoulders.length){
-      const verge=new THREE.BufferGeometry();verge.setAttribute('position',new THREE.Float32BufferAttribute(shoulders,3));verge.computeVertexNormals()
-      this.streets.add(new THREE.Mesh(verge,new THREE.MeshStandardMaterial({color:0x444b4f,roughness:0.95,side:THREE.DoubleSide})))
-    }
+    const ribbon=new THREE.Mesh(geo,roadMat);ribbon.renderOrder=3;group.add(ribbon)
+    if(sidewalks.length){const geo=new THREE.BufferGeometry();geo.setAttribute('position',new THREE.Float32BufferAttribute(sidewalks,3));geo.computeVertexNormals();const mesh=new THREE.Mesh(geo,pavingMaterial());mesh.name="sidewalks";mesh.renderOrder=3;group.add(mesh)}
+    if(paint.length){const geo=new THREE.BufferGeometry();geo.setAttribute('position',new THREE.Float32BufferAttribute(paint,3));const mesh=new THREE.Mesh(geo,new THREE.MeshBasicMaterial({color:0x8b8d7e,side:THREE.DoubleSide,polygonOffset:true,polygonOffsetFactor:-3,polygonOffsetUnits:-3}));mesh.renderOrder=4;group.add(mesh)}
+    this.addStreetLights(lamps,group)
     if(pillars.length) {
       const mesh=new THREE.InstancedMesh(new THREE.BoxGeometry(1,1,1),new THREE.MeshStandardMaterial({color:0x484b4e,roughness:0.9}),pillars.length)
-      pillars.forEach((m,i)=>mesh.setMatrixAt(i,m)); this.streets.add(mesh)
+      pillars.forEach((m,i)=>mesh.setMatrixAt(i,m)); group.add(mesh)
     }
     const mk = (arr: number[], color: number, opacity: number) => {
       const g = new THREE.BufferGeometry()
       g.setAttribute('position', new THREE.Float32BufferAttribute(arr, 3))
       return new THREE.LineSegments(g, new THREE.LineBasicMaterial({ color, transparent: true, opacity }))
     }
-    this.streets.add(mk(line, 0x00a4b6, 0.24))
-    this.streets.add(mk(lineMajor, 0x00b9c9, 0.34))
+    group.add(mk(line, 0x00a4b6, 0.24))
+    group.add(mk(lineMajor, 0x00b9c9, 0.34))
   }
 
-  private addStreetLights(lamps:{x:number;y:number;z:number;heading:number}[]) {
+  private addStreetLights(lamps:{x:number;y:number;z:number;heading:number}[],group:THREE.Group) {
     if(!lamps.length)return
     const pole=new THREE.InstancedMesh(new THREE.CylinderGeometry(0.06,0.10,5.6,6),new THREE.MeshStandardMaterial({color:0x454c50,roughness:0.8}),lamps.length)
     const head=new THREE.InstancedMesh(new THREE.BoxGeometry(0.35,0.065,0.7),new THREE.MeshBasicMaterial({color:0xffc174}),lamps.length)
     const arm=new THREE.InstancedMesh(new THREE.BoxGeometry(.09,.12,1.3),pole.material,lamps.length)
     const housing=new THREE.InstancedMesh(new THREE.BoxGeometry(.45,.16,.8),pole.material,lamps.length)
-    const pool=new THREE.InstancedMesh(new THREE.PlaneGeometry(18,25),new THREE.MeshBasicMaterial({color:0xffb35b,map:softDisc,transparent:true,opacity:0.4,depthWrite:false,blending:THREE.AdditiveBlending}),lamps.length)
+    const pool=new THREE.InstancedMesh(new THREE.PlaneGeometry(8,12),new THREE.MeshBasicMaterial({color:0xffb35b,map:softDisc,transparent:true,opacity:0.23,depthWrite:false,blending:THREE.AdditiveBlending}),lamps.length)
+    pole.name="streetlight-poles"
     const obj=new THREE.Object3D()
     lamps.forEach((l,i)=>{
       obj.position.set(l.x,l.y+2.8,l.z);obj.rotation.set(0,l.heading,0);obj.updateMatrix();pole.setMatrixAt(i,obj.matrix)
@@ -333,7 +344,7 @@ export class World {
       obj.position.set(l.x-Math.sin(l.heading)*1.15,l.y+5.6,l.z-Math.cos(l.heading)*1.15);obj.updateMatrix();housing.setMatrixAt(i,obj.matrix)
       obj.position.y-=.1;obj.updateMatrix();head.setMatrixAt(i,obj.matrix)
       obj.position.set(l.x-Math.sin(l.heading)*3,l.y+0.16,l.z-Math.cos(l.heading)*3);obj.rotation.set(-Math.PI/2,0,-l.heading);obj.updateMatrix();pool.setMatrixAt(i,obj.matrix)
-    });this.streets.add(pole,arm,housing,head,pool)
+    });group.add(pole,arm,housing,head,pool)
   }
 
   private placePumps() {
