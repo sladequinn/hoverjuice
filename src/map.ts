@@ -538,7 +538,7 @@ export function proceduralCity(name: string, lat: number, lon: number): CityData
         for (let b = 0; b < split; b++) {
           const pad = 3 + r() * 6
           const x = x0 + a * cell + pad, z = z0 + b * cell + pad, w = cell - pad * 2, d = cell - pad * 2
-          const h = 10 + r() * r() * (220 * (1 - dist) + 30)
+          const h = 10 + r() * r() * (220 * Math.max(0, 1 - dist) + 30)
           const bld = makeBuilding([[x, z], [x + w, z], [x + w, z + d], [x, z + d]], h)
           if (bld) buildings.push(bld)
         }

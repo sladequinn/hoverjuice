@@ -157,3 +157,23 @@ test('four gang leaders trade from parked cars without kiosks or sign sprites',(
  for(const d of dealers.dealers)assert.ok(dealers.group.getObjectByName(`dealer-car-${d.gang}`))
  dealers.dispose();w.dispose()
 })
+
+test('vehicle batching preserves opaque chassis geometry for every vehicle class',()=>{
+  // RoundedBoxGeometry is non-indexed while Box/Cylinder geometries are indexed.
+  // An unnormalised merge silently discarded the complete compact chassis.
+  for(const id of ['board','neonic','z150','hovercedes','goblin','hoverarrari','hoverghini']){
+    const spec=vehicleById(id),mesh=buildVehicleMesh(spec)
+    const body=mesh.children.find(child=>{
+      const candidate=child as unknown as {material?:{color?:{getHex:()=>number}}}
+      return candidate.material?.color?.getHex()===spec.body
+    }) as unknown as {geometry?:{attributes:{position:{count:number}},computeBoundingBox:()=>void,boundingBox:{min:{y:number},max:{y:number}}}}
+    assert.ok(body?.geometry,`Missing chassis for ${spec.id}`)
+    assert.ok(body.geometry.attributes.position.count>30)
+    body.geometry.computeBoundingBox()
+    assert.ok(body.geometry.boundingBox.max.y>body.geometry.boundingBox.min.y)
+  }
+})
+
+test('fallback city never generates inverted building heights at its outskirts',()=>{
+  for(const building of proceduralCity('test',43.45,-80.49).buildings)assert.ok(building.height>=10)
+})

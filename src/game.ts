@@ -1455,6 +1455,7 @@ export class Game {
 
     const c = this.active
     const panel = $('contract')
+    panel.classList.toggle('idle',!c && !this.waypoint)
     if (c) {
       panel.classList.add('show')
       const w = this.world!
@@ -1470,7 +1471,7 @@ export class Game {
       setHtml(panel, `<div class="client">Waypoint: ${esc(this.waypoint.label)}</div><div class="muted">${touch ? 'Tap for contracts' : 'Press <kbd>J</kbd> for contracts'}</div>`)
     } else {
       panel.classList.add('show')
-      setHtml(panel, `<div class="client">No active contract</div><div class="muted">${touch ? 'Tap to open the contract board' : 'Press <kbd>J</kbd> to open the contract board'}</div>`)
+      setHtml(panel, `<span class="muted">DISPATCH</span> · ${touch?'Tap for work':'<kbd>J</kbd> Find a contract'}`)
     }
 
     const { dist } = this.world!.nearestPump(p.pos.x, p.pos.z)

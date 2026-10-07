@@ -1,3 +1,4 @@
+import { renderGaragePreview } from './menu-scene'
 import { crewInvite } from './spatial'
 import { CITIES } from './data'
 import './style.css'
@@ -14,7 +15,7 @@ renderer.toneMapping = THREE.ACESFilmicToneMapping
 renderer.toneMappingExposure = 1.0
 
 const scene = new THREE.Scene()
-scene.fog = new THREE.FogExp2(0x18212b, 0.0022)
+scene.fog = new THREE.FogExp2(0x263441, 0.0045)
 scene.add(new THREE.HemisphereLight(0xc8dcf0, 0x4b535e, 2.2))
 const sun = new THREE.DirectionalLight(0xffce91, 2.0)
 sun.position.set(40, 80, -30)
@@ -33,12 +34,14 @@ scene.add(fill, fill.target)
 let renderScale = Math.min(window.devicePixelRatio, 1.25, Math.sqrt(1600000 / (innerWidth * innerHeight)))
 let slowFrames = 0
 
+let renderTitle: (() => void) | undefined
 function resize() {
   camera.aspect = window.innerWidth / window.innerHeight
   camera.updateProjectionMatrix()
   renderer.setSize(window.innerWidth, window.innerHeight)
   renderScale = Math.min(window.devicePixelRatio, 1.25, Math.sqrt(1600000 / (innerWidth * innerHeight)))
   renderer.setPixelRatio(renderScale)
+  renderTitle?.()
 }
 window.addEventListener('resize', resize)
 resize()
@@ -50,6 +53,7 @@ coarse.addEventListener('change', syncTouch)
 
 const game = new Game(scene)
 ;(window as unknown as { hoverghini: Game }).hoverghini = game
+;(window as unknown as {hoverjuiceRenderStats:()=>unknown}).hoverjuiceRenderStats=()=>({calls:renderer.info.render.calls,triangles:renderer.info.render.triangles,geometries:renderer.info.memory.geometries,textures:renderer.info.memory.textures,pixelRatio:renderer.getPixelRatio()})
 
 // ---------- input ----------
 const keys = new Set<string>()
@@ -173,6 +177,8 @@ window.addEventListener('wheel', (e) => { zoom = Math.min(2.5, Math.max(0.5, zoo
 
 // ---------- title ----------
 const title = $('title')
+renderTitle = () => { if(title.classList.contains('show')) renderGaragePreview(renderer, innerWidth, innerHeight) }
+renderTitle()
 const cont = $('btn-continue')
 if (game.hasSave) {
   cont.style.display = ''

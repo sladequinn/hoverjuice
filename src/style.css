@@ -404,3 +404,22 @@ body.is-touch .toast {width:calc(100% - 32px);max-width:400px;font-style:normal;
 
 .test-flight-only { display:none !important; }
 body.test-flight .test-flight-only { display:block !important; }
+
+/* Industrial instrument panels: preserve the driving viewport. */
+.panel{border-left:1px solid var(--line);border-radius:2px;box-shadow:none;backdrop-filter:none;background:rgba(12,18,23,.9)}
+.hud-tl{min-width:180px;padding:10px 12px}.hud-tl .brand{font-family:monospace;font-size:.7rem;letter-spacing:.12em}.hud-tl #mask-portrait{width:28px;height:28px}
+.money{font-family:monospace;font-size:1.7rem;color:#d3bd94}#income,#network-status{font-size:.65rem;letter-spacing:.04em}
+#minimap{width:146px;height:146px;border-radius:3px;border:1px solid #596671;box-shadow:none}.cam-label{display:none}
+.contract{top:172px;width:220px;font-size:.88rem}.contract.idle{padding:9px 12px;min-height:0}.hud-bl{width:270px;padding:12px}.speed{font-family:monospace}
+.juice-bar{height:5px;border:0;border-radius:0}.juice-label{font-family:monospace}#juice-fill{background:#55bac0;box-shadow:none}.mode.mag,.mode.free{box-shadow:none}
+.menu{gap:0;background:rgba(12,18,23,.9);border:1px solid #3d484f}.menu button{border:0;border-left:1px solid #303b43;border-radius:0;min-width:60px;padding:7px 10px;font-size:.8rem;background:transparent}.menu button b{font-family:monospace;color:#9aaab1}
+.turn{border-radius:2px;font:12px monospace;color:#bac8ce}.prompt,.toast{border-radius:2px;font-size:.9rem}
+body.is-touch{--row2:calc(84px + env(safe-area-inset-top))}body.is-touch .hud-tl,body.is-touch .hud-bl{height:72px;padding:6px 8px}body.is-touch #income,body.is-touch #network-status,body.is-touch #mask-portrait{display:none}
+body.is-touch .city{font-size:.7rem}body.is-touch .money{font-size:1.1rem}body.is-touch .juice{margin:3px 0 0}body.is-touch .juice-bar{height:4px}body.is-touch .contract.idle{min-height:30px;height:30px;padding:6px 8px;font-size:.7rem}
+body.is-touch .menu-btn{height:30px;width:40px;right:8px}body.is-touch #minimap{top:calc(var(--row2) + 38px);width:76px;height:76px;border-radius:2px}body.is-touch .turn{top:calc(var(--row2) + 38px);font-size:.7rem;padding:5px 8px}
+.touch button{box-shadow:none!important;background:rgba(14,23,30,.84);border-color:#65828b;color:#b5cbd2;border-radius:14px}.touch .gas{border-color:#a58551;color:#dec798}.touch .steer button{width:58px;height:58px}.touch .gas{width:70px;height:70px}
+body.is-touch #combat-status{position:absolute;left:8px;right:8px;bottom:4px;margin:0;font:600 7px monospace;line-height:1;white-space:nowrap;letter-spacing:0}body.is-touch .hud-bl .juice{margin-top:2px}body.is-touch .hud-bl .juice-label{font-size:8px}
+/* The menu uses an actual in-engine garage render behind the dispatch panel. */
+.title{justify-content:flex-start;background:linear-gradient(90deg,rgba(8,14,19,.97),rgba(8,14,19,.88) 35%,rgba(8,14,19,.08) 75%)}
+.title-inner{max-width:600px;padding:0 28px}.title h1{font-size:clamp(40px,5.3vw,76px)}.title-statement{font-size:32px}.lede{font-size:1rem;max-width:440px}.title-status{margin-bottom:24px}.title-brief{gap:16px;font-size:10px}
+@media(max-width:760px){.title{align-items:flex-end;padding:24px 20px;background:linear-gradient(0deg,rgba(8,14,19,.98),rgba(8,14,19,.9) 48%,rgba(8,14,19,0) 85%)}.title-inner{padding:0 16px}.title-status{margin-bottom:16px}.title h1{font-size:42px}.title-statement{font-size:26px;margin:14px 0}.lede{font-size:.9rem}.title-brief{margin-top:16px;padding-top:12px;font-size:9px;gap:10px}.title-actions{margin:18px 0 0}}
