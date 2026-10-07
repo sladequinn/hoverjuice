@@ -3,7 +3,7 @@ import * as THREE from 'three'
 import {softDisc} from './art'
 import {mergeGeometries} from 'three/examples/jsm/utils/BufferGeometryUtils.js'
 import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js'
-import type { VehicleSpec } from './data'
+import { VEHICLE_SCALE, type VehicleSpec } from './data'
 import type { World } from './world'
 import { buildCharacter, setCharacterMask } from './character'
 
@@ -149,7 +149,9 @@ export function buildVehicleMesh(spec: VehicleSpec, maskId = 'balaclava') {
   flame.name = 'flame'
   flame.visible = false
   g.add(flame)
-  g.userData.halfL = halfL
+  g.scale.setScalar(VEHICLE_SCALE)
+  g.userData.halfL = halfL * VEHICLE_SCALE
+  g.userData.halfW = halfW * VEHICLE_SCALE
 
   return g
 }
@@ -405,7 +407,7 @@ export class Player {
       if(steer && steer!==this.steerLatch) this.laneIndex=Math.max(0,Math.min(2,this.laneIndex-steer))
       this.steerLatch=steer
       const oldSway=this.sway
-      const chassisHalfWidth=s.kind==='board'?0.45:s.kind==='truck'?1.3:1.05
+      const chassisHalfWidth=this.mesh.userData.halfW as number
       const laneWidth=Math.min(3.2,Math.max(0,Math.min(a.width??5,b.width??5)/2-chassisHalfWidth-0.5))
       this.sway += (((1-this.laneIndex)*laneWidth)-this.sway)*(1-Math.exp(-18*dt))
       this.swayV=(this.sway-oldSway)/Math.max(dt,0.001)
@@ -504,7 +506,7 @@ export class Player {
     }
     const pad = this.mesh.getObjectByName('pad') as THREE.Mesh | undefined
     if (pad) {
-      pad.position.y = -this.pos.y + 0.15
+      pad.position.y = (-this.pos.y + 0.15) / VEHICLE_SCALE
       const shadow=this.mesh.getObjectByName('contact-shadow');if(shadow)shadow.position.y=pad.position.y-0.01
       ;(pad.material as THREE.MeshBasicMaterial).opacity = (hasJuice ? 0.055 + Math.random() * 0.015 : 0.04) * (this.spec.kind === 'board' ? 0.25 : 1)
     }
