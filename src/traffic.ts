@@ -1,3 +1,4 @@
+import {VEHICLE_SCALE} from './data'
 import * as THREE from 'three'
 import type { World } from './world'
 interface Agent {a:number;b:number;distance:number;speed:number;seed:number;kind:number;pos:THREE.Vector3;near:boolean;cooldown:number}
@@ -47,20 +48,20 @@ export class TrafficSystem {
     a=nodes[car.a];b=nodes[car.b];len=Math.hypot(b.x-a.x,b.z-a.z)||1
    }
    const t=Math.min(1,car.distance/len),heading=Math.atan2(b.x-a.x,b.z-a.z)
-   const clearance=Math.max(0,Math.min(a.width??5,b.width??5)/2-(car.kind===1?1.32:car.kind===0?.74:1.05)-.2)
+   const clearance=Math.max(0,Math.min(a.width??5,b.width??5)/2-(car.kind===1?1.32:car.kind===0?.74:1.05)*VEHICLE_SCALE-.2)
    let lane=(car.seed%2?1:-1)*Math.min(1.6,clearance)
    if(d<15&&playerSpeed>25&&!hostile)lane=Math.sign(lane)*Math.min(clearance,Math.abs(lane)*1.12)
    if(hostile&&d<15){lane=0;closeHostiles++}
    car.pos.set(a.x+(b.x-a.x)*t+Math.cos(heading)*lane,(a.y??0)*(1-t)+(b.y??0)*t+1.3,a.z+(b.z-a.z)*t-Math.sin(heading)*lane)
    if(dt>0){
-    const hit=player.distanceTo(car.pos)<(car.kind===1?3.1:2.1)
+    const hit=player.distanceTo(car.pos)<(car.kind===1?3.1:2.1)*VEHICLE_SCALE
     if(hit&&car.cooldown===0){events.impact=Math.max(events.impact,Math.max(4,Math.abs(playerSpeed-car.speed)));car.cooldown=1}
     if(d<6&&!hit)car.near=true
     if(d>9&&car.near){if(playerSpeed>25&&car.cooldown===0)events.nearMisses++;car.near=false}
    }
    this.rotation.setFromAxisAngle(this.up,heading)
    const scale=car.kind===1?new THREE.Vector3(1.25,2,1.8):car.kind===0?new THREE.Vector3(0.7,0.5,0.8):new THREE.Vector3(1,1,1)
-   this.matrix.compose(car.pos,this.rotation,scale)
+   this.matrix.compose(car.pos,this.rotation,scale.multiplyScalar(VEHICLE_SCALE))
    this.fleets[car.kind].setMatrixAt(counts[car.kind]++,this.matrix)
   }
   for(let i=0;i<3;i++){this.fleets[i].count=counts[i];this.fleets[i].instanceMatrix.needsUpdate=true}

@@ -81,8 +81,21 @@ test('captured Kitchener tile junctions build finite pavement and spaced streetl
  assert.ok(poles.count>0)
  const matrices=poles.instanceMatrix.array
  for(let i=0;i<poles.count;i++)for(let j=0;j<i;j++)assert.ok(Math.hypot(matrices[i*16+12]-matrices[j*16+12],matrices[i*16+14]-matrices[j*16+14])>21.99)
+ assert.ok(city.roads.every(road=>road.width>=3.2),'real Kitchener roads must retain driveable width')
  assert.ok(sidewalk,'actual MVT junction fixture should retain pavement')
  assert.ok(sidewalk.geometry.getAttribute('position').count>30)
  assert.ok(Array.from(sidewalk.geometry.getAttribute('position').array).every(Number.isFinite))
  world.dispose()
+})
+
+test('a crossing building cannot collapse a long carriageway into a hairline',()=>{
+ const city=proceduralCity('regression',43.45,-80.49)
+ city.roads=[{pts:[[0,0],[0,100]],width:5,major:false}]
+ city.nodes=[{x:0,z:0,main:true,adj:[1]},{x:0,z:100,main:true,adj:[0]}]
+ city.buildings=[makeBuilding([[-2,40],[2,40],[2,46],[-2,46]],10)!]
+ fitStreetWidths(city)
+ assert.ok(city.roads[0].width>=3.2)
+ assert.equal(city.roads[0].sidewalkWidth,0)
+ assert.equal(city.nodes[0].width,city.roads[0].width)
+ fitStreetWidths(city);assert.ok(city.roads[0].width>=3.2)
 })

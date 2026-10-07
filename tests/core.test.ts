@@ -123,7 +123,7 @@ test('no turn request goes straight and lane offset fits a narrow road',()=>{
  assert.equal(p.edgeB,5)
  p.speed=0
  for(let i=0;i<30;i++)p.update(1/60,{...neutral,steer:1},w,true)
- assert.ok(Math.abs(p.sway)<=2.2)
+ assert.ok(Math.abs(p.sway)+p.mesh.userData.halfW<=Math.min(w.city.nodes[p.edgeA].width!,w.city.nodes[p.edgeB].width!)/2-.49)
 })
 test('lane overlap with a footprint recentres instead of ejecting',()=>{
  const w=junctionFixture();w.hitBuilding=(x)=>Math.abs(x)>0.5?0:-1
@@ -176,4 +176,16 @@ test('vehicle batching preserves opaque chassis geometry for every vehicle class
 
 test('fallback city never generates inverted building heights at its outskirts',()=>{
   for(const building of proceduralCity('test',43.45,-80.49).buildings)assert.ok(building.height>=10)
+})
+
+test('scaled vehicle envelopes fit the minimum carriageway and shadows stay at ground level',()=>{
+ for(const id of ['board','neonic','z150','hovercedes','hoverghini']){
+  const w=fixture();w.city.nodes.forEach(n=>n.width=3.2)
+  const p=new Player(vehicleById(id),'balaclava');p.placeAtNode(w,0)
+  for(let i=0;i<60;i++)p.update(1/60,{...neutral,steer:1},w,true)
+  assert.equal(p.mesh.scale.x,.75)
+  assert.ok(Math.abs(p.sway)+p.mesh.userData.halfW<=1.6-.49)
+  const pad=p.mesh.getObjectByName('pad')!
+  assert.ok(Math.abs(p.pos.y+pad.position.y*p.mesh.scale.y-.15)<.001)
+ }
 })

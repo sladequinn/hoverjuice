@@ -1,6 +1,7 @@
 import type { CityData, Pt, Road } from './map'
 
 export const SIDEWALK_WIDTH = 1.1
+export const MIN_DRIVABLE_WIDTH = 3.2
 export const streetKey = (p:Pt,y=0) => `${Math.round(p[0]*4)},${Math.round(p[1]*4)},${Math.round(y*10)}`
 type Branch={dx:number;dz:number;width:number;key:string}
 export function streetJunctions(roads:Road[]) {
@@ -39,7 +40,7 @@ function segmentDistance(a:Pt,b:Pt,c:Pt,d:Pt){
   if(cross(a,b,c)*cross(a,b,d)<0&&cross(c,d,a)*cross(c,d,b)<0)return 0
   return Math.min(pointSegment(a,c,d),pointSegment(b,c,d),pointSegment(c,a,b),pointSegment(d,a,b))
 }
-/** Fit the whole ribbon plus paving in the mapped corridor; never move buildings. */
+/** Fit pavement to mapped corridors, but do not collapse carriageways on noisy building data. */
 export function fitStreetWidths(city:CityData){
   const grid=new Map<string,number[]>(),cell=40
   city.buildings.forEach((b,i)=>{for(let x=Math.floor(b.minX/cell);x<=Math.floor(b.maxX/cell);x++)for(let z=Math.floor(b.minZ/cell);z<=Math.floor(b.maxZ/cell);z++){const key=`${x},${z}`,list=grid.get(key)??[];list.push(i);grid.set(key,list)}})
@@ -52,7 +53,8 @@ export function fitStreetWidths(city:CityData){
       for(const index of candidates){const poly=city.buildings[index].poly;for(let j=0;j<poly.length;j++)clearance=Math.min(clearance,segmentDistance(a,b,poly[j],poly[(j+1)%poly.length]))}
     }
     // Keep useful carriageway space first, then reduce pavement in tight alleys.
-    road.width=Math.min(road.requestedWidth,Math.max(.2,2*(clearance-.25-Math.min(SIDEWALK_WIDTH,Math.max(0,clearance-1.9)))) )
+    const availableWidth=2*(clearance-.25-Math.min(SIDEWALK_WIDTH,Math.max(0,clearance-1.9)))
+    road.width=Math.max(MIN_DRIVABLE_WIDTH,Math.min(road.requestedWidth,availableWidth))
     road.sidewalkWidth=road.tunnel||road.bridge?0:Math.max(0,Math.min(SIDEWALK_WIDTH,clearance-road.width/2-.25))
   }
   const widths=new Map<string,number>()

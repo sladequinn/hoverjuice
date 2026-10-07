@@ -1,3 +1,4 @@
+import {VEHICLE_SCALE} from './data'
 import * as THREE from 'three'
 import type { CityData } from './map'
 import { worldToLatLon } from './map'
@@ -46,7 +47,7 @@ export class Multiplayer {
       if(peer.state&&data.seq<=peer.state.seq)return
       const first=!peer.state
       peer.state=data;peer.received=performance.now();peer.mesh.visible=true
-      peer.mesh.scale.setScalar(data.chassisId==='board'?0.6:data.chassisId==='z150'?1.4:1)
+      peer.mesh.scale.setScalar(VEHICLE_SCALE*(data.chassisId==='board'?0.6:data.chassisId==='z150'?1.4:1))
       if(first)peer.mesh.position.copy(this.local(data))
     }
     ws.onerror=()=>{this.status='RECONNECTING'}
