@@ -406,7 +406,7 @@ export class Player {
       this.steerLatch=steer
       const oldSway=this.sway
       const chassisHalfWidth=s.kind==='board'?0.45:s.kind==='truck'?1.3:1.05
-      const laneWidth=Math.min(3.2,Math.max(0.5,Math.min(a.width??10,b.width??10)/2-chassisHalfWidth-0.5))
+      const laneWidth=Math.min(3.2,Math.max(0,Math.min(a.width??5,b.width??5)/2-chassisHalfWidth-0.5))
       this.sway += (((1-this.laneIndex)*laneWidth)-this.sway)*(1-Math.exp(-18*dt))
       this.swayV=(this.sway-oldSway)/Math.max(dt,0.001)
       const lx = Math.cos(target), lz = -Math.sin(target)
