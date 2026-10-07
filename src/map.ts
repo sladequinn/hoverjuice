@@ -35,6 +35,8 @@ export interface RoadNode {
 }
 
 export interface Road {
+  requestedWidth?: number
+  sidewalkWidth?: number
   heights?: number[]
   bridge?: boolean
   tunnel?: boolean
@@ -210,14 +212,14 @@ type GeoGeometry =
   | { type: 'MultiLineString'; coordinates: LngLat[][] }
 
 const ROAD_CLASS: Record<string, { width: number; major: boolean }> = {
-  motorway: { width: 12, major: true },
-  trunk: { width: 12, major: true },
-  primary: { width: 12, major: true },
-  secondary: { width: 10, major: true },
-  tertiary: { width: 10, major: false },
-  minor: { width: 7.5, major: false },
-  service: { width: 7.5, major: false },
-  track: { width: 7.5, major: false },
+  motorway: { width: 8, major: true },
+  trunk: { width: 7, major: true },
+  primary: { width: 6.5, major: true },
+  secondary: { width: 6, major: true },
+  tertiary: { width: 5.5, major: false },
+  minor: { width: 5, major: false },
+  service: { width: 3.5, major: false },
+  track: { width: 3, major: false },
 }
 
 export function tileFor(lat: number, lon: number, z: number) {
@@ -303,7 +305,7 @@ export class MapStreamer {
     return [(lon - this.city.lon) * kx, -(lat - this.city.lat) * 110540]
   }
 
-  private node(pt: Pt, y = 0, tunnel = false, width = 7.5) {
+  private node(pt: Pt, y = 0, tunnel = false, width = 5) {
     const key = `${Math.round(pt[0] * 4)},${Math.round(pt[1] * 4)},${Math.round(y * 10)}`
     let i = this.nodeIndex.get(key)
     if (i === undefined) {
@@ -516,11 +518,11 @@ export function proceduralCity(name: string, lat: number, lon: number): CityData
   for (let i = 0; i <= n; i++)
     for (let j = 0; j <= n; j++) nodes.push({ x: off + i * step, z: off + j * step, adj: [], main: true })
   const link = (a: number, b: number, major: boolean) => {
-    nodes[a].width = Math.max(nodes[a].width ?? 0, major ? 12 : 7.5)
-    nodes[b].width = Math.max(nodes[b].width ?? 0, major ? 12 : 7.5)
+    nodes[a].width = Math.max(nodes[a].width ?? 0, major ? 6.5 : 5)
+    nodes[b].width = Math.max(nodes[b].width ?? 0, major ? 6.5 : 5)
     nodes[a].adj.push(b)
     nodes[b].adj.push(a)
-    roads.push({ pts: [[nodes[a].x, nodes[a].z], [nodes[b].x, nodes[b].z]], width: major ? 12 : 7.5, major })
+    roads.push({ pts: [[nodes[a].x, nodes[a].z], [nodes[b].x, nodes[b].z]], width: major ? 6.5 : 5, major })
   }
   for (let i = 0; i <= n; i++)
     for (let j = 0; j <= n; j++) {

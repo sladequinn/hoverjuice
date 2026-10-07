@@ -47,8 +47,9 @@ export class TrafficSystem {
     a=nodes[car.a];b=nodes[car.b];len=Math.hypot(b.x-a.x,b.z-a.z)||1
    }
    const t=Math.min(1,car.distance/len),heading=Math.atan2(b.x-a.x,b.z-a.z)
-   let lane=car.seed%2?3.2:-3.2
-   if(d<15&&playerSpeed>25&&!hostile)lane*=1.12
+   const clearance=Math.max(0,Math.min(a.width??5,b.width??5)/2-(car.kind===1?1.32:car.kind===0?.74:1.05)-.2)
+   let lane=(car.seed%2?1:-1)*Math.min(1.6,clearance)
+   if(d<15&&playerSpeed>25&&!hostile)lane=Math.sign(lane)*Math.min(clearance,Math.abs(lane)*1.12)
    if(hostile&&d<15){lane=0;closeHostiles++}
    car.pos.set(a.x+(b.x-a.x)*t+Math.cos(heading)*lane,(a.y??0)*(1-t)+(b.y??0)*t+1.3,a.z+(b.z-a.z)*t-Math.sin(heading)*lane)
    if(dt>0){

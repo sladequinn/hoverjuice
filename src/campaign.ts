@@ -1,3 +1,4 @@
+import {streetKey} from './streets'
 import * as THREE from 'three'
 import type { World } from './world'
 import type { Player } from './vehicle'
@@ -6,7 +7,14 @@ import { vehicleById } from './data'
 /** Find a contiguous road-graph cycle; disconnected avenues never form a fabricated circuit. */
 export function highwayLoop(world:World,start:number) {
  const nodes=world.city.nodes,visited=new Set<number>()
- const starts=nodes.map((n,i)=>({n,i})).filter(({n})=>(n.width??7.5)>=10&&n.adj.length>1).sort((a,b)=>Math.hypot(a.n.x-nodes[start].x,a.n.z-nodes[start].z)-Math.hypot(b.n.x-nodes[start].x,b.n.z-nodes[start].z))
+ const majorNodes=new Set<string>(),majorEdges=new Set<string>()
+ const edgeKey=(a:string,b:string)=>a<b?`${a}|${b}`:`${b}|${a}`
+ for(const road of world.city.roads)if(road.major)for(let i=1;i<road.pts.length;i++){
+  const a=streetKey(road.pts[i-1],road.heights?.[i-1]),b=streetKey(road.pts[i],road.heights?.[i])
+  majorNodes.add(a);majorNodes.add(b);majorEdges.add(edgeKey(a,b))
+ }
+ const key=(i:number)=>streetKey([nodes[i].x,nodes[i].z],nodes[i].y)
+ const starts=nodes.map((n,i)=>({n,i})).filter(({n})=>majorNodes.has(streetKey([n.x,n.z],n.y))&&n.adj.length>1).sort((a,b)=>Math.hypot(a.n.x-nodes[start].x,a.n.z-nodes[start].z)-Math.hypot(b.n.x-nodes[start].x,b.n.z-nodes[start].z))
  for(const root of starts){
   if(visited.has(root.i))continue
   const stack=[{id:root.i,parent:-1,edge:0}],active=new Map<number,number>([[root.i,0]])
@@ -15,7 +23,7 @@ export function highwayLoop(world:World,start:number) {
    const frame=stack[stack.length-1],adj=nodes[frame.id].adj
    if(frame.edge>=adj.length){active.delete(frame.id);stack.pop();continue}
    const next=adj[frame.edge++]
-   if(next===frame.parent||(nodes[next].width??7.5)<10)continue
+   if(next===frame.parent||!majorEdges.has(edgeKey(key(frame.id),key(next))))continue
    const ancestor=active.get(next)
    if(ancestor!==undefined){
     const path=stack.slice(ancestor).map(f=>f.id)

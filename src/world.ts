@@ -1,3 +1,4 @@
+import {fitStreetWidths,streetJunctions,streetCorner,streetKey} from './streets'
 import { GANGS } from './filter'
 import {softDisc} from './art'
 import * as THREE from 'three'
@@ -24,9 +25,12 @@ export class World {
   private ownedGroup = new THREE.Group()
   private pumpRings: THREE.Mesh[] = []
   private time = 0
+  private streets=new THREE.Group()
 
   constructor(city: CityData) {
     this.city = city
+    this.group.add(this.streets)
+    fitStreetWidths(city)
     this.buildGround()
     this.buildBuildings()
     this.buildRoads()
@@ -57,7 +61,11 @@ export class World {
       await new Promise<void>(resolve=>setTimeout(resolve,0))
     }
     if(this.disposed)return
-    this.buildRoads(delta.roadsFrom)
+    fitStreetWidths(this.city)
+    this.streets.traverse(obj=>{if(obj instanceof THREE.Mesh || obj instanceof THREE.LineSegments){obj.geometry.dispose();for(const mat of Array.isArray(obj.material)?obj.material:[obj.material])mat.dispose()}})
+    this.streets.clear()
+    this.roadGrid.clear()
+    this.buildRoads()
     this.buildWater()
     this.placePumps()
     this.indexBuildings(delta.buildingsFrom)
@@ -204,6 +212,7 @@ export class World {
   }
 
   private buildRoads(from = 0) {
+    const junctions=streetJunctions(this.city.roads)
     const tunnelWalls:number[] = [], tunnelCaps:number[] = [], tunnelCuts:number[] = []
     const pos: number[] = [], line: number[] = [], lineMajor: number[] = [], shoulders: number[] = []
     const paint:number[]=[],sidewalks:number[]=[]
@@ -225,17 +234,27 @@ export class World {
         const y1 = road.heights?.[i] ?? 0, y2 = road.heights?.[i + 1] ?? 0
         const len = Math.hypot(x2 - x1, z2 - z1) || 1
         const nx = (-(z2 - z1) / len) * w, nz = ((x2 - x1) / len) * w
-        pos.push(x1 + nx, y1 + 0.05, z1 + nz, x2 + nx, y2 + 0.05, z2 + nz, x2 - nx, y2 + 0.05, z2 - nz)
-        pos.push(x1 + nx, y1 + 0.05, z1 + nz, x2 - nx, y2 + 0.05, z2 - nz, x1 - nx, y1 + 0.05, z1 - nz)
-        // Batching concrete verge strips makes the road readable without more per-road objects.
-        for(const side of [-1,1]) {
-          const ox=nx/w*0.18*side, oz=nz/w*0.18*side
-          const setback=Math.min(.24,(w+1)/len)
-          const ax=x1+(x2-x1)*setback+nx*side, az=z1+(z2-z1)*setback+nz*side, bx=x2-(x2-x1)*setback+nx*side, bz=z2-(z2-z1)*setback+nz*side
-          const sx=nx/w*2.8*side,sz=nz/w*2.8*side
-          sidewalks.push(ax,y1+0.24,az,bx,y2+0.24,bz,bx+sx,y2+0.24,bz+sz,ax,y1+0.24,az,bx+sx,y2+0.24,bz+sz,ax+sx,y1+0.24,az+sz)
-          sidewalks.push(ax,y1+0.05,az,bx,y2+0.05,bz,bx,y2+0.24,bz,ax,y1+0.05,az,bx,y2+0.24,bz,ax,y1+0.24,az)
-          shoulders.push(ax,y1+0.25,az,bx,y2+0.25,bz,bx+ox,y2+0.25,bz+oz,ax,y1+0.25,az,bx+ox,y2+0.25,bz+oz,ax+ox,y1+0.25,az+oz)
+        const branchesA=junctions.get(streetKey([x1,z1],y1))??[],branchesB=junctions.get(streetKey([x2,z2],y2))??[]
+        const dX=(x2-x1)/len,dZ=(z2-z1)/len
+        const lA=streetCorner([x1,z1],y1,dX,dZ,w,1,branchesA,true),rA=streetCorner([x1,z1],y1,dX,dZ,w,-1,branchesA,true)
+        const lB=streetCorner([x2,z2],y2,dX,dZ,w,1,branchesB,false),rB=streetCorner([x2,z2],y2,dX,dZ,w,-1,branchesB,false)
+        pos.push(lA[0],y1+.05,lA[1],lB[0],y2+.05,lB[1],rB[0],y2+.05,rB[1],lA[0],y1+.05,lA[1],rB[0],y2+.05,rB[1],rA[0],y1+.05,rA[1])
+        const pavement=road.sidewalkWidth??1.1
+        if(pavement>0.05)for(const side of [-1,1]) {
+          const first=junctions.get(streetKey([x1,z1],y1))??[],last=junctions.get(streetKey([x2,z2],y2))??[]
+          const cutA=first.length>2?Math.min(len*.45,Math.max(...first.map(b=>b.width))/2+.25):0
+          const cutB=last.length>2?Math.min(len*.45,Math.max(...last.map(b=>b.width))/2+.25):0
+          const dx=(x2-x1)/len,dz=(z2-z1)/len
+          const a:Pt=[x1+dx*cutA,z1+dz*cutA],b:Pt=[x2-dx*cutB,z2-dz*cutB]
+          const ay=y1+(y2-y1)*cutA/len,by=y2-(y2-y1)*cutB/len
+          const [ax,az]=streetCorner(a,ay,dx,dz,w,side,cutA?[]:first,true)
+          const [bx,bz]=streetCorner(b,by,dx,dz,w,side,cutB?[]:last,false)
+          const [cx,cz]=streetCorner(a,ay,dx,dz,w+pavement,side,cutA?[]:first,true)
+          const [ex,ez]=streetCorner(b,by,dx,dz,w+pavement,side,cutB?[]:last,false)
+          sidewalks.push(ax,ay+.2,az,bx,by+.2,bz,ex,by+.2,ez,ax,ay+.2,az,ex,by+.2,ez,cx,ay+.2,cz)
+          sidewalks.push(ax,ay+.05,az,bx,by+.05,bz,bx,by+.2,bz,ax,ay+.05,az,bx,by+.2,bz,ax,ay+.2,az)
+          const ox=-dz*.1*side,oz=dx*.1*side
+          shoulders.push(ax,ay+.21,az,bx,by+.21,bz,bx+ox,by+.21,bz+oz,ax,ay+.21,az,bx+ox,by+.21,bz+oz,ax+ox,ay+.21,az+oz)
         }
         if (road.bridge) {
           while(nextPillar<=distance+len){
@@ -244,7 +263,7 @@ export class World {
             nextPillar+=25
           }
         }
-        if(!road.tunnel && len>8 && lamps.length<1000){const side=ri%2?1:-1;lamps.push({x:(x1+x2)/2+nx/w*(w+0.8)*side,y:(y1+y2)/2,z:(z1+z2)/2+nz/w*(w+0.8)*side,heading:Math.atan2(nx*side,nz*side)})}
+        if(!road.tunnel && pavement>.5 && len>8 && lamps.length<1000){const side=ri%2?1:-1;lamps.push({x:(x1+x2)/2+nx/w*(w+pavement*.65)*side,y:(y1+y2)/2,z:(z1+z2)/2+nz/w*(w+pavement*.65)*side,heading:Math.atan2(nx*side,nz*side)})}
         distance+=len
         if(road.tunnel) {
           tunnelCuts.push(x1+nx,0.02,z1+nz,x2+nx,0.02,z2+nz,x2-nx,0.02,z2-nz,x1+nx,0.02,z1+nz,x2-nx,0.02,z2-nz,x1-nx,0.02,z1-nz)
@@ -268,36 +287,36 @@ export class World {
     }
     for(const arr of [tunnelWalls,tunnelCaps])if(arr.length){
       const g=new THREE.BufferGeometry();g.setAttribute('position',new THREE.Float32BufferAttribute(arr,3));g.computeVertexNormals()
-      this.group.add(new THREE.Mesh(g,new THREE.MeshStandardMaterial({color:0x4b4f4d,roughness:0.9,side:THREE.DoubleSide})))
+      this.streets.add(new THREE.Mesh(g,new THREE.MeshStandardMaterial({color:0x4b4f4d,roughness:0.9,side:THREE.DoubleSide})))
     }
     if(tunnelCuts.length){
       const g=new THREE.BufferGeometry();g.setAttribute('position',new THREE.Float32BufferAttribute(tunnelCuts,3))
       const m=new THREE.MeshBasicMaterial({side:THREE.DoubleSide,colorWrite:false,depthWrite:false,depthTest:false,stencilWrite:true,stencilRef:1,stencilFunc:THREE.AlwaysStencilFunc,stencilZPass:THREE.ReplaceStencilOp})
-      const cut=new THREE.Mesh(g,m);cut.renderOrder=1;this.group.add(cut)
+      const cut=new THREE.Mesh(g,m);cut.renderOrder=1;this.streets.add(cut)
     }
     const geo = new THREE.BufferGeometry()
     geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3))
     geo.computeVertexNormals()
     const roadMat=asphaltMaterial(0x28343e);roadMat.polygonOffset=true;roadMat.polygonOffsetFactor=-2;roadMat.polygonOffsetUnits=-2
-    const ribbon=new THREE.Mesh(geo,roadMat);ribbon.renderOrder=3;this.group.add(ribbon)
-    if(sidewalks.length){const geo=new THREE.BufferGeometry();geo.setAttribute('position',new THREE.Float32BufferAttribute(sidewalks,3));geo.computeVertexNormals();const mesh=new THREE.Mesh(geo,pavingMaterial());mesh.renderOrder=3;this.group.add(mesh)}
-    if(paint.length){const geo=new THREE.BufferGeometry();geo.setAttribute('position',new THREE.Float32BufferAttribute(paint,3));const mesh=new THREE.Mesh(geo,new THREE.MeshBasicMaterial({color:0x8b8d7e,side:THREE.DoubleSide,polygonOffset:true,polygonOffsetFactor:-3,polygonOffsetUnits:-3}));mesh.renderOrder=4;this.group.add(mesh)}
+    const ribbon=new THREE.Mesh(geo,roadMat);ribbon.renderOrder=3;this.streets.add(ribbon)
+    if(sidewalks.length){const geo=new THREE.BufferGeometry();geo.setAttribute('position',new THREE.Float32BufferAttribute(sidewalks,3));geo.computeVertexNormals();const mesh=new THREE.Mesh(geo,pavingMaterial());mesh.renderOrder=3;this.streets.add(mesh)}
+    if(paint.length){const geo=new THREE.BufferGeometry();geo.setAttribute('position',new THREE.Float32BufferAttribute(paint,3));const mesh=new THREE.Mesh(geo,new THREE.MeshBasicMaterial({color:0x8b8d7e,side:THREE.DoubleSide,polygonOffset:true,polygonOffsetFactor:-3,polygonOffsetUnits:-3}));mesh.renderOrder=4;this.streets.add(mesh)}
     this.addStreetLights(lamps)
     if(shoulders.length){
       const verge=new THREE.BufferGeometry();verge.setAttribute('position',new THREE.Float32BufferAttribute(shoulders,3));verge.computeVertexNormals()
-      this.group.add(new THREE.Mesh(verge,new THREE.MeshStandardMaterial({color:0x444b4f,roughness:0.95,side:THREE.DoubleSide})))
+      this.streets.add(new THREE.Mesh(verge,new THREE.MeshStandardMaterial({color:0x444b4f,roughness:0.95,side:THREE.DoubleSide})))
     }
     if(pillars.length) {
       const mesh=new THREE.InstancedMesh(new THREE.BoxGeometry(1,1,1),new THREE.MeshStandardMaterial({color:0x484b4e,roughness:0.9}),pillars.length)
-      pillars.forEach((m,i)=>mesh.setMatrixAt(i,m)); this.group.add(mesh)
+      pillars.forEach((m,i)=>mesh.setMatrixAt(i,m)); this.streets.add(mesh)
     }
     const mk = (arr: number[], color: number, opacity: number) => {
       const g = new THREE.BufferGeometry()
       g.setAttribute('position', new THREE.Float32BufferAttribute(arr, 3))
       return new THREE.LineSegments(g, new THREE.LineBasicMaterial({ color, transparent: true, opacity }))
     }
-    this.group.add(mk(line, 0x00a4b6, 0.24))
-    this.group.add(mk(lineMajor, 0x00b9c9, 0.34))
+    this.streets.add(mk(line, 0x00a4b6, 0.24))
+    this.streets.add(mk(lineMajor, 0x00b9c9, 0.34))
   }
 
   private addStreetLights(lamps:{x:number;y:number;z:number;heading:number}[]) {
@@ -314,7 +333,7 @@ export class World {
       obj.position.set(l.x-Math.sin(l.heading)*1.15,l.y+5.6,l.z-Math.cos(l.heading)*1.15);obj.updateMatrix();housing.setMatrixAt(i,obj.matrix)
       obj.position.y-=.1;obj.updateMatrix();head.setMatrixAt(i,obj.matrix)
       obj.position.set(l.x-Math.sin(l.heading)*3,l.y+0.16,l.z-Math.cos(l.heading)*3);obj.rotation.set(-Math.PI/2,0,-l.heading);obj.updateMatrix();pool.setMatrixAt(i,obj.matrix)
-    });this.group.add(pole,arm,housing,head,pool)
+    });this.streets.add(pole,arm,housing,head,pool)
   }
 
   private placePumps() {
