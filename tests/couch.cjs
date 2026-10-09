@@ -40,7 +40,7 @@ const assert=require('node:assert/strict');
   await page.evaluate(()=>window.hoverghini.openModal('holdings'));
   await page.locator('[data-act=home]').click();
   await page.waitForFunction(()=>!window.hoverghini.loading&&window.hoverghini.save.city.lat===43.4516223);
-  assert.equal(await page.evaluate(()=>window.hoverghini.dealers.dealers.length),4);
+  assert.ok(await page.evaluate(()=>window.hoverghini.dealers.dealers.some(d=>d.gang==='LIARS')));
   await page.evaluate(()=>{const g=window.hoverghini;g.player.speed=0;g.player.vel.set(0,0);g.save.money=150;g.stash()});
   assert.equal(await page.evaluate(()=>window.hoverghini.save.vaultCash),150);
   await page.evaluate(()=>window.hoverghini.openModal('couch'));

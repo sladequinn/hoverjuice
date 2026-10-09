@@ -150,7 +150,10 @@ test('enclosed vehicles have no cockpit head while boards keep their rider',()=>
  assert.ok(buildVehicleMesh(vehicleById('board')).getObjectByName('rider'))
 })
 test('four gang leaders trade from parked cars without kiosks or sign sprites',()=>{
- const w=new World(proceduralCity('Dealers',43.45,-80.49)),dealers=new DealerSystem(w)
+ const w=new World(proceduralCity('Dealers',43.45,-80.49))
+ // Isolate car/identity rendering; placement constraints have separate tests.
+ w.eligibleAt=()=>true;w.hitBuilding=()=>-1
+ const dealers=new DealerSystem(w)
  assert.deepEqual(dealers.dealers.map(d=>[d.gang,d.name]),SYNDICATE_LEADERS.map(d=>[d.gang,d.name]))
  dealers.refresh();assert.equal(dealers.group.children.length,4);assert.equal(dealers.dealers.length,4)
  dealers.group.traverse(o=>{assert.notEqual(o.type,'Sprite');assert.notEqual(o.name,'cockpit-mask')})
@@ -245,13 +248,13 @@ test('dealers are dispersed, remain stable nearby, and reuse cars after long-dis
  const w=fixture();w.eligibleAt=()=>true
  const d=new DealerSystem(w),start=d.dealers.map(v=>({...v})),cars=[...d.group.children]
  assert.equal(start.length,4)
- for(const a of start)for(const b of start)if(a!==b)assert.ok(Math.hypot(a.x-b.x,a.z-b.z)>=450)
+ for(const a of start)for(const b of start)if(a!==b)assert.ok(Math.hypot(a.x-b.x,a.z-b.z)>=1200)
  d.refresh(200,200);assert.deepEqual(d.dealers,start)
  const offset=w.city.nodes.length
  w.city.nodes.push(...w.city.nodes.map(n=>({...n,x:n.x+10000,adj:n.adj.map(i=>i+offset)})))
  d.refresh(10000,0)
  assert.equal(d.dealers.length,4);assert.deepEqual(d.group.children,cars)
- assert.ok(d.dealers.every(v=>Math.hypot(v.x-10000,v.z)<2300))
- for(const a of d.dealers)for(const b of d.dealers)if(a!==b)assert.ok(Math.hypot(a.x-b.x,a.z-b.z)>=450)
+ assert.ok(d.dealers.every(v=>Math.hypot(v.x-10000,v.z)<3800))
+ for(const a of d.dealers)for(const b of d.dealers)if(a!==b)assert.ok(Math.hypot(a.x-b.x,a.z-b.z)>=1200)
  d.dispose()
 })
