@@ -103,20 +103,21 @@ export class DealerSystem {
 
   private placeDealers() {
     const city = this.world.city
-    const missing=SYNDICATE_LEADERS.map((leader,index)=>({leader,index})).filter(({leader})=>!this.dealers.some(d=>d.gang===leader.gang && Math.hypot(d.x-this.centerX,d.z-this.centerZ)<2600))
+    const missing=SYNDICATE_LEADERS.map((leader,index)=>({leader,index})).filter(({leader})=>!this.dealers.some(d=>d.gang===leader.gang && Math.hypot(d.x-this.centerX,d.z-this.centerZ)<4500))
     if(!missing.length)return
     const candidates = city.nodes.map((node,i)=>({node,i}))
-      .filter(({node,i})=>node.adj.length>0 && Math.hypot(node.x-this.centerX,node.z-this.centerZ)<2300 && !node.tunnel && Math.abs(node.y??0)<0.5 &&
+      .filter(({node,i})=>node.adj.length>0 && Math.hypot(node.x-this.centerX,node.z-this.centerZ)<3800 && !node.tunnel && Math.abs(node.y??0)<0.5 &&
         !this.dealers.some(d=>d.node===i) && this.world.eligibleAt(node.x,node.z))
       .sort((a,b)=>Math.hypot(a.node.x,a.node.z)-Math.hypot(b.node.x,b.node.z) || hash(`${city.key}:${a.i}`)-hash(`${city.key}:${b.i}`))
     for(const {leader,index} of missing) {
       const angle=index*Math.PI/2+Math.PI/4
-      const tx=this.centerX+Math.cos(angle)*1100,tz=this.centerZ+Math.sin(angle)*1100
+      const tx=this.centerX+Math.cos(angle)*2300,tz=this.centerZ+Math.sin(angle)*2300
       candidates.sort((a,b)=>Math.hypot(a.node.x-tx,a.node.z-tz)-Math.hypot(b.node.x-tx,b.node.z-tz))
       let parked: {node:typeof city.nodes[number];i:number;x:number;z:number;heading:number}|undefined
       // Try every candidate before giving up; one blocked parking spot must not lose a leader.
-      for(const spacing of [750,450]) {
+      for(const spacing of [1800,1200]) {
         for(const {node,i} of candidates) {
+          if(spacing===1800 && ((node.x-this.centerX)*Math.cos(angle)<0 || (node.z-this.centerZ)*Math.sin(angle)<0))continue
           if(this.dealers.some(d=>d.gang!==leader.gang && (d.node===i || Math.hypot(d.x-node.x,d.z-node.z)<spacing)))continue
           const adjacent=city.nodes[node.adj[0]]
           const heading=Math.atan2(adjacent.x-node.x,adjacent.z-node.z)

@@ -17,6 +17,7 @@
       <div class="hud-tl panel">
         <div class="row"><img id="mask-portrait" width="44" height="44" alt="Equipped mask" /><div class="brand">HOVERJUICE</div></div><div id="network-status" class="muted small">LOCAL SAVE</div>
         <div id="money" class="money">$0</div>
+        <div id="territory-status" class="territory-status"></div>
         <div id="income" class="muted small income"></div>
         <div class="city"><span id="city-name"></span><span id="city-tag" class="tag"></span></div>
       </div>
@@ -37,6 +38,7 @@
         <div id="combat-status" class="combat-status"></div>
       </div>
 
+      <button id="tutorial-tip" class="tutorial-tip panel" data-tap="tutorial" hidden></button>
       <canvas id="minimap" data-tap="map" title="Expand city map"></canvas>
       <div class="cam-label">MAP</div>
       <button id="contract" class="panel contract" data-tap="contracts"></button>
@@ -87,7 +89,7 @@
         <button id="map-plus" aria-label="Zoom map in">+</button>
       </div>
       <div id="map-selection" class="panel map-selection" hidden></div>
-      <div class="map-attribution">Map data © <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap contributors</a></div><div class="map-legend panel"><span>▲ You</span><span style="color:#df8dcc">D Dealer</span><span style="color:#78c6ff">C Contract</span><span style="color:#ffba4b">P Pickup · X Drop-off</span><span style="color:#fff280">W Waypoint</span><span style="color:#94e4b2">H Home</span><span style="color:#00d8e8">F Fuel</span><span>Teal buildings: homes for sale</span></div>
+      <div class="map-attribution">Map data © <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap contributors</a></div><div class="map-legend panel"><span>▲ You</span><span style="color:#df8dcc">D Dealer</span><span style="color:#78c6ff">C Contract</span><span style="color:#ffba4b">P Pickup · X Drop-off</span><span style="color:#fff280">W Waypoint</span><span style="color:#94e4b2">H Home</span><span style="color:#00d8e8">F Fuel</span><span>Teal buildings: homes for sale</span><span style="color:#45c4cb">SHINOBI</span><span style="color:#dce0da">LIARS</span><span style="color:#d7a35f">HYENAS</span><span style="color:#c879af">JESTERS</span></div>
     </div>
 
     <div id="title" class="title show">

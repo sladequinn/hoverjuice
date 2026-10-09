@@ -1,0 +1,53 @@
+const {chromium}=require('playwright');
+const {spawn}=require('node:child_process');
+const {mkdirSync}=require('node:fs');
+const assert=require('node:assert/strict');
+(async()=>{
+ const server=spawn(process.execPath,['node_modules/vite/bin/vite.js','preview','--host','127.0.0.1','--port','47291','--strictPort'],{stdio:'pipe'});
+ let browser;
+ try{
+  await new Promise((resolve,reject)=>{const timeout=setTimeout(()=>reject(new Error('Vite startup timeout')),10000);server.stdout.on('data',d=>{if(d.toString().includes('Local:')){clearTimeout(timeout);resolve()}});server.on('error',reject);server.on('exit',code=>{if(code)reject(new Error('Vite exited '+code))})});
+  browser=await chromium.launch({headless:true,args:['--no-sandbox','--use-gl=angle','--use-angle=swiftshader','--enable-webgl']});
+  const page=await browser.newPage({viewport:{width:1440,height:900},hasTouch:true}),errors=[];
+  page.on('pageerror',e=>errors.push(e.message));page.on('console',m=>{if(m.type()==='error'&&!m.text().includes('503 (Service Unavailable)'))errors.push(m.text())});
+  await page.route('https://tiles.openfreemap.org/**',r=>r.fulfill({status:503,body:'offline fixture'}));
+  await page.route('https://fonts.googleapis.com/**',r=>r.fulfill({body:''}));
+  await page.route('https://fonts.gstatic.com/**',r=>r.fulfill({body:''}));
+  await page.goto('http://127.0.0.1:47291');
+
+  await page.evaluate(()=>{document.getElementById('title').classList.remove('show');return window.hoverghini.warp('Tutorial test',43.45,-80.49)});
+  await page.setViewportSize({width:390,height:844});
+  await page.evaluate(()=>{const g=window.hoverghini;g.introMessage=0;g.campaign.intro=0;g.updateHud()});
+  assert.equal(await page.evaluate(()=>window.hoverghini.save.tutorial.stage),'pickup');
+  assert.ok(await page.locator('#tutorial-tip').isVisible());
+  mkdirSync('.test-artifacts',{recursive:true});await page.screenshot({path:'.test-artifacts/tutorial-mobile.png'});
+  await page.evaluate(()=>{const g=window.hoverghini,n=g.world.city.nodes[g.active.from];g.player.pos.set(n.x,1.3,n.z);g.updateContract(1/60)});
+  assert.equal(await page.evaluate(()=>window.hoverghini.save.tutorial.stage),'dropoff');
+  await page.reload();await page.locator('#btn-continue').click();
+  await page.waitForFunction(()=>window.hoverghini.world&&!window.hoverghini.loading);
+  assert.equal(await page.evaluate(()=>window.hoverghini.active.stage),'dropoff');
+  const before=await page.evaluate(()=>window.hoverghini.save.money);
+  await page.evaluate(()=>{const g=window.hoverghini,n=g.world.city.nodes[g.active.to];g.player.pos.set(n.x,1.3,n.z);g.updateContract(1/60)});
+  assert.equal(await page.evaluate(()=>window.hoverghini.save.tutorial.stage),'deal');
+  assert.equal(await page.evaluate(()=>window.hoverghini.save.money),before+250);
+  await page.evaluate(()=>window.hoverghini.sellTutorialSample());
+  assert.equal(await page.evaluate(()=>window.hoverghini.save.tutorial.stage),'deal');
+  await page.evaluate(()=>{const g=window.hoverghini,d=g.dealers.dealers.find(d=>d.gang==='LIARS');g.player.pos.set(d.x,d.y+1.3,d.z);g.player.vel.set(0,0);g.player.speed=0;g.openDealer()});
+  await page.locator('[data-act=tutorial-sale]').click();
+  assert.equal(await page.evaluate(()=>window.hoverghini.save.tutorial.stage),'done');
+  assert.equal(await page.evaluate(()=>window.hoverghini.save.money),before+350);
+  await page.evaluate(()=>window.hoverghini.sellTutorialSample());
+  assert.equal(await page.evaluate(()=>window.hoverghini.save.money),before+350);
+  await page.evaluate(()=>window.hoverghini.openModal('gangs'));
+  assert.equal(await page.locator('[data-act=join-gang]').count(),4);
+  await page.locator('[data-act=join-gang][data-arg=LIARS]').click();
+  assert.equal(await page.evaluate(()=>window.hoverghini.gang),'LIARS');
+  await page.evaluate(()=>{const g=window.hoverghini;g.closeModal();g.toggleMap(true)});
+  await page.screenshot({path:'.test-artifacts/gang-territories.png'});
+  await page.reload();assert.equal(await page.evaluate(()=>window.hoverghini.save.tutorial.stage),'done');
+  assert.equal(await page.evaluate(()=>window.hoverghini.gang),'LIARS');
+  await page.evaluate(()=>{const key='hoverghini.save.v1',s=JSON.parse(localStorage.getItem(key));delete s.tutorial;localStorage.setItem(key,JSON.stringify(s))});
+  await page.reload();assert.equal(await page.evaluate(()=>window.hoverghini.save.tutorial.stage),'skipped');
+  assert.deepEqual(errors,[]);console.log('Tutorial pickup, reload, delivery, White Lie proximity/sale, reward guards, gang affiliation and legacy migration passed.');
+ }finally{if(browser)await browser.close();server.kill()}
+})().catch(e=>{console.error(e);process.exitCode=1});

@@ -1,3 +1,7 @@
+import {jobPair} from './jobs'
+import {GANG_INFO} from './gangs'
+import {GANGS,type Gang} from './filter'
+import {tutorialActive,tutorialText,type TutorialState} from './tutorial'
 import {NavigationMap,type MapView,type MapMarker} from './navigation-map'
 import {residential,houseOffer,localHome,distanceToHome,type Safehouse} from './housing'
 import { Campaign } from './campaign'
@@ -26,6 +30,9 @@ interface Holding {
 }
 
 interface SaveData {
+  tutorial: TutorialState
+  allegiance: Gang
+  gangRep: Record<Gang,number>
   money: number
   owned: string[]
   current: string
@@ -49,6 +56,7 @@ interface SaveData {
 }
 
 interface Contract {
+  tutorial?: boolean
   id: number
   type: ContractType
   client: string
@@ -72,6 +80,9 @@ export const money = (n: number) => '$' + Math.floor(n).toLocaleString('en-US')
 
 function defaultSave(): SaveData {
   return {
+    tutorial:{stage:'ready'},
+    allegiance:'SHINOBI',
+    gangRep:{SHINOBI:0,LIARS:0,HYENAS:0,JESTERS:0},
     money: 150,
     owned: ['board'],
     current: 'board',
@@ -92,7 +103,7 @@ function defaultSave(): SaveData {
 function loadSave(): SaveData {
   try {
     const raw = localStorage.getItem(SAVE_KEY)
-    if (raw) return { ...defaultSave(), ...JSON.parse(raw) }
+    if (raw) {const parsed=JSON.parse(raw);return { ...defaultSave(), ...parsed,tutorial:parsed.tutorial??{stage:'skipped'},allegiance:parsed.allegiance??(parsed.mask==='liar'?'LIARS':parsed.mask==='oni'?'HYENAS':parsed.mask==='jester'?'JESTERS':'SHINOBI')} }
   } catch {
     /* corrupted save: start fresh */
   }
@@ -166,6 +177,7 @@ export class Game {
   private routeLine: THREE.Line | null = null
   private beacon: THREE.Group
   private arrow: THREE.Mesh
+  private territoryLast: Gang|null=null
   private hudTimer=0
   private homeBuildings=new Map<string,number>()
   private navigation: NavigationMap | null = null
@@ -347,6 +359,7 @@ export class Game {
     this.waypoint = null
     this.offers = []
     this.generateOffers()
+    this.resumeTutorial()
     this.buildMinimap()
     this.save.city = { name, lat, lon }
     this.persist()
@@ -367,12 +380,49 @@ export class Game {
     )
   }
 
+  private resumeTutorial(){
+    const w=this.world,t=this.save.tutorial
+    if(!w||!tutorialActive(t))return
+    if(t.stage==='deal'){this.locateWhiteLie();return}
+    const nodes=w.city.nodes,pool=this.mainNodes()
+    const nearest=(x:number,z:number)=>pool.reduce((best,i)=>Math.hypot(nodes[i].x-x,nodes[i].z-z)<Math.hypot(nodes[best].x-x,nodes[best].z-z)?i:best,pool[0])
+    if(pool.length<2)return
+    let from:number,to:number
+    if(t.city?.lat===w.city.lat&&t.city.lon===w.city.lon&&t.from&&t.to){from=nearest(t.from.x,t.from.z);to=nearest(t.to.x,t.to.z)}
+    else {
+      const starts=pool.filter(i=>{const n=nodes[i],d=Math.hypot(n.x-this.actor.x,n.z-this.actor.z);return d>70&&d<300})
+      from=starts[0]??nearest(this.actor.x,this.actor.z)
+      const ends=pool.filter(i=>{const n=nodes[i],d=Math.hypot(n.x-nodes[from].x,n.z-nodes[from].z);return d>=400&&d<850})
+      if(!ends.length)return
+      to=ends[0]
+      this.save.tutorial={stage:'pickup',city:{lat:w.city.lat,lon:w.city.lon},from:{x:nodes[from].x,z:nodes[from].z},to:{x:nodes[to].x,z:nodes[to].z}}
+    }
+    const drop=this.save.tutorial.stage==='dropoff'
+    this.active={id:this.nextId++,tutorial:true,type:CONTRACT_TYPES[0],client:'First night · Courier induction',from,to,dist:Math.hypot(nodes[from].x-nodes[to].x,nodes[from].z-nodes[to].z),pay:250,time:0,stage:drop?'dropoff':'pickup',remaining:0}
+    this.routeTimer=0;this.persist()
+  }
+  private skipTutorial(){
+    if(this.active?.tutorial)this.active=null
+    this.save.tutorial={stage:'skipped'};this.persist()
+  }
+  private locateWhiteLie(){
+    const d=this.dealers?.dealers.find(d=>d.gang==='LIARS')
+    if(d)this.locateDealer(d.id)
+    else this.toast('WHITE LIE needs a commercial parking spot. Explore another sector; the sample stays with you.','info')
+  }
+  private sellTutorialSample(){
+    if(this.save.tutorial.stage!=='deal'||this.nearbyDealer()?.gang!=='LIARS'||!this.player.parked)return
+    this.save.tutorial={stage:'done'};this.save.gangRep.LIARS+=2;this.earn(100);this.persist()
+    this.toast('WHITE LIE: “You can drive. You can keep quiet. We’ll get along.” · +$100','good')
+    this.openModal('market')
+  }
+
   // ---------- contracts ----------
 
   private mainNodes() {
     const w = this.world!
     const out: number[] = []
-    w.city.nodes.forEach((n, i) => n.main && Math.hypot(n.x, n.z) < w.city.radius * 0.92 && out.push(i))
+    w.city.nodes.forEach((n, i) => n.main && n.adj.length>0 && out.push(i))
     return out
   }
 
@@ -382,23 +432,14 @@ export class Game {
     const pool = this.mainNodes()
     if (pool.length < 2) return
     const p = this.actor
-    const near = pool.filter((i) => Math.hypot(w.city.nodes[i].x - p.x, w.city.nodes[i].z - p.z) < 450)
     const spec = this.player.spec
     this.offers = []
     for (let k = 0; k < 4; k++) {
-      let type = k === 3 || Math.random() < 0.18 ? CONTRACT_TYPES[2] : Math.random() < 0.35 ? CONTRACT_TYPES[1] : CONTRACT_TYPES[0]
+      const type = k === 3 || Math.random() < 0.18 ? CONTRACT_TYPES[2] : Math.random() < 0.35 ? CONTRACT_TYPES[1] : CONTRACT_TYPES[0]
       const safePool = type.id === 'cyanade' ? pool.filter(i=>w.eligibleAt(w.city.nodes[i].x,w.city.nodes[i].z)) : pool
-      if(type.id === 'cyanade' && safePool.length<2) continue
-      const safeNear = near.filter(i=>safePool.includes(i))
-      const src = safeNear.length ? safeNear : safePool
-      const from = src[Math.floor(Math.random() * src.length)]
-      let to = from, dist = 0
-      for (let tries = 0; tries < 40; tries++) {
-        const cand = safePool[Math.floor(Math.random() * safePool.length)]
-        const d = Math.hypot(w.city.nodes[cand].x - w.city.nodes[from].x, w.city.nodes[cand].z - w.city.nodes[from].z)
-        if (d > 350 && d < 1300) { to = cand; dist = d; break }
-        if (d > dist) { to = cand; dist = d }
-      }
+      const pair=jobPair(w.city.nodes,safePool,p.x,p.z,this.offers.map(o=>o.from))
+      if(!pair)continue
+      const {from,to,dist}=pair
       const pathDist = dist * 1.3
       const pay = Math.round(((40 + pathDist * 0.13) * spec.payMult * type.payMult) / 5) * 5
       const time = Math.round((pathDist / (spec.maxSpeed * 0.62) + 25) * type.timeMult)
@@ -422,6 +463,7 @@ export class Game {
   accept(id: number) {
     const c = this.offers.find((o) => o.id === id)
     if (!c) return
+    if(this.active?.tutorial)this.skipTutorial()
     this.active = c
     this.offers = this.offers.filter((o) => o.id !== id)
     this.waypoint = null
@@ -433,6 +475,7 @@ export class Game {
 
   abandon() {
     if (!this.active) return
+    if(this.active.tutorial){this.skipTutorial();this.closeModal();return}
     this.toast('Contract abandoned. The client will remember that.', 'bad')
     this.active = null
     this.closeModal()
@@ -455,21 +498,24 @@ export class Game {
     if (!c) return
     const tgt = w.city.nodes[c.stage === 'pickup' ? c.from : c.to]
     const d = Math.hypot(tgt.x - this.actor.x, tgt.z - this.actor.z)
-    if (c.stage === 'dropoff') c.remaining -= dt
+    if (c.stage === 'dropoff'&&!c.tutorial) c.remaining -= dt
     if (d < 16 && this.actor.y < 30) {
       if (c.stage === 'pickup') {
         c.stage = 'dropoff'
         c.remaining = c.time
         this.routeTimer = 0
-        this.toast(`Package secured. ${c.time}s on the clock.`, 'info')
+        if(c.tutorial){this.save.tutorial.stage='dropoff';this.persist();this.toast('Parcel secured. Follow X. No timer on your first run.','info')}
+        else this.toast(`Package secured. ${c.time}s on the clock.`, 'info')
       } else {
         const late = c.remaining < 0
-        const pay = Math.round(late ? c.pay * 0.4 : c.pay + Math.max(0, c.remaining) * c.pay * 0.004 * this.run.flow)
+        const pay = c.tutorial?250:Math.round(late ? c.pay * 0.4 : c.pay + Math.max(0, c.remaining) * c.pay * 0.004 * this.run.flow)
         this.earn(pay)
         this.save.deliveries++
+        const turf=w.gangAt(tgt.x,tgt.z);this.save.gangRep[turf]++
+        if(c.tutorial){this.save.tutorial={stage:'deal'};this.locateWhiteLie()}
         this.active = null
         this.persist()
-        this.toast(late ? `Late delivery. Client docked you: +${money(pay)}` : `Delivered! +${money(pay)} (incl. speed tip)`, late ? 'bad' : 'good')
+        this.toast(c.tutorial?'First delivery complete · +$250. Take the sealed sample to WHITE LIE.':late ? `Late delivery. Client docked you: +${money(pay)}` : `Delivered! +${money(pay)} (incl. speed tip)`, late ? 'bad' : 'good')
         this.generateOffers()
       }
     }
@@ -673,7 +719,7 @@ export class Game {
     this.toast('OVERCLOCK · 300 km/h · 15 seconds · −25 hull','info')
   }
 
-  get gang(){return this.save.mask==='liar'?'LIARS':this.save.mask==='oni'?'HYENAS':this.save.mask==='jester'?'JESTERS':'SHINOBI'}
+  get gang(){return this.save.allegiance}
   get netWorth(){return this.save.money+this.save.vaultCash+this.save.owned.reduce((sum,id)=>sum+vehicleById(id).price,0)+this.save.holdings.reduce((sum,h)=>sum+h.income/0.012,0)}
   challenge(){
     if(!this.world||!this.campaign)return
@@ -690,7 +736,7 @@ export class Game {
     this.player.placeAtNode(this.world,this.garageNode)
     this.player.unsnap()
     this.juice=Math.max(this.juice,this.player.spec.tank*0.25)
-    this.run.repair();this.persist()
+    this.run.repair();this.persist();this.resumeTutorial()
     this.toast('IMPOUNDED · cargo confiscated · $250 fee · stash untouched','bad')
   }
 
@@ -745,6 +791,7 @@ export class Game {
         void this.syncOwnership()
         this.traffic?.ensurePopulation()
         this.refreshDealers()
+        if(this.save.tutorial.stage==='ready')this.resumeTutorial()
         this.buildMinimap()
         $('city-tag').textContent = `OSM · ${streamer.tileCount} SECTORS`
         if (this.mapOpen) this.drawFullMap()
@@ -918,7 +965,7 @@ export class Game {
     const m = $('modal')
     m.dataset.view = view
     const body = $('modal-body')
-    const tabs: [string, string][] = [['contracts', 'Contracts'], ['market', 'Night Market'], ['garage', 'Garage'], ['masks', 'Masks'], ['holdings', 'Turf & vaults'], ['warp', 'City'], ['help', 'Help']]
+    const tabs: [string, string][] = [['contracts', 'Contracts'], ['tutorial','First night'], ['gangs','Gangs'], ['market', 'Night Market'], ['garage', 'Garage'], ['masks', 'Masks'], ['holdings', 'Turf & vaults'], ['warp', 'City'], ['help', 'Help']]
     const tabBar = this.world && view !== 'win' && view !== 'couch'
       ? `<nav class="tabs">${tabs.map(([id, label]) => `<button class="tab ${id === view ? 'on' : ''}" data-act="view" data-arg="${id}">${label}</button>`).join('')}<button class="tab-close" data-act="close" aria-label="Close">✕</button></nav>`
       : ''
@@ -950,6 +997,12 @@ export class Game {
 
   private onAction(act: string, arg: string) {
     switch (act) {
+      case 'skip-tutorial': this.skipTutorial();this.closeModal();break
+      case 'tutorial-dealer': this.locateWhiteLie();this.closeModal();break
+      case 'tutorial-sale': this.sellTutorialSample();break
+      case 'join-gang':
+        if(GANGS.includes(arg as Gang)){this.save.allegiance=arg as Gang;this.persist();this.openModal('gangs')}
+        break
       case 'accept': this.accept(Number(arg)); break
       case 'abandon': this.abandon(); break
       case 'refresh': this.generateOffers(); break
@@ -1035,12 +1088,16 @@ export class Game {
     const s = this.save
     const w = this.world
     switch (view) {
+      case 'tutorial':
+        return `<h2>Your first night</h2><p>${esc(tutorialText(s.tutorial))}</p><p class="muted">Deliver a legal parcel for $250, then sell a sealed sample to WHITE LIE for $100. Use the map’s P / X markers. Dealers use D. Return to a safehouse to stash cargo and clear Heat.</p>${s.tutorial.stage==='deal'?'<button class="btn buy" data-act="tutorial-dealer">Locate WHITE LIE</button>':''}${tutorialActive(s.tutorial)?'<button class="btn ghost" data-act="skip-tutorial">Skip tutorial</button>':''}`
+      case 'gangs':
+        return `<h2>Four gangs. One city.</h2><p class="muted">You represent ${this.gang}. Your mask keeps its own perk. Rival turf increases Heat gain while carrying contraband; the Street Balaclava reduces that penalty. Deliveries build local respect. Gang control follows mapped landuse, with stable generated districts filling unmapped areas.</p><div class="grid">${GANGS.map(g=>`<div class="card" style="border-color:${GANG_INFO[g].color}"><h3 style="color:${GANG_INFO[g].color}">${g}</h3><p>${GANG_INFO[g].leader} · ${GANG_INFO[g].district}</p><p>Respect: ${s.gangRep[g]}</p><button class="btn" data-act="join-gang" data-arg="${g}" ${this.gang===g?'disabled':''}>${this.gang===g?'Representing':'Represent '+g}</button></div>`).join('')}</div>`
       case 'contracts': {
         const active = this.active
           ? `<div class="card active-card">
               <div class="row"><span class="pill ${this.active.type.id}">${this.active.type.label}</span><strong>${money(this.active.pay)}</strong></div>
               <h3>${esc(this.active.client)}</h3><p class="muted">${this.active.type.blurb}</p>
-              <p>${this.active.stage === 'pickup' ? 'Heading to pickup' : `Delivering, ${Math.max(0, Math.ceil(this.active.remaining))}s left`}</p>
+              <p>${this.active.tutorial ? 'Training delivery · no timer' : this.active.stage === 'pickup' ? 'Heading to pickup' : `Delivering, ${Math.max(0, Math.ceil(this.active.remaining))}s left`}</p>
               <button class="btn danger" data-act="abandon">Abandon contract</button></div>`
           : ''
         const offers = this.offers
@@ -1083,6 +1140,7 @@ export class Game {
           return `<h2>Night Market</h2><p class="muted">SLADE runs SHINOBI. WHITE LIE runs LIARS. FASA runs HYENAS. FRECKLES runs JESTERS. Find their parked cars to trade; prices shift with the local supply.</p>
             ${cargo}<div class="grid dealers">${cards || '<p class="muted">No eligible dealer parking in these sectors yet. Explore more of the city.</p>'}</div>`
         }
+        const tutorialDeal=s.tutorial.stage==='deal'&&dealer.gang==='LIARS'?'<div class="card"><h3>WHITE LIE · First deal</h3><p>Hand over the sealed sample from your courier run.</p><button class="btn buy" data-act="tutorial-sale">Sell sealed sample · $100</button></div>':''
         const event = this.dealers.event(dealer)
         const specialty = CONTRABAND.find((good) => good.id === dealer.specialty)!
         const rows = CONTRABAND.map((good) => {
@@ -1109,7 +1167,7 @@ export class Game {
             <strong class="market-cash">${money(s.money)}</strong>
           </div>
           ${event ? `<div class="market-event ${event.kind}"><b>${event.kind === 'shortage' ? 'SUPPLY SHOCK' : 'STREET GLUT'}</b>${esc(event.headline)}</div>` : ''}
-          ${cargo}<div class="market-table">${rows}</div>`
+          ${cargo}<div class="market-table">${tutorialDeal}${rows}</div>`
       }
       case 'garage': {
         const max = { speed: 95, tank: 120, pay: 15 }
@@ -1361,7 +1419,7 @@ export class Game {
       }
       const p=this.player
       const tunnel=w.isTunnel(p.pos.x,p.pos.z,p.pos.y)
-      this.run.update(dt,this.cargoUsed+(this.active?.type.id==='cyanade'&&this.active.stage==='dropoff'?1:0),tunnel,w.gangAt(p.pos.x,p.pos.z)!==this.gang,this.save.mask==='balaclava')
+      this.run.update(dt,this.cargoUsed+(this.save.tutorial.stage==='deal'?1:0)+(this.active?.type.id==='cyanade'&&this.active.stage==='dropoff'?1:0),tunnel,w.gangAt(p.pos.x,p.pos.z)!==this.gang,this.save.mask==='balaclava')
       p.overclocking=this.run.overclock>0; p.limping=this.run.limp>=0
       this.player.update(dt, input, w, this.juice > 0)
       this.collisionCooldown=Math.max(0,this.collisionCooldown-dt)
@@ -1448,6 +1506,14 @@ export class Game {
   private updateHud() {
     const s = this.save
     const p = this.player
+    const turf=this.world!.gangAt(p.pos.x,p.pos.z)
+    $('territory-status').textContent=`${turf} · ${turf===this.gang?'FRIENDLY':'RIVAL'} TURF`
+    $('territory-status').style.color=GANG_INFO[turf].color
+    if(this.territoryLast!==turf){if(this.territoryLast)this.toast(`${turf} territory · ${GANG_INFO[turf].leader}`,'info');this.territoryLast=turf}
+    const training=tutorialActive(s.tutorial)
+    $('tutorial-tip').hidden=!training
+    document.body.classList.toggle('training',training)
+    $('tutorial-tip').textContent=tutorialText(s.tutorial)
     $('money').textContent = money(s.money)
     $('income').textContent = this.incomePerMin ? `+${money(this.incomePerMin)}/min passive` : 'NO VAULTS · KEEP MOVING'
     $('vehicle-name').textContent = `${p.spec.name} · ${this.gang}`
@@ -1499,7 +1565,7 @@ export class Game {
       setHtml(panel, `<div class="row"><span class="pill ${c.type.id}">${c.type.label}</span><strong class="pay">${money(c.pay)}</strong></div>
         <div class="client">${esc(c.client)}</div>
         <div class="row"><span>${c.stage === 'pickup' ? 'PICKUP' : 'DROP-OFF'} · ${dist}</span>
-        <span class="timer ${c.stage === 'dropoff' && c.remaining < 15 ? 'hot' : ''}">${c.stage === 'dropoff' ? (c.remaining > 0 ? Math.ceil(c.remaining) + 's' : 'LATE') : c.time + 's'}</span></div>`)
+        <span class="timer ${c.stage === 'dropoff' && c.remaining < 15 ? 'hot' : ''}">${c.tutorial?'TRAINING':c.stage === 'dropoff' ? (c.remaining > 0 ? Math.ceil(c.remaining) + 's' : 'LATE') : c.time + 's'}</span></div>`)
     } else if (this.waypoint) {
       panel.classList.add('show')
       setHtml(panel, `<div class="client">Waypoint: ${esc(this.waypoint.label)}</div><div class="muted">${touch ? 'Tap for contracts' : 'Press <kbd>J</kbd> for contracts'}</div>`)

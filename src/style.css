@@ -450,3 +450,10 @@ body.is-touch.test-flight .toast{bottom:calc(388px + env(safe-area-inset-bottom)
 .map-selection button{margin:4px 4px 0 0}
 .map-selection[hidden]{display:none}
 .map-legend{font-size:.7rem;line-height:1.5;max-width:calc(100% - 98px);flex-wrap:wrap;background:#0c1821ed}
+
+.territory-status{font:10px monospace;letter-spacing:.04em;margin-top:3px}
+.tutorial-tip{position:absolute;top:180px;left:16px;width:min(350px,calc(100% - 155px));padding:10px;text-align:left;color:#d9ebef;background:#101c24e8;border:1px solid #4b9ba4;font:12px/1.4 sans-serif;pointer-events:auto}
+.tutorial-tip[hidden]{display:none}
+body.is-touch .territory-status{font-size:8px}
+body.is-touch .tutorial-tip{top:145px;left:10px;width:calc(100% - 105px);font-size:11px;padding:8px}
+body.training .turn{top:245px}

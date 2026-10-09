@@ -1,3 +1,4 @@
+import {Territories} from './gangs'
 import {PavementLayout,appendPavement} from './pavement'
 import {fitStreetWidths,streetJunctions,streetCorner,streetKey} from './streets'
 import { GANGS, criminalEligible, protectedVenue } from './filter'
@@ -442,7 +443,12 @@ export class World {
     })
   }
   isWater(x: number,z: number) { return this.city.waters.some(w=>pointInPoly(x,z,w.poly)&&!w.holes.some(h=>pointInPoly(x,z,h))) }
-  gangAt(x: number,z: number) { return this.city.zones.find(w=>pointInPoly(x,z,w.poly))?.gang ?? 'SHINOBI' }
+  private territoryCache:Territories|null=null
+  private territoryZones=-1
+  gangAt(x:number,z:number){
+    if(!this.territoryCache||this.territoryZones!==this.city.zones.length){this.territoryCache=new Territories(this.city);this.territoryZones=this.city.zones.length}
+    return this.territoryCache.at(x,z)
+  }
   eligibleAt(x: number,z: number) {
     if(this.city.zones.some(w=>w.tags.landuse==='residential'&&pointInPoly(x,z,w.poly))) return false
     const ids=new Set<number>()
