@@ -101,53 +101,51 @@ export class DealerSystem {
   private placeDealers() {
     const city = this.world.city
     const missing=SYNDICATE_LEADERS.map((leader,index)=>({leader,index})).filter(({leader})=>!this.dealers.some(d=>d.gang===leader.gang))
-    const candidates = city.nodes
-      .map((node, i) => ({ node, i }))
-      .filter(({ node, i }) => !this.dealers.some(d=>d.node===i) && node.main && node.adj.length > 1 && this.world.eligibleAt(node.x,node.z) && Math.hypot(node.x, node.z) > 120)
-      .sort((a, b) => hash(`${city.key}:${a.i}`) - hash(`${city.key}:${b.i}`))
-    const chosen: typeof candidates = []
-    while (chosen.length < missing.length && candidates.length) {
-      let best = candidates[0], bestDistance = -1
-      for (const candidate of candidates.slice(0, 600)) {
-        const spacing = chosen.length
-          ? Math.min(...chosen.map((other) => Math.hypot(candidate.node.x - other.node.x, candidate.node.z - other.node.z)))
-          : Math.hypot(candidate.node.x, candidate.node.z)
-        if (spacing > bestDistance) {
-          best = candidate
-          bestDistance = spacing
+    const candidates = city.nodes.map((node,i)=>({node,i}))
+      .filter(({node,i})=>node.main && node.adj.length>0 && !node.tunnel && Math.abs(node.y??0)<0.5 &&
+        !this.dealers.some(d=>d.node===i) && this.world.eligibleAt(node.x,node.z))
+      .sort((a,b)=>Math.hypot(a.node.x,a.node.z)-Math.hypot(b.node.x,b.node.z) || hash(`${city.key}:${a.i}`)-hash(`${city.key}:${b.i}`))
+    for(const {leader,index} of missing) {
+      let parked: {node:typeof city.nodes[number];i:number;x:number;z:number;heading:number}|undefined
+      // Try every candidate before giving up; one blocked parking spot must not lose a leader.
+      for(const spacing of [100,35]) {
+        for(const {node,i} of candidates) {
+          if(this.dealers.some(d=>d.node===i || Math.hypot(d.x-node.x,d.z-node.z)<spacing))continue
+          const adjacent=city.nodes[node.adj[0]]
+          const heading=Math.atan2(adjacent.x-node.x,adjacent.z-node.z)
+          const offset=(node.width??5)/2+1.6
+          for(const side of [1,-1]) {
+            const x=node.x+Math.cos(heading)*offset*side,z=node.z-Math.sin(heading)*offset*side
+            if(this.world.isWater(x,z) || !this.world.eligibleAt(x,z))continue
+            // Check the parked car envelope, not just its centre.
+            const spec=vehicleById(leader.chassis),halfL=spec.kind==='truck'?3.2:2.1
+            const clear=[-halfL,0,halfL].every(l=>[-1,0,1].every(w=>
+              this.world.hitBuilding(x+Math.sin(heading)*l+Math.cos(heading)*w,z+Math.cos(heading)*l-Math.sin(heading)*w,1)<0))
+            if(clear){parked={node,i,x,z,heading};break}
+          }
+          if(parked)break
         }
+        if(parked)break
       }
-      chosen.push(best)
-      const index = candidates.indexOf(best)
-      candidates.splice(index, 1)
-    }
-    chosen.forEach(({ node, i }, slot) => {
-      const {leader,index}=missing[slot]
+      if(!parked)continue
+      const {node,i,x,z,heading}=parked
       const specialty = CONTRABAND[(index + hash(city.key)) % CONTRABAND.length]
-      const adjacent = city.nodes[node.adj[0]]
-      const length = adjacent ? Math.hypot(adjacent.x - node.x, adjacent.z - node.z) || 1 : 1
-      const offset=(node.width??10)/2+1.6
-      let sideX = adjacent ? (adjacent.z - node.z) / length * offset : 0
-      let sideZ = adjacent ? -(adjacent.x - node.x) / length * offset : 0
-      if(this.world.hitBuilding(node.x+sideX,node.z+sideZ,(node.y??0)+1)>=0){sideX=-sideX;sideZ=-sideZ}
-      if(this.world.hitBuilding(node.x+sideX,node.z+sideZ,(node.y??0)+1)>=0){sideX*=0.4;sideZ*=0.4}
-      if(this.world.hitBuilding(node.x+sideX,node.z+sideZ,(node.y??0)+1)>=0)return
       const dealer: Dealer = {
         id: `${city.key}:dealer:${index}`,
         name: leader.name,
         gang: leader.gang,
         bio: leader.bio,
-        heading: Math.atan2(adjacent.x-node.x,adjacent.z-node.z),
+        heading,
         y: node.y??0,
         node: i,
-        x: node.x + sideX,
-        z: node.z + sideZ,
+        x,
+        z,
         specialty: specialty.id,
         color: leader.color,
       }
       this.dealers.push(dealer)
       this.group.add(dealerCar(dealer,index))
-    })
+    }
   }
 
   get epoch() {

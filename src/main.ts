@@ -201,7 +201,7 @@ if (game.hasSave) {
 }
 $('btn-new').addEventListener('click', () => {
   title.classList.remove('show')
-  game.openModal('warp')
+  game.openModal('couch')
 })
 
 // ---------- camera ----------

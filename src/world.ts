@@ -1,6 +1,6 @@
 import {PavementLayout,appendPavement} from './pavement'
 import {fitStreetWidths,streetJunctions,streetCorner,streetKey} from './streets'
-import { GANGS } from './filter'
+import { GANGS, criminalEligible, protectedVenue } from './filter'
 import {softDisc} from './art'
 import * as THREE from 'three'
 import { ShapeUtils } from 'three'
@@ -450,7 +450,11 @@ export class World {
       for(let gz=Math.floor((z-50)/CELL);gz<=Math.floor((z+50)/CELL);gz++)
         for(const i of this.grid.get(`${gx},${gz}`)??[])ids.add(i)
     const nearby=[...ids].map(i=>this.city.buildings[i]).filter(b=>Math.hypot(x-b.cx,z-b.cz)<50)
-    return nearby.some(b=>b.eligible) && !nearby.some(b=>b.tags && ['school','kindergarten','hospital','place_of_worship','residential'].some(t=>Object.values(b.tags!).includes(t)))
+    const venues=this.city.venues.filter(v=>Math.hypot(x-v.x,z-v.z)<65)
+    if(nearby.some(b=>b.tags && protectedVenue(b.tags)) || venues.some(v=>protectedVenue(v.tags)))return false
+    // MVT building footprints often omit use tags. Landuse and POIs carry that evidence.
+    return nearby.some(b=>b.eligible) || venues.some(v=>criminalEligible(v.tags)) ||
+      this.city.zones.some(zone=>['commercial','industrial','retail'].includes(String(zone.tags.landuse)) && pointInPoly(x,z,zone.poly))
   }
   private waterCount=0
   private buildWater() {
