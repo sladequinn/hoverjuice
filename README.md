@@ -66,3 +66,10 @@ Mag-Lock now assists sharp corners by reducing speed, recentres around lane/foot
 Gang leaders trade from parked vehicles: SHINOBI / SLADE, LIARS / WHITE LIE, HYENAS / FASA, JESTERS / FRECKLES (the female clown). Market panels and proximity prompts identify the leader and gang. Eligible commercial sites are still required.
 
 New Game asks “Where’s your couch?”: select an address search result or a random preset district. The selected coordinates and label persist locally as the starter safehouse; its playable entrance is the nearest connected street node. Return to it from Turf & vaults. A new game confirms before replacing existing progress. City travel does not change the saved couch.
+
+## Living dealers and residential safehouses
+Dealers aim for four different areas roughly 1.1 km around the player and keep at least 450 m apart (750 m preferred). Nearby dealers stay put. Beyond 2.6 km, a leader can move to valid loaded commercial parking within 2.3 km of the player. The same four car meshes are reused. Tile streaming and movement trigger replenishment; protected/residential locations never become dealer sites. Sparse commercial coverage can leave fewer local dealers until suitable sectors load.
+
+The north-up maps render spatially indexed vectors at viewport resolution rather than shrinking a world-sized bitmap. Expanded map: drag to pan, use + / − or wheel to zoom, ◎ to recenter, tap D to locate a dealer, C to accept a contract, and empty ground to set a waypoint. Pickup/drop-off, fuel, homes, and waypoints have labelled symbols. Minimap edge markers show offscreen targets.
+
+Tap a teal residential footprint to inspect and buy it. Houses/apartments and residential landuse qualify, excluding protected civic uses and incomplete tile-edge footprints. Purchases use deterministic centroid IDs and persist locally; they grant nearby stash access, Heat clearing and limp recovery, without criminal turf or rent. Owned homes appear in Turf & vaults. This does not add authoritative shared property ownership. Address classification depends on available OSM tags; unknown buildings are not silently assumed residential.

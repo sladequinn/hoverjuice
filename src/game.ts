@@ -1,3 +1,5 @@
+import {NavigationMap,type MapView,type MapMarker} from './navigation-map'
+import {residential,houseOffer,localHome,distanceToHome,type Safehouse} from './housing'
 import { Campaign } from './campaign'
 import { ParticlePool } from './particles'
 import { Multiplayer } from './multiplayer'
@@ -5,7 +7,7 @@ import { OwnershipClient } from './persistence'
 import { RunState } from './dynamics'
 import * as THREE from 'three'
 import { CITIES, CONTRACT_TYPES, JUICE_PRICE, VEHICLES, vehicleById, type ContractType } from './data'
-import { fetchCity, geocode, proceduralCity, streamerFor, type CityData } from './map'
+import { fetchCity, geocode, proceduralCity, streamerFor, type CityData, pointInPoly } from './map'
 import { Player, type Input } from './vehicle'
 import { MASKS, buildMask, validMask } from './character'
 import { World } from './world'
@@ -29,6 +31,7 @@ interface SaveData {
   current: string
   holdings: Holding[]
   city: { name: string; lat: number; lon: number } | null
+  homes: Safehouse[]
   safehouse: { name: string; lat: number; lon: number } | null
   deliveries: number
   earned: number
@@ -75,6 +78,7 @@ function defaultSave(): SaveData {
     holdings: [],
     city: null,
     safehouse: null,
+    homes: [],
     deliveries: 0,
     earned: 0,
     won: false,
@@ -162,14 +166,19 @@ export class Game {
   private routeLine: THREE.Line | null = null
   private beacon: THREE.Group
   private arrow: THREE.Mesh
-  private minimapBase: HTMLCanvasElement | null = null
-  private mmScale = 0.2
+  private hudTimer=0
+  private homeBuildings=new Map<string,number>()
+  private navigation: NavigationMap | null = null
+  private fullView: MapView | null = null
+  private mapCenter: {x:number;z:number}|null = null
+  private dealerAnchor={x:Infinity,z:Infinity}
+  private dealerWaypoint: string|null=null
   private toastTimer = 0
   private thumbs = new Map<string, string>()
   private streamTimer = 0
   private streamBusy = false
   private mapOpen = false
-  private mapZoom = 1
+  private mapZoom = 2
   private marketEpoch = -1
 
   constructor(scene: THREE.Scene) {
@@ -316,6 +325,8 @@ export class Game {
     void this.syncOwnership()
     this.traffic = new TrafficSystem(this.world)
     this.scene.add(this.traffic.group)
+    this.dealerAnchor={x:Infinity,z:Infinity}
+    this.mapCenter=null
     this.dealers = new DealerSystem(this.world)
     this.scene.add(this.dealers.group)
     this.marketEpoch = this.dealers.epoch
@@ -415,6 +426,7 @@ export class Game {
     this.offers = this.offers.filter((o) => o.id !== id)
     this.waypoint = null
     this.routeTimer = 0
+    this.toggleMap(false)
     this.closeModal()
     this.toast(`Contract accepted: head to the pickup for ${c.client}`, 'info')
   }
@@ -646,8 +658,10 @@ export class Game {
   private locateDealer(id: string) {
     const dealer = this.dealers?.dealers.find((candidate) => candidate.id === id)
     if (!dealer) return
+    this.dealerWaypoint=id
     this.waypoint = { x: dealer.x, z: dealer.z, label: dealer.name }
     this.routeTimer = 0
+    this.toggleMap(false)
     this.closeModal()
     this.toast(`Night Market waypoint: ${dealer.name}`, 'info')
   }
@@ -684,7 +698,7 @@ export class Game {
     if(!this.world || !this.player.parked)return
     const p=this.player.pos,n=this.world.city.nodes[this.garageNode]
     const owned=this.save.holdings.some(h=>{const b=this.world!.city.buildings.find(b=>b.id===h.id);return b&&Math.hypot(p.x-b.cx,p.z-b.cz)<40})
-    if(!owned&&Math.hypot(p.x-n.x,p.z-n.z)>15){this.toast('Return to your garage or an owned property','info');return}
+    if(!owned&&!this.atOwnedHome()&&Math.hypot(p.x-n.x,p.z-n.z)>15){this.toast('Return to your garage or an owned property','info');return}
     if(withdraw){
       this.save.money+=this.save.vaultCash;this.save.vaultCash=0
       let room=this.cargoCapacity-this.cargoUsed
@@ -702,11 +716,11 @@ export class Game {
     this.mapOpen = force ?? !this.mapOpen
     $('map-overlay').classList.toggle('show', this.mapOpen)
     this.paused = this.mapOpen
-    if (this.mapOpen) this.drawFullMap()
+    if (this.mapOpen) {$('map-selection').hidden=true;this.mapCenter={x:this.actor.x,z:this.actor.z};this.drawFullMap()}
   }
 
   zoomMap(factor: number) {
-    this.mapZoom = Math.max(0.7, Math.min(5, this.mapZoom * factor))
+    this.mapZoom = Math.max(0.3, Math.min(32, this.mapZoom * factor))
     this.drawFullMap()
   }
 
@@ -730,7 +744,7 @@ export class Game {
         if(this.world !== w)return
         void this.syncOwnership()
         this.traffic?.ensurePopulation()
-        this.dealers?.refresh()
+        this.refreshDealers()
         this.buildMinimap()
         $('city-tag').textContent = `OSM · ${streamer.tileCount} SECTORS`
         if (this.mapOpen) this.drawFullMap()
@@ -943,6 +957,12 @@ export class Game {
       case 'select-vehicle': this.selectVehicle(arg); break
       case 'buy-landmark': this.buyLandmark(arg); break
       case 'locate': this.locate(arg); break
+      case 'buy-home': this.buyHome(Number(arg)); break
+      case 'home-waypoint': {
+        const h=this.save.homes.find(h=>h.id===arg)
+        if(h&&this.world){const p=localHome(h,this.world.city);this.waypoint={...p,label:h.name};this.routeTimer=0;this.toggleMap(false);this.closeModal()}
+        break
+      }
       case 'random-couch': {
         const c=CITIES[Math.floor(Math.random()*CITIES.length)]
         this.onAction('couch',`${c.lat}|${c.lon}|${c.name}`)
@@ -1154,6 +1174,8 @@ export class Game {
           : ''
         const elsewhere = s.holdings.filter((h) => h.cityKey !== w?.city.key)
         return `<h2>Real Estate: ${esc(w?.city.name ?? '')}</h2>
+          ${s.homes.map(h=>`<div class="card"><h3>${esc(h.name)}</h3><p class="muted">Owned safehouse · No criminal turf or passive rent</p><button class="btn ghost" data-act="home-waypoint" data-arg="${esc(h.id)}">Set waypoint</button></div>`).join('')}
+          <p class="muted">Open the map and tap a teal residential building to buy a safehouse.</p>
           ${s.safehouse?`<div class="card"><h3>Your couch · Starter safehouse</h3><p>${esc(s.safehouse.name)}</p><p class="muted">Free garage and stash. Park at the street entrance to clear Heat.</p><button class="btn" data-act="home">Return to couch</button><button class="btn ghost" data-act="stash">Stash</button><button class="btn ghost" data-act="withdraw">Withdraw</button></div>`:''}
           <p class="muted">Buy landmark towers to earn passive rent every minute, in every city, forever. Owned towers glow gold.</p>
           <div class="summary"><div><small>Portfolio</small><strong>${s.holdings.length} properties</strong></div><div><small>Passive income</small><strong>${money(this.incomePerMin)}/min</strong></div></div>
@@ -1211,141 +1233,109 @@ export class Game {
 
   // ---------- minimap ----------
 
-  private buildMinimap() {
-    const w = this.world!
-    const size = 1800
-    this.mmScale = 820 / Math.max(750, w.city.radius)
-    const c = document.createElement('canvas')
-    c.width = c.height = size
-    const g = c.getContext('2d')!
-    const o = size / 2
-    g.fillStyle = '#08090c'
-    g.fillRect(0, 0, size, size)
-    g.fillStyle = '#343b44'
-    for (const b of w.city.buildings) {
-      g.beginPath()
-      b.poly.forEach(([x, z], i) => (i ? g.lineTo(o + x * this.mmScale, o + z * this.mmScale) : g.moveTo(o + x * this.mmScale, o + z * this.mmScale)))
-      g.fill()
+  private refreshDealers(){
+    this.dealerAnchor={x:this.actor.x,z:this.actor.z}
+    this.dealers?.refresh(this.actor.x,this.actor.z)
+    if(this.dealerWaypoint && this.waypoint){
+      const d=this.dealers?.dealers.find(d=>d.id===this.dealerWaypoint)
+      if(d&&this.waypoint.label===d.name){this.waypoint={x:d.x,z:d.z,label:d.name};this.routeTimer=0}
     }
-    g.lineCap = 'round'
-    for (const r of w.city.roads) {
-      g.strokeStyle = r.major ? '#a57738' : '#435057'
-      g.lineWidth = Math.max(1, r.width * this.mmScale * 0.8)
-      g.beginPath()
-      r.pts.forEach(([x, z], i) => (i ? g.lineTo(o + x * this.mmScale, o + z * this.mmScale) : g.moveTo(o + x * this.mmScale, o + z * this.mmScale)))
-      g.stroke()
-    }
-    this.minimapBase = c
   }
 
-  private mapDot(g: CanvasRenderingContext2D, x: number, z: number, color: string, r: number) {
-    const w = this.world!
-    const base = this.minimapBase!
-    const o = base.width / 2
-    g.fillStyle = color
-    g.beginPath()
-    g.arc(o + x * this.mmScale, o + z * this.mmScale, r, 0, Math.PI * 2)
-    g.fill()
-    if (w.city.procedural) return
+  private atOwnedHome(){
+    if(!this.world)return false
+    return this.save.homes.some(h=>{
+      const i=this.homeBuildings.get(h.id),b=i===undefined?undefined:this.world!.city.buildings[i]
+      return b ? distanceToHome(this.actor.x,this.actor.z,b)<18 : Math.hypot(this.actor.x-localHome(h,this.world!.city).x,this.actor.z-localHome(h,this.world!.city).z)<18
+    })
   }
 
-  private drawFullMap() {
-    const w = this.world
-    const cv = $<HTMLCanvasElement>('full-map')
-    const g = cv.getContext('2d')
-    if (!w || !g || !this.minimapBase || !this.mapOpen) return
-    const dpr = Math.min(devicePixelRatio, 2)
-    const width = Math.max(1, cv.clientWidth), height = Math.max(1, cv.clientHeight)
-    if (cv.width !== Math.round(width * dpr) || cv.height !== Math.round(height * dpr)) {
-      cv.width = Math.round(width * dpr)
-      cv.height = Math.round(height * dpr)
-    }
-    const base = this.minimapBase, o = base.width / 2
-    const fit = Math.min(cv.width, cv.height) / base.width
-    const scale = fit * this.mapZoom
-    const px = o + this.actor.x * this.mmScale, pz = o + this.actor.z * this.mmScale
-    g.fillStyle = '#08090c'
-    g.fillRect(0, 0, cv.width, cv.height)
-    g.save()
-    g.translate(cv.width / 2, cv.height / 2)
-    g.scale(scale, scale)
-    g.drawImage(base, -px, -pz)
-    g.translate(-px, -pz)
-    for (const p of w.pumps) this.mapDot(g, p.x, p.z, '#19ffe6', 6 / scale)
-    const garage=w.city.nodes[this.garageNode]
-    if(garage)this.mapDot(g,garage.x,garage.z,'#ffcf77',8/scale)
-    for (const dealer of this.dealers?.dealers ?? []) this.mapDot(g, dealer.x, dealer.z, `#${dealer.color.toString(16).padStart(6, '0')}`, 7 / scale)
-    const t = this.target()
-    if (t) this.mapDot(g, t.x, t.z, '#ff9d00', 9 / scale)
-    if (this.route.length > 1) {
-      g.strokeStyle = '#ff9d00'
-      g.lineWidth = 4 / scale
-      g.beginPath()
-      this.route.forEach((i, n) => {
-        const node = w.city.nodes[i]
-        const x = o + node.x * this.mmScale, y = o + node.z * this.mmScale
-        if (n) g.lineTo(x, y); else g.moveTo(x, y)
-      })
-      g.stroke()
-    }
-    this.mapDot(g, this.actor.x, this.actor.z, '#ffffff', 8 / scale)
-    g.restore()
-    $('map-coords').textContent = `${w.city.name} · ${streamerFor(w.city)?.tileCount ?? 'SIM'} sectors · ${(w.city.radius * 2 / 1000).toFixed(1)} km loaded`
+  buyHome(index:number){
+    const w=this.world,b=w?.city.buildings[index]
+    if(!w||!b||!residential(b,w.city))return
+    const offer=houseOffer(b,w.city)
+    if(this.save.homes.some(h=>h.id===offer.id))return
+    if(this.save.money<offer.price){this.toast('Not enough cash for this safehouse','bad');return}
+    this.save.money-=offer.price;this.save.homes.push(offer);this.homeBuildings.set(offer.id,index);this.persist()
+    this.showMapBuilding(index);this.toast('Safehouse acquired. Park nearby to clear Heat and use your stash.','good')
   }
 
-  private drawMinimap() {
-    const w = this.world
-    const cv = $<HTMLCanvasElement>('minimap')
-    const g = cv.getContext('2d')
-    if (!w || !g || !this.minimapBase) return
-    const dpr = Math.min(window.devicePixelRatio, 2)
-    const css = cv.clientWidth
-    if (cv.width !== css * dpr) { cv.width = cv.height = css * dpr }
-    const S = cv.width
-    const zoom = (0.34 / this.mmScale) * dpr
-    const base = this.minimapBase
-    const o = base.width / 2
-    const px = this.actor.x, pz = this.actor.z
-    g.save()
-    g.fillStyle = '#05050c'
-    g.fillRect(0, 0, S, S)
-    g.translate(S / 2, S / 2)
-    g.rotate(-this.actorHeading + Math.PI)
-    g.scale(zoom, zoom)
-    g.drawImage(base, -(o + px * this.mmScale), -(o + pz * this.mmScale))
-    const dot = (x: number, z: number, color: string, r: number) => {
-      g.fillStyle = color
-      g.beginPath()
-      g.arc((x - px) * this.mmScale, (z - pz) * this.mmScale, r / zoom * dpr, 0, Math.PI * 2)
-      g.fill()
-    }
-    for (const h of this.save.holdings) if (h.cityKey === w.city.key) { const b = w.city.buildings.find(b=>b.id===h.id); if (b) dot(b.cx, b.cz, '#ff9d00', 3) }
-    for (const p of w.pumps) dot(p.x, p.z, '#19ffe6', 3.5)
-    for (const dealer of this.dealers?.dealers ?? []) dot(dealer.x, dealer.z, `#${dealer.color.toString(16).padStart(6, '0')}`, 4.5)
-    if (this.route.length > 1) {
-      g.strokeStyle = '#ff9d00'
-      g.lineWidth = 2.5 / zoom * dpr
-      g.beginPath()
-      g.moveTo(0, 0)
-      for (const i of this.route) g.lineTo((w.city.nodes[i].x - px) * this.mmScale, (w.city.nodes[i].z - pz) * this.mmScale)
-      g.stroke()
-    }
-    const t = this.target()
-    if (t) dot(t.x, t.z, this.active?.stage === 'dropoff' ? '#ff9d00' : '#00f0ff', 6)
-    g.restore()
-    g.fillStyle = '#fff'
-    g.beginPath()
-    g.moveTo(S / 2, S / 2 - 8 * dpr)
-    g.lineTo(S / 2 + 5 * dpr, S / 2 + 6 * dpr)
-    g.lineTo(S / 2 - 5 * dpr, S / 2 + 6 * dpr)
-    g.closePath()
-    g.fill()
-    if (this.mapOpen) this.drawFullMap()
+  private mapPanel(html:string){
+    const panel=$('map-selection');panel.hidden=false;panel.innerHTML=html
+    panel.querySelectorAll<HTMLElement>('[data-act]').forEach(el=>el.addEventListener('click',()=>this.onAction(el.dataset.act!,el.dataset.arg??'')))
+  }
+  private showMapBuilding(index:number){
+    const w=this.world!,b=w.city.buildings[index],h=houseOffer(b,w.city),owned=this.save.homes.some(v=>v.id===h.id)
+    this.mapPanel(`<strong>${esc(h.name)}</strong><p>${owned?'Your safehouse · Park nearby to stash cargo and clear Heat.':`Residential safehouse · ${money(h.price)}`}</p>${owned?`<button class="btn" data-act="home-waypoint" data-arg="${esc(h.id)}">Set waypoint</button><button class="btn ghost" data-act="stash">Stash</button><button class="btn ghost" data-act="withdraw">Withdraw</button>`:`<button class="btn buy" data-act="buy-home" data-arg="${index}" ${this.save.money<h.price?'disabled':''}>Buy safehouse · ${money(h.price)}</button>`}`)
   }
 
-  // ---------- frame ----------
+  mapPick(x:number,y:number){
+    if(!this.fullView||!this.navigation||!this.world)return
+    const cv=$<HTMLCanvasElement>('full-map'),dpr=cv.width/cv.clientWidth,v=this.fullView
+    const m=this.mapMarkers().map(m=>{const p=this.navigation!.project(v,m.x,m.z);return {m,d:Math.hypot(p.x-x*dpr,p.y-y*dpr)}}).filter(v=>v.d<16*dpr).sort((a,b)=>a.d-b.d)[0]?.m
+    if(m){
+      if(m.id.startsWith('dealer:')){this.mapPanel(`<strong>${esc(m.label)}</strong><p>Parked gang dealer</p><button class="btn" data-act="locate-dealer" data-arg="${esc(m.id.slice(7))}">Set waypoint</button>`);return}
+      if(m.id.startsWith('offer:')){const id=Number(m.id.slice(6)),c=this.offers.find(c=>c.id===id)!;this.mapPanel(`<strong>${esc(c.client)}</strong><p>${esc(c.type.label)} · ${money(c.pay)}</p><button class="btn" data-act="accept" data-arg="${id}">Accept contract</button>`);return}
+    }
+    const p=this.navigation.unproject(v,x*dpr,y*dpr)
+    const i=this.world.city.buildings.findIndex(b=>residential(b,this.world!.city)&&pointInPoly(p.x,p.z,b.poly))
+    if(i>=0){this.showMapBuilding(i);return}
+    this.waypoint={...p,label:m?.label??'Map waypoint'};this.dealerWaypoint=null;this.routeTimer=0;this.computeRoute();this.drawRoute()
+    this.mapPanel(`<strong>${esc(this.waypoint.label)}</strong><p>Waypoint set. Close the map to drive.</p>`)
+    this.drawFullMap()
+  }
+  panMap(dx:number,dy:number){
+    if(!this.fullView||!this.mapCenter)return
+    const cv=$<HTMLCanvasElement>('full-map'),dpr=cv.width/cv.clientWidth
+    this.mapCenter.x-=dx*dpr/this.fullView.scale;this.mapCenter.z-=dy*dpr/this.fullView.scale
+    this.drawFullMap()
+  }
+  centerMap(){this.mapCenter={x:this.actor.x,z:this.actor.z};$('map-selection').hidden=true;this.drawFullMap()}
 
-  private hudTimer = 0
+  private mapMarkers():MapMarker[]{
+    const w=this.world!,out:MapMarker[]=[]
+    for(const d of this.dealers?.dealers??[])out.push({id:`dealer:${d.id}`,x:d.x,z:d.z,label:d.name,symbol:'D',color:'#df8dcc'})
+    for(const c of this.offers){const n=w.city.nodes[c.from];if(n)out.push({id:`offer:${c.id}`,x:n.x,z:n.z,label:`${c.type.label} · ${money(c.pay)}`,symbol:'C',color:'#78c6ff'})}
+    if(this.active)for(const [node,label,symbol] of [[this.active.from,'Pickup','P'],[this.active.to,'Drop-off','X']] as const){const n=w.city.nodes[node];out.push({id:label,x:n.x,z:n.z,label,symbol,color:'#ffba4b'})}
+    for(const h of this.save.homes)out.push({id:h.id,...localHome(h,w.city),label:h.name,symbol:'H',color:'#94e4b2'})
+    const garage=w.city.nodes[this.garageNode];if(garage)out.push({id:'garage',x:garage.x,z:garage.z,label:'Garage / stash',symbol:'H',color:'#94e4b2'})
+    for(const p of w.pumps)out.push({id:`fuel:${p.x}:${p.z}`,x:p.x,z:p.z,label:'HJ-77',symbol:'F',color:'#00d8e8'})
+    if(this.waypoint)out.push({id:'waypoint',...this.waypoint,symbol:'W',color:'#fff280'})
+    return out
+  }
+  private buildMinimap(){
+    const city=this.world!.city;this.navigation=new NavigationMap(city)
+    this.homeBuildings.clear()
+    const owned=new Set(this.save.homes.map(h=>h.id))
+    if(owned.size)city.buildings.forEach((b,i)=>{const id=b.id??houseOffer(b,city).id;if(owned.has(id))this.homeBuildings.set(id,i)})
+  }
+
+  private drawNavigation(cv:HTMLCanvasElement,full:boolean){
+    if(!this.navigation||!this.world)return
+    const dpr=Math.min(devicePixelRatio,2),width=Math.round(cv.clientWidth*dpr),height=Math.round(cv.clientHeight*dpr)
+    if(!width||!height)return
+    if(cv.width!==width||cv.height!==height){cv.width=width;cv.height=height}
+    const g=cv.getContext('2d')!,center=full?(this.mapCenter??this.actor):this.actor
+    const v:MapView={x:center.x,z:center.z,width,height,scale:full?Math.min(width,height)/3200*this.mapZoom:width/650}
+    if(full)this.fullView=v
+    this.navigation.draw(g,v,full?'full':'mini',dpr)
+    if(this.route.length>1){g.strokeStyle='#ffc36a';g.lineWidth=2*dpr;g.beginPath();this.route.forEach((i,j)=>{const n=this.world!.city.nodes[i],p=this.navigation!.project(v,n.x,n.z);if(j)g.lineTo(p.x,p.y);else g.moveTo(p.x,p.y)});g.stroke()}
+    for(const m of this.mapMarkers()){
+      if(!full&&m.symbol==='H'&&Math.hypot(m.x-v.x,m.z-v.z)>2600)continue
+      if(!full&&!['D','W','H','P','X'].includes(m.symbol)&&Math.hypot(m.x-v.x,m.z-v.z)>325)continue
+      this.navigation.marker(g,v,m,dpr,full)
+    }
+    const p=this.navigation.project(v,this.actor.x,this.actor.z)
+    g.save();g.translate(p.x,p.y);g.rotate(Math.PI-this.actorHeading);g.fillStyle='#fff';g.strokeStyle='#0a141c';g.lineWidth=2*dpr;g.beginPath();g.moveTo(0,-9*dpr);g.lineTo(6*dpr,7*dpr);g.lineTo(0,4*dpr);g.lineTo(-6*dpr,7*dpr);g.closePath();g.fill();g.stroke();g.restore()
+    g.textAlign='left';g.textBaseline='top';g.font=`bold ${11*dpr}px sans-serif`;g.fillStyle='#dbe6ed';g.fillText('N ↑',8*dpr,8*dpr)
+    if(full){const metres=100/ (v.scale/dpr);g.fillText(`${Math.round(metres)} m`,16*dpr,height-165*dpr);g.fillRect(16*dpr,height-145*dpr,100*dpr,2*dpr)}
+  }
+  private drawFullMap(){
+    if(!this.mapOpen)return
+    this.drawNavigation($<HTMLCanvasElement>('full-map'),true)
+    $('map-coords').textContent=`${streamerFor(this.world!.city)?.tileCount??'SIM'} sectors · Drag to explore · Tap buildings / markers`
+  }
+  private drawMinimap(){this.drawNavigation($<HTMLCanvasElement>('minimap'),false);if(this.mapOpen)this.drawFullMap()}
 
   update(dt: number, input: Input) {
     const w = this.world
@@ -1379,7 +1369,7 @@ export class Game {
       if(p.apex) this.run.chain()
       if(this.run.limp===0) this.bust()
       const garage=w.city.nodes[this.garageNode]
-      if(p.groundSpeed<3 && Math.hypot(p.pos.x-garage.x,p.pos.z-garage.z)<12) { this.run.heat=0; if(this.run.limp>=0)this.run.repair() }
+      if(p.groundSpeed<3 && (Math.hypot(p.pos.x-garage.x,p.pos.z-garage.z)<12 || this.atOwnedHome())) { this.run.heat=0; if(this.run.limp>=0)this.run.repair() }
       if(tunnel) this.route=[]
 
       const leak = this.save.mask==='respirator' ? 0 : this.active?.stage === 'dropoff' ? this.active.type.leak : 0
@@ -1410,6 +1400,7 @@ export class Game {
       this.streamTimer -= dt
       if (this.streamTimer <= 0) {
         this.streamTimer = 1.5
+        if(Math.hypot(this.actor.x-this.dealerAnchor.x,this.actor.z-this.dealerAnchor.z)>250)this.refreshDealers()
         void this.streamMap()
       }
     }

@@ -443,3 +443,10 @@ body.is-touch .prompt{bottom:calc(244px + env(safe-area-inset-bottom));max-width
 body.is-touch .toast{bottom:calc(306px + env(safe-area-inset-bottom))}
 body.is-touch.test-flight .prompt{bottom:calc(330px + env(safe-area-inset-bottom))}
 body.is-touch.test-flight .toast{bottom:calc(388px + env(safe-area-inset-bottom))}
+
+#full-map{touch-action:none}
+.map-selection{position:absolute;left:16px;top:104px;max-width:min(380px,calc(100% - 32px));padding:14px;background:#0c1821ed;border:1px solid #6e9296;color:#e2edef}
+.map-selection p{margin:8px 0;font-size:.85rem}
+.map-selection button{margin:4px 4px 0 0}
+.map-selection[hidden]{display:none}
+.map-legend{font-size:.7rem;line-height:1.5;max-width:calc(100% - 98px);flex-wrap:wrap;background:#0c1821ed}

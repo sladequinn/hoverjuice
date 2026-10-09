@@ -240,3 +240,18 @@ test('blocked dealer parking is retried at other eligible streets',()=>{
  assert.ok(d.dealers.every(v=>Math.hypot(v.x,v.z)>=180))
  d.dispose()
 })
+
+test('dealers are dispersed, remain stable nearby, and reuse cars after long-distance streaming',()=>{
+ const w=fixture();w.eligibleAt=()=>true
+ const d=new DealerSystem(w),start=d.dealers.map(v=>({...v})),cars=[...d.group.children]
+ assert.equal(start.length,4)
+ for(const a of start)for(const b of start)if(a!==b)assert.ok(Math.hypot(a.x-b.x,a.z-b.z)>=450)
+ d.refresh(200,200);assert.deepEqual(d.dealers,start)
+ const offset=w.city.nodes.length
+ w.city.nodes.push(...w.city.nodes.map(n=>({...n,x:n.x+10000,adj:n.adj.map(i=>i+offset)})))
+ d.refresh(10000,0)
+ assert.equal(d.dealers.length,4);assert.deepEqual(d.group.children,cars)
+ assert.ok(d.dealers.every(v=>Math.hypot(v.x-10000,v.z)<2300))
+ for(const a of d.dealers)for(const b of d.dealers)if(a!==b)assert.ok(Math.hypot(a.x-b.x,a.z-b.z)>=450)
+ d.dispose()
+})

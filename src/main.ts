@@ -120,6 +120,20 @@ document.querySelectorAll<HTMLElement>('[data-tap]').forEach((el) =>
 $('map-close').addEventListener('click', () => game.toggleMap(false))
 $('map-plus').addEventListener('click', () => game.zoomMap(1.35))
 $('map-minus').addEventListener('click', () => game.zoomMap(1 / 1.35))
+$('map-center').addEventListener('click',()=>game.centerMap())
+const mapCanvas=$('full-map')
+let mapDrag:{id:number;x:number;y:number;startX:number;startY:number;moved:boolean}|null=null
+mapCanvas.addEventListener('pointerdown',e=>{if(mapDrag)return;e.preventDefault();mapCanvas.setPointerCapture(e.pointerId);mapDrag={id:e.pointerId,x:e.clientX,y:e.clientY,startX:e.clientX,startY:e.clientY,moved:false}})
+mapCanvas.addEventListener('pointermove',e=>{
+ if(!mapDrag||mapDrag.id!==e.pointerId)return
+ if(Math.hypot(e.clientX-mapDrag.startX,e.clientY-mapDrag.startY)>6)mapDrag.moved=true
+ if(mapDrag.moved)game.panMap(e.clientX-mapDrag.x,e.clientY-mapDrag.y)
+ mapDrag.x=e.clientX;mapDrag.y=e.clientY
+})
+mapCanvas.addEventListener('pointerup',e=>{if(!mapDrag||mapDrag.id!==e.pointerId)return;const click=!mapDrag.moved;mapDrag=null;if(click){const r=mapCanvas.getBoundingClientRect();game.mapPick(e.clientX-r.left,e.clientY-r.top)}})
+for(const event of ['pointercancel','lostpointercapture'])mapCanvas.addEventListener(event,()=>{mapDrag=null})
+mapCanvas.addEventListener('wheel',e=>{e.preventDefault();e.stopPropagation();game.zoomMap(e.deltaY<0?1.2:1/1.2)},{passive:false})
+
 $('modal-close').addEventListener('click', () => game.closeModal())
 $('modal').addEventListener('click', (e) => { if (e.target === $('modal')) game.closeModal() })
 
