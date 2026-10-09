@@ -210,3 +210,33 @@ test('queued turns last through a slow approach but expire when unused',()=>{
  for(let i=0;i<150;i++)p.update(1/60,neutral,w,true)
  assert.equal(p.nextTurn(w).dir,0)
 })
+
+
+test('dealer eligibility reads POIs and landuse when MVT building tags are missing',()=>{
+ const c=proceduralCity('MVT regression',43.45,-80.49)
+ c.buildings=[];c.zones=[];c.venues=[]
+ const w=new World(c)
+ assert.equal(w.eligibleAt(0,0),false)
+ c.venues.push({x:0,z:0,name:'Cafe',tags:{amenity:'cafe'}})
+ assert.equal(w.eligibleAt(0,0),true)
+ c.venues.push({x:10,z:0,name:'School',tags:{amenity:'school'}})
+ assert.equal(w.eligibleAt(0,0),false)
+ c.venues=[]
+ c.zones=[{poly:[[-2000,-2000],[2000,-2000],[2000,2000],[-2000,2000]],tags:{landuse:'commercial'},gang:'SHINOBI'}]
+ assert.equal(w.eligibleAt(0,0),true)
+ const d=new DealerSystem(w)
+ assert.equal(d.dealers.length,4)
+ d.refresh();assert.equal(d.dealers.length,4)
+ c.zones[0].tags.landuse='residential'
+ assert.equal(w.eligibleAt(0,0),false)
+ d.dispose();w.dispose()
+})
+
+test('blocked dealer parking is retried at other eligible streets',()=>{
+ const w=fixture();w.eligibleAt=()=>true
+ w.hitBuilding=(x,z)=>Math.hypot(x,z)<180?0:-1
+ const d=new DealerSystem(w)
+ assert.equal(d.dealers.length,4)
+ assert.ok(d.dealers.every(v=>Math.hypot(v.x,v.z)>=180))
+ d.dispose()
+})

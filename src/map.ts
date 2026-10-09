@@ -556,19 +556,41 @@ export function proceduralCity(name: string, lat: number, lon: number): CityData
 
 export interface GeoResult { name: string; area: string; lat: number; lon: number }
 
-let geocoderConfig:Promise<{geocoder?:string}>|undefined
+let geocoderConfig:Promise<{geocoder?:string;geocoderFormat?:string}>|undefined
+const geoCache=new Map<string,GeoResult[]>()
+let searching=false,lastSearch=0
 export async function geocode(q: string): Promise<GeoResult[]> {
-  geocoderConfig??=fetch('/config.json').then(r=>r.ok?r.json():{}).catch(()=>({}))
-  const config=await geocoderConfig
-  const endpoint=config.geocoder??'/api/geocode'
-  const url = `${endpoint}${endpoint.includes('?')?'&':'?'}q=${encodeURIComponent(q)}`
-  const res = await fetch(url, { headers: { Accept: 'application/json' } })
-  if (!res.ok) throw new Error(`Place search unavailable (${res.status}). Choose a preset or use your location.`)
-  const data: { display_name: string; lat: string; lon: string; name?: string }[] = await res.json()
-  return data.map((d) => {
-    const parts = d.display_name.split(',').map((s) => s.trim())
-    return { name: d.name || parts[0], area: parts.slice(1, 3).join(', '), lat: parseFloat(d.lat), lon: parseFloat(d.lon) }
-  })
+  q=q.trim()
+  if(q.length<3 || q.length>160)throw new Error('Enter an address and city (3–160 characters).')
+  const key=q.toLowerCase(),cached=geoCache.get(key)
+  if(cached)return cached
+  if(searching || Date.now()-lastSearch<1200)throw new Error('Wait a moment before searching again.')
+  searching=true;lastSearch=Date.now()
+  try {
+    geocoderConfig??=fetch(`${import.meta.env?.BASE_URL??'/'}config.json`,{signal:AbortSignal.timeout(8000)}).then(r=>r.ok?r.json():{}).catch(()=>({}))
+    const config=await geocoderConfig
+    const endpoint=config.geocoder??'https://photon.komoot.io/api/'
+    const photon=config.geocoderFormat==='photon' || endpoint.includes('photon.komoot.io')
+    const url = `${endpoint}${endpoint.includes('?')?'&':'?'}q=${encodeURIComponent(q)}&limit=6`
+    const res=await fetch(url,{headers:{Accept:'application/json'},signal:AbortSignal.timeout(12000)})
+    if(!res.ok)throw new Error(`Address search unavailable (${res.status}). Try again or choose Random couch.`)
+    const data=await res.json()
+    let results:GeoResult[]
+    if(photon){
+      results=(data.features??[]).map((f:{properties:Record<string,string>;geometry:{coordinates:number[]}})=>{
+        const p=f.properties,[lon,lat]=f.geometry.coordinates
+        const street=[p.housenumber,p.street].filter(Boolean).join(' ')
+        return {name:street||p.name||p.city||'Selected location',area:[p.city,p.state,p.country].filter(Boolean).join(', '),lat,lon}
+      })
+    }else{
+      if(!Array.isArray(data))throw new Error('Address search is not configured correctly. Choose Random couch for now.')
+      results=data.map(d=>{const parts=String(d.display_name).split(',').map(s=>s.trim());return {name:parts[0],area:parts.slice(1).join(', '),lat:Number(d.lat),lon:Number(d.lon)}})
+    }
+    results=results.filter(d=>Number.isFinite(d.lat)&&Number.isFinite(d.lon)&&Math.abs(d.lat)<85&&Math.abs(d.lon)<=180)
+    if(geoCache.size>=50)geoCache.delete(geoCache.keys().next().value!)
+    geoCache.set(key,results)
+    return results
+  }finally{searching=false}
 }
 
 export function pointInPoly(x: number, z: number, poly: Pt[]) {

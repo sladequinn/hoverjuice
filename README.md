@@ -47,7 +47,7 @@ Merge this branch, then open **Settings → Pages → Build and deployment → S
 
 Publishing `main` directly from its root serves uncompiled TypeScript and will show an unstyled, nonfunctional page. The default Vite base `/` is correct for `https://slade.ninja/`. A repository-subpath deployment would instead need `/hoverjuice/` as its Vite base. Browser smoke tests use the production build, so run `npm run build` before `npm run test:browser`.
 
-Pages hosts the client only. Preset cities and browser location work; place search needs the separately deployed geocoder below, and online services need their own hosting.
+Pages hosts the client only. Address search now defaults to Photon over HTTPS, so no Vercel migration is needed. Search runs only on explicit submission, caches results for the session, and limits repeat requests. Photon’s public endpoint permits reasonable project use but has no availability guarantee: https://github.com/komoot/photon#demo-server. Configure your own provider for larger audiences. Online multiplayer and global persistence still need their own hosting.
 
 ## Optional online services
 
@@ -55,7 +55,7 @@ Pages hosts the client only. Preset cities and browser location work; place sear
 - `server/schema.sql`: sparse Cloudflare D1 tables for ownership, dead drops, verified speed records and flashpoints.
 - `server/api.ts`: read-only ownership/record gateway. Set `VITE_API_BASE` after deploying it. **Global claims, transactions and leaderboard submissions are not enabled.** Never trust localStorage cash or client-supplied race times for global writes.
 - Copy `wrangler.example.toml` to `wrangler.toml`, supply the real D1 ID, application origin and contact email, apply the schema, and deploy with your Cloudflare tooling. No account, database or hosting deployment is created by this branch.
-- `server/geocoder.ts`: singleton Durable Object, query caching and an application-wide 1.1-second interval between Nominatim requests. Set `public/config.json`'s `geocoder` URL to the deployed `/api/geocode`; this runtime file allows provider changes without rebuilding the client.
+- `server/geocoder.ts`: singleton Durable Object, query caching and an application-wide 1.1-second interval between Nominatim requests. To use this backend instead of Photon, set `public/config.json`'s `geocoder` URL to the deployed `/api/geocode` and `geocoderFormat` to `nominatim`; this runtime file allows provider changes without rebuilding the client.
 
 Nominatim public service use must follow its [usage policy](https://operations.osmfoundation.org/policies/nominatim/): the maximum is one request/second **across the entire app**, results must be cached, requests must identify the app, and autocomplete/systematic POI extraction are forbidden. Search runs only on explicit form submission. Larger audiences need a suitable hosted or self-hosted Nominatim provider. Presets and browser geolocation work without place search.
 
@@ -64,3 +64,5 @@ Map data © [OpenStreetMap contributors](https://www.openstreetmap.org/copyright
 Mag-Lock now assists sharp corners by reducing speed, recentres around lane/footprint overlaps and only releases for heavy traffic impacts, water or manual input. Test flight is a session-only debugging option capped at 250 m above local road height; turning it off returns you toward street height.
 
 Gang leaders trade from parked vehicles: SHINOBI / SLADE, LIARS / WHITE LIE, HYENAS / FASA, JESTERS / FRECKLES (the female clown). Market panels and proximity prompts identify the leader and gang. Eligible commercial sites are still required.
+
+New Game asks “Where’s your couch?”: select an address search result or a random preset district. The selected coordinates and label persist locally as the starter safehouse; its playable entrance is the nearest connected street node. Return to it from Turf & vaults. A new game confirms before replacing existing progress. City travel does not change the saved couch.

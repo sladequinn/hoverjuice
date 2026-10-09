@@ -29,6 +29,7 @@ interface SaveData {
   current: string
   holdings: Holding[]
   city: { name: string; lat: number; lon: number } | null
+  safehouse: { name: string; lat: number; lon: number } | null
   deliveries: number
   earned: number
   won: boolean
@@ -73,6 +74,7 @@ function defaultSave(): SaveData {
     current: 'board',
     holdings: [],
     city: null,
+    safehouse: null,
     deliveries: 0,
     earned: 0,
     won: false,
@@ -240,7 +242,7 @@ export class Game {
 
   // ---------- cities ----------
 
-  async warp(name: string, lat: number, lon: number) {
+  async warp(name: string, lat: number, lon: number, newGame = false) {
     if (this.loading) return
     this.settleFuel(false)
     this.loading = true
@@ -286,6 +288,12 @@ export class Game {
     $('loading-status').textContent = `Extruding ${city.buildings.length.toLocaleString()} towers…`
     await new Promise((r) => setTimeout(r, 30))
 
+    if(newGame){
+      this.save=defaultSave();this.run=new RunState()
+      this.player.setSpec(vehicleById('board'));this.player.setMask('balaclava')
+      this.juice=this.player.spec.tank
+    }
+    this.save.safehouse??={name,lat,lon}
     if(this.campaign){this.scene.remove(this.campaign.boss);this.campaign.dispose();this.campaign=null}
     if(this.multiplayer){this.scene.remove(this.multiplayer.group);this.multiplayer.dispose();this.multiplayer=null}
     if (this.world) {
@@ -314,7 +322,10 @@ export class Game {
     this.refreshOwned()
 
     const main = city.nodes.map((n, i) => ({ n, i })).filter(({ n }) => n.main && n.adj.length > 0)
-    main.sort((a, b) => Math.hypot(a.n.x, a.n.z) - Math.hypot(b.n.x, b.n.z))
+    const home=this.save.safehouse
+    const hx=(home.lon-lon)*111320*Math.cos(lat*Math.PI/180),hz=-(home.lat-lat)*110540
+    const nearHome=Math.hypot(hx,hz)<city.radius
+    main.sort((a,b)=>Math.hypot(a.n.x-(nearHome?hx:0),a.n.z-(nearHome?hz:0))-Math.hypot(b.n.x-(nearHome?hx:0),b.n.z-(nearHome?hz:0)))
     this.garageNode = main[0]?.i ?? 0
     this.player.placeAtNode(this.world, this.garageNode)
     this.player.unsnap()
@@ -889,12 +900,12 @@ export class Game {
   // ---------- modals ----------
 
   openModal(view: string) {
-    if (!this.world && view !== 'warp') return
+    if (!this.world && view !== 'warp' && view !== 'couch') return
     const m = $('modal')
     m.dataset.view = view
     const body = $('modal-body')
     const tabs: [string, string][] = [['contracts', 'Contracts'], ['market', 'Night Market'], ['garage', 'Garage'], ['masks', 'Masks'], ['holdings', 'Turf & vaults'], ['warp', 'City'], ['help', 'Help']]
-    const tabBar = this.world && view !== 'win'
+    const tabBar = this.world && view !== 'win' && view !== 'couch'
       ? `<nav class="tabs">${tabs.map(([id, label]) => `<button class="tab ${id === view ? 'on' : ''}" data-act="view" data-arg="${id}">${label}</button>`).join('')}<button class="tab-close" data-act="close" aria-label="Close">✕</button></nav>`
       : ''
     $('modal-close').style.display = tabBar || view === 'win' || !this.world ? 'none' : ''
@@ -932,9 +943,21 @@ export class Game {
       case 'select-vehicle': this.selectVehicle(arg); break
       case 'buy-landmark': this.buyLandmark(arg); break
       case 'locate': this.locate(arg); break
+      case 'random-couch': {
+        const c=CITIES[Math.floor(Math.random()*CITIES.length)]
+        this.onAction('couch',`${c.lat}|${c.lon}|${c.name}`)
+        break
+      }
+      case 'home': {
+        const h=this.save.safehouse
+        if(h)void this.warp(h.name,h.lat,h.lon)
+        break
+      }
+      case 'couch':
       case 'warp': {
+        if(act==='couch' && this.hasSave && !confirm('Start a new game here? This replaces your current progress.'))return
         const [lat, lon, ...name] = arg.split('|')
-        void this.warp(name.join('|'), Number(lat), Number(lon))
+        void this.warp(name.join('|'), Number(lat), Number(lon), act==='couch')
         break
       }
       case 'view': this.openModal(arg); break
@@ -969,20 +992,22 @@ export class Game {
   private async search(q: string) {
     const out = document.getElementById('search-results')
     if (!out || !q.trim()) return
+    const action=$('modal').dataset.view==='couch'?'couch':'warp'
     out.innerHTML = '<p class="muted">Scanning the global grid…</p>'
     try {
       const res = await geocode(q)
+      if(!out.isConnected)return
       out.innerHTML = res.length
         ? res
             .map(
-              (r) => `<button class="city-btn" data-act="warp" data-arg="${r.lat}|${r.lon}|${esc(r.name)}">
+              (r) => `<button class="city-btn" data-act="${action}" data-arg="${r.lat}|${r.lon}|${esc(r.name+', '+r.area)}">
                 <strong>${esc(r.name)}</strong><span>${esc(r.area)}</span></button>`,
             )
             .join('')
-        : '<p class="muted">No matches. Try a city or neighbourhood name.</p>'
+        : '<p class="muted">No matches. Include the street number, street, city and country, or choose Random couch.</p>'
       out.querySelectorAll<HTMLElement>('[data-act]').forEach((b) => b.addEventListener('click', () => this.onAction(b.dataset.act!, b.dataset.arg ?? '')))
-    } catch {
-      out.innerHTML = '<p class="error">Geocoder unreachable. Pick one of the preset cities instead.</p>'
+    } catch (error) {
+      out.innerHTML = `<p class="error">${esc(error instanceof Error?error.message:'Address search unavailable. Try again or choose Random couch.')}</p>`
     }
   }
 
@@ -1129,15 +1154,23 @@ export class Game {
           : ''
         const elsewhere = s.holdings.filter((h) => h.cityKey !== w?.city.key)
         return `<h2>Real Estate: ${esc(w?.city.name ?? '')}</h2>
+          ${s.safehouse?`<div class="card"><h3>Your couch · Starter safehouse</h3><p>${esc(s.safehouse.name)}</p><p class="muted">Free garage and stash. Park at the street entrance to clear Heat.</p><button class="btn" data-act="home">Return to couch</button><button class="btn ghost" data-act="stash">Stash</button><button class="btn ghost" data-act="withdraw">Withdraw</button></div>`:''}
           <p class="muted">Buy landmark towers to earn passive rent every minute, in every city, forever. Owned towers glow gold.</p>
           <div class="summary"><div><small>Portfolio</small><strong>${s.holdings.length} properties</strong></div><div><small>Passive income</small><strong>${money(this.incomePerMin)}/min</strong></div></div>
           <div class="grid">${list || '<p class="muted">No landmarks found in this district.</p>'}</div>
           ${elsewhere.length ? `<h3 class="sub">Holdings in other cities</h3><ul class="plain">${elsewhere.map((h) => `<li>${esc(h.name)} <span class="muted">(${esc(h.city)})</span> <strong>+${money(h.income)}/min</strong></li>`).join('')}</ul>` : ''}`
       }
+      case 'couch':
+        return `<h2>Where’s your couch?</h2>
+          <p class="muted">Every empire starts somewhere. Pick an address for your first safehouse. You’ll spawn on the nearest connected street.</p>
+          <form id="search-form" class="search"><input name="q" aria-label="Safehouse address" placeholder="Street number, street, city, country" maxlength="160" required autocomplete="off" /><button class="btn">Find couch</button></form>
+          <div id="search-results" class="cities" aria-live="polite"></div>
+          <button class="btn buy big" data-act="random-couch">Random couch</button>
+          <p class="muted small">Random chooses a starting district. Your safehouse stays saved on this device.</p>`
       case 'warp':
         return `<h2>${this.world ? 'City uplink' : 'Choose your district'}</h2>
           <p class="muted">Pick a city. Take the night shift. Run cargo, dodge traffic and keep enough HJ-77 in the tank to get home.</p>
-          <form id="search-form" class="search"><input name="q" placeholder="Search any city or neighbourhood…" autocomplete="off" /><button class="btn">Search</button></form>
+          <form id="search-form" class="search"><input name="q" placeholder="Search an address, city or neighbourhood…" autocomplete="off" /><button class="btn">Search</button></form>
           <div id="search-results" class="cities"></div>
           <h3 class="sub">Deployment zones</h3>
           <div class="cities">${CITIES.map((c) => `<button class="city-btn" data-act="warp" data-arg="${c.lat}|${c.lon}|${c.name}"><strong>${c.name}</strong><span>${c.area}</span></button>`).join('')}</div>`
@@ -1239,6 +1272,8 @@ export class Game {
     g.drawImage(base, -px, -pz)
     g.translate(-px, -pz)
     for (const p of w.pumps) this.mapDot(g, p.x, p.z, '#19ffe6', 6 / scale)
+    const garage=w.city.nodes[this.garageNode]
+    if(garage)this.mapDot(g,garage.x,garage.z,'#ffcf77',8/scale)
     for (const dealer of this.dealers?.dealers ?? []) this.mapDot(g, dealer.x, dealer.z, `#${dealer.color.toString(16).padStart(6, '0')}`, 7 / scale)
     const t = this.target()
     if (t) this.mapDot(g, t.x, t.z, '#ff9d00', 9 / scale)
