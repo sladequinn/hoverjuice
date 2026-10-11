@@ -50,6 +50,7 @@ const assert=require('node:assert/strict');
    const input={throttle:1,brake:0,steer:0,boost:false,up:false,down:false};
    for(let i=0;i<60;i++)g.update(1/60,input);
    const speed=g.player.groundSpeed;
+   if(!g.spray.activeCount)throw new Error('Moving vehicle must emit Hoverjuice');
    g.save.contraband.cyanade=2;g.overclock();const hull=g.run.hull;g.overclock();
    const cargo=g.save.contraband.cyanade;
    g.run.repair();g.save.money=500;g.player.placeAtNode(g.world,g.garageNode);g.stash();

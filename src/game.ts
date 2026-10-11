@@ -6,6 +6,7 @@ import {NavigationMap,type MapView,type MapMarker} from './navigation-map'
 import {residential,houseOffer,localHome,distanceToHome,type Safehouse} from './housing'
 import { Campaign } from './campaign'
 import { ParticlePool } from './particles'
+import { HoverjuiceSpray } from './hoverjuice'
 import { Multiplayer } from './multiplayer'
 import { OwnershipClient } from './persistence'
 import { RunState } from './dynamics'
@@ -149,6 +150,7 @@ export class Game {
   multiplayer: Multiplayer | null = null
   ownership = new OwnershipClient()
   particles=new ParticlePool()
+  spray=new HoverjuiceSpray()
   private fueling:{x:number;z:number;litres:number;limit:number}|null=null
   private slicks:{x:number;z:number;life:number}[]=[]
   campaign:Campaign|null=null
@@ -195,7 +197,7 @@ export class Game {
 
   constructor(scene: THREE.Scene) {
     this.scene = scene
-    scene.add(this.particles.mesh)
+    scene.add(this.particles.mesh, this.spray.mesh)
     this.save.mask = validMask(this.save.mask)
     this.save.masks = [...new Set(["balaclava", ...this.save.masks.map(validMask)])]
     this.player = new Player(vehicleById(this.save.current), this.save.mask)
@@ -314,6 +316,7 @@ export class Game {
       this.player.setSpec(vehicleById('board'));this.player.setMask('balaclava')
       this.juice=this.player.spec.tank
     }
+    this.spray.clear()
     this.save.safehouse??={name,lat,lon}
     if(this.campaign){this.scene.remove(this.campaign.boss);this.campaign.dispose();this.campaign=null}
     if(this.multiplayer){this.scene.remove(this.multiplayer.group);this.multiplayer.dispose();this.multiplayer=null}
@@ -1462,16 +1465,24 @@ export class Game {
         void this.streamMap()
       }
     }
-    this.multiplayer?.update(dt,this.player)
+    this.multiplayer?.update(dt,this.player,this.spray,w,this.paused?0:dt)
     w.update(this.paused?0:dt)
-    const traffic=this.traffic?.update(this.paused?0:dt,this.actor,this.player.groundSpeed,this.run.heat)
+    const traffic=this.traffic?.update(this.paused?0:dt,this.actor,this.player.groundSpeed,this.run.heat,this.spray)
     if(!this.paused&&traffic){
       if(traffic.impact>0){this.run.damage(Math.min(30,traffic.impact*0.5),this.save.mask==='oni');if(this.player.mode==='mag' && traffic.impact>22)this.player.unsnap()}
       for(let i=0;i<traffic.nearMisses;i++)this.run.chain()
       if(traffic.boxed&&this.run.limp<0){this.run.limp=15;this.toast('BOXED IN · 15 seconds reserve power','bad')}
     }
     if(!this.paused){
-      if(this.player.boosting)this.particles.emit(this.actor.x-Math.sin(this.player.heading)*2,this.actor.y,this.actor.z-Math.cos(this.player.heading)*2)
+      this.spray.emit(this.player,dt,this.actor,this.player.heading,this.player.groundSpeed,
+        this.player.mesh.userData.halfW,this.player.mesh.userData.halfL,
+        w.groundHeightAt(this.actor.x,this.actor.z,this.actor.y),this.player.boosting)
+      if(this.campaign?.intro || this.campaign?.racing){
+        const boss=this.campaign.boss
+        this.spray.emit(boss,dt,boss.position,boss.rotation.y,60,boss.userData.halfW,boss.userData.halfL,
+          w.groundHeightAt(boss.position.x,boss.position.z,boss.position.y),true)
+      }
+      this.spray.update(dt)
       for(const slick of this.slicks){slick.life-=dt;this.particles.emit(slick.x+(Math.random()-0.5)*5,0.4,slick.z+(Math.random()-0.5)*5);if(Math.hypot(this.actor.x-slick.x,this.actor.z-slick.z)<3)this.run.hull=Math.max(0,this.run.hull-dt*2)}
       this.slicks=this.slicks.filter(s=>s.life>0)
       this.particles.update(dt)

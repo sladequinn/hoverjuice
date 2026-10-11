@@ -1,6 +1,7 @@
 import {VEHICLE_SCALE} from './data'
 import * as THREE from 'three'
 import type { World } from './world'
+import type { HoverjuiceSpray } from './hoverjuice'
 interface Agent {a:number;b:number;distance:number;speed:number;seed:number;kind:number;pos:THREE.Vector3;near:boolean;cooldown:number}
 export interface TrafficEvents {nearMisses:number;impact:number;boxed:boolean}
 /** Three instanced fleets: couriers, freight and territorial interceptors. */
@@ -30,7 +31,7 @@ export class TrafficSystem {
    this.agents.push({a,b,distance:0,speed:12,seed,kind:seed%3,pos:new THREE.Vector3(nodes[a].x,1.3,nodes[a].z),near:false,cooldown:0})
   }
  }
- update(dt:number,player:THREE.Vector3,playerSpeed=0,heat=0):TrafficEvents {
+ update(dt:number,player:THREE.Vector3,playerSpeed=0,heat=0,spray?:HoverjuiceSpray):TrafficEvents {
   const events={nearMisses:0,impact:0,boxed:false},nodes=this.world.city.nodes,counts=[0,0,0]
   let closeHostiles=0
   for(const car of this.agents){
@@ -63,6 +64,7 @@ export class TrafficSystem {
    const scale=car.kind===1?new THREE.Vector3(1.25,2,1.8):car.kind===0?new THREE.Vector3(0.7,0.5,0.8):new THREE.Vector3(1,1,1)
    this.matrix.compose(car.pos,this.rotation,scale.multiplyScalar(VEHICLE_SCALE))
    this.fleets[car.kind].setMatrixAt(counts[car.kind]++,this.matrix)
+   if(d<65)spray?.emit(car,dt,car.pos,heading,car.speed,1.05*scale.x,2.3*scale.z,car.pos.y-1.3,false,.45)
   }
   for(let i=0;i<3;i++){this.fleets[i].count=counts[i];this.fleets[i].instanceMatrix.needsUpdate=true}
   events.boxed=closeHostiles>=3&&playerSpeed<2
