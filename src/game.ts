@@ -1,3 +1,4 @@
+import {TrafficSound} from './traffic-sound'
 import {Radio} from './radio'
 import {STATIONS} from './radio-config'
 import { PAINTS, UPGRADES, normalizeBuilds, buildFor, tunedVehicle, upgradeCost, type GarageBuilds } from './customization'
@@ -155,6 +156,7 @@ export class Game {
   multiplayer: Multiplayer | null = null
   ownership = new OwnershipClient()
   radio=new Radio(()=>({heat:this.run.heat,speed:this.player.groundSpeed*3.6,gang:this.world?.gangAt(this.actor.x,this.actor.z)??this.gang}))
+  trafficSound=new TrafficSound()
   particles=new ParticlePool()
   spray=new HoverjuiceSpray()
   private fueling:{x:number;z:number;litres:number;limit:number}|null=null
@@ -363,6 +365,8 @@ export class Game {
     this.garageNode = main[0]?.i ?? 0
     this.player.placeAtNode(this.world, this.garageNode)
     this.player.unsnap()
+    this.traffic.setActivitySites(this.dealers.dealers,this.actor)
+    this.traffic.prime(this.actor)
     this.campaign=new Campaign(this.world);this.scene.add(this.campaign.boss)
     if(!this.save.coldOpenDone){this.campaign.coldOpen(this.player);this.introMessage=2;this.save.coldOpenDone=true}
     this.juice = Math.max(this.juice, this.player.spec.tank * 0.6)
@@ -1074,6 +1078,7 @@ export class Game {
       }
       case 'radio-station': void this.radio.select(arg).then(()=>{if($('modal').dataset.view==='radio')this.openModal('radio')});break
       case 'radio-refresh': void this.radio.load().then(()=>{if($('modal').dataset.view==='radio')this.openModal('radio')});break
+      case 'traffic-sound':this.trafficSound.toggle();this.openModal('help');break
       case 'radio-play': if(this.radio.playing)this.radio.pause();else void this.radio.play();break
       case 'radio-next': void this.radio.next();break
       case 'paint': this.customizeVehicle('paint',arg); break
@@ -1311,7 +1316,7 @@ export class Game {
           <h3 class="sub">Deployment zones</h3>
           <div class="cities">${CITIES.map((c) => `<button class="city-btn" data-act="warp" data-arg="${c.lat}|${c.lon}|${c.name}"><strong>${c.name}</strong><span>${c.area}</span></button>`).join('')}</div>`
       case 'help':
-        return `<h2>Courier Manual</h2>
+        return `<h2>Courier Manual</h2><button class="btn ghost" data-act="traffic-sound">Traffic sound: ${this.trafficSound.enabled?'ON':'OFF'}</button>
           <div class="help">
             <div><h3>Street handling</h3><ul class="plain keys">
               <li><kbd>W</kbd>/<kbd>S</kbd> Thrust and brake (hold S when stopped to reverse on a conduit)</li>
@@ -1350,6 +1355,7 @@ export class Game {
   private refreshDealers(){
     this.dealerAnchor={x:this.actor.x,z:this.actor.z}
     this.dealers?.refresh(this.actor.x,this.actor.z)
+    this.traffic?.setActivitySites(this.dealers?.dealers??[],this.actor)
     if(this.dealerWaypoint && this.waypoint){
       const d=this.dealers?.dealers.find(d=>d.id===this.dealerWaypoint)
       if(d&&this.waypoint.label===d.name){this.waypoint={x:d.x,z:d.z,label:d.name};this.routeTimer=0}
@@ -1522,6 +1528,7 @@ export class Game {
     w.update(this.paused?0:dt)
     const traffic=this.traffic?.update(this.paused?0:dt,this.actor,this.player.groundSpeed,this.run.heat,this.spray)
     if(!this.paused&&traffic){
+      if(traffic.horn)this.trafficSound.honk(traffic.horn.distance,traffic.horn.side,traffic.horn.freight)
       if(traffic.impact>0){this.run.damage(Math.min(30,traffic.impact*0.5),this.save.mask==='oni');if(this.player.mode==='mag' && traffic.impact>22)this.player.unsnap()}
       for(let i=0;i<traffic.nearMisses;i++)this.run.chain()
       if(traffic.boxed&&this.run.limp<0){this.run.limp=15;this.toast('BOXED IN · 15 seconds reserve power','bad')}
