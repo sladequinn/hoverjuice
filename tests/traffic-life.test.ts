@@ -50,3 +50,17 @@ test('initial local traffic uses the existing pool; fly-by horns have per-car co
  assert.equal(traffic.group.children.length,3)
  traffic.dispose()
 })
+test('all approaches clear over time without a permanently renewed intersection reservation',()=>{
+ const {traffic,state}=setup(true);state.agents=state.agents.slice(0,4)
+ state.agents.forEach((car:any,i:number)=>Object.assign(car,{a:[0,2,3,4][i],b:1,distance:34,speed:5,kind:0}))
+ traffic.update(0,far)
+ for(let i=0;i<900;i++)traffic.update(1/60,far)
+ for(const car of state.agents)assert.ok(car.turns>0,'Every approach must cross')
+ traffic.dispose()
+})
+test('a player behind or on the sidewalk does not hold nearby traffic stopped',()=>{
+ const {traffic,state}=setup();const car=state.agents[0];state.agents=[car];Object.assign(car,{a:0,b:1,distance:100,speed:0,kind:0,seed:1})
+ traffic.update(0,far);const player=car.pos.clone();player.z-=2
+ for(let i=0;i<120;i++)traffic.update(1/60,player,0)
+ assert.ok(car.distance>105);traffic.dispose()
+})

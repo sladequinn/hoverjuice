@@ -1,3 +1,4 @@
+import {routeGuide} from './route-guide'
 import {TrafficSound} from './traffic-sound'
 import {Radio} from './radio'
 import {STATIONS} from './radio-config'
@@ -609,8 +610,7 @@ export class Game {
     }
     const w = this.world
     if (!w || this.route.length < 2) return
-    const pts: THREE.Vector3[] = []
-    for (const i of this.route) pts.push(new THREE.Vector3(w.city.nodes[i].x, 0.35, w.city.nodes[i].z))
+    const pts=routeGuide(w,this.route)
     const geo = new THREE.BufferGeometry().setFromPoints(pts)
     this.routeLine = new THREE.Line(geo, new THREE.LineBasicMaterial({ color: 0xff9d00, transparent: true, opacity: 0.9 }))
     this.scene.add(this.routeLine)

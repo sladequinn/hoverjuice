@@ -39,6 +39,7 @@ export class TrafficSystem {
  private time=0
  private queues=new Map<string,Agent[]>()
  private junctions=new Map<number,{seed:number;until:number}>()
+ private waiting=new Map<number,Map<number,number>>()
  private up=new THREE.Vector3(0,1,0)
  constructor(world:World){
   this.world=world
@@ -160,15 +161,37 @@ export class TrafficSystem {
     let junctionStop=Infinity
     if(b.adj.length>=3&&remaining<14){
      wanted=Math.min(wanted,7)
+     const waiters=this.waiting.get(car.b)??new Map<number,number>();this.waiting.set(car.b,waiters)
+     if(!waiters.has(car.seed)&&dt>0)waiters.set(car.seed,this.time)
+     // Remove departed/recycled cars before choosing the oldest eligible approach.
+     for(const seed of waiters.keys())if(!this.agents.some(c=>c.seed===seed&&c.phase==='drive'&&c.b===car.b))waiters.delete(seed)
+     const opts=b.adj.filter(n=>n!==car.a),target=hostile?player:car.site?nodes[car.site.node]:null
+     if(target)opts.sort((i,j)=>Math.hypot(nodes[i].x-target.x,nodes[i].z-target.z)-Math.hypot(nodes[j].x-target.x,nodes[j].z-target.z))
+     const exit=opts.length?opts[target?0:(car.seed+car.turns+1)%opts.length]:car.a
+     const exitQueue=this.queues.get(`${car.b}:${exit}`)??[]
+     const clear=exitQueue.every(c=>c.distance>7)&&(!leader||gap>safe+2)
      const reservation=this.junctions.get(car.b)
-     if(reservation&&reservation.seed!==car.seed&&reservation.until>this.time){wanted=Math.min(wanted,Math.max(0,(remaining-3)*2));junctionStop=Math.max(0,remaining-2.5)}
-     else if(remaining<7&&dt>0)this.junctions.set(car.b,{seed:car.seed,until:this.time+1.8})
+     const held=reservation&&reservation.until>this.time
+     // A stopped car cannot renew a reservation forever, or reserve a blocked exit.
+     const oldest=[...waiters].sort((a,b)=>a[1]-b[1]||a[0]-b[0])[0]?.[0]
+     if(!held&&remaining<7&&clear&&oldest===car.seed&&dt>0)this.junctions.set(car.b,{seed:car.seed,until:this.time+2})
+     const owner=this.junctions.get(car.b)
+     if(!owner||owner.seed!==car.seed||owner.until<=this.time||!clear){
+      wanted=Math.min(wanted,Math.max(0,(remaining-3)*2));junctionStop=Math.max(0,remaining-2.5)
+      // Blocked exits relinquish their place, letting other approaches clear first.
+      if(!clear&&dt>0){waiters.set(car.seed,this.time);if(owner?.seed===car.seed)this.junctions.delete(car.b)}
+     }
     }
-    if(!hostile&&d<12&&playerSpeed<5)wanted=Math.min(wanted,Math.max(0,(d-3)*2))
+    if(!hostile&&d<12&&playerSpeed<5){
+     const dx=(b.x-a.x)/len,dz=(b.z-a.z)/len,px=player.x-car.pos.x,pz=player.z-car.pos.z
+     const ahead=px*dx+pz*dz,lateral=Math.abs(px*dz-pz*dx)
+     if(ahead>0&&lateral<1.5&&Math.abs(player.y-car.pos.y)<2)wanted=Math.min(wanted,Math.max(0,(ahead-3)*2))
+    }
     car.speed+=(wanted-car.speed)*Math.min(1,dt*(wanted<car.speed?6:1.5))
     car.distance+=Math.min(car.speed*dt,Math.max(0,gap-safe),junctionStop)
     for(let guard=0;car.distance>=len&&guard<12;guard++){
      if(car.site&&car.b===car.site.node){car.phase='enter';car.progress=0;car.from.copy(car.pos);car.distance=len;break}
+     this.waiting.get(car.b)?.delete(car.seed)
      car.distance-=len
      const opts=b.adj.filter(n=>n!==car.a),prev=car.a;car.a=car.b;car.turns++
      if(car.site&&car.turns>30){this.release(car);car.wait=20}
@@ -203,5 +226,5 @@ export class TrafficSystem {
   events.boxed=closeHostiles>=3&&playerSpeed<2
   return events
  }
- dispose(){for(const mesh of this.fleets){mesh.geometry.dispose();(mesh.material as THREE.Material).dispose()}this.agents=[];this.sites=[];this.queues.clear();this.junctions.clear()}
+ dispose(){for(const mesh of this.fleets){mesh.geometry.dispose();(mesh.material as THREE.Material).dispose()}this.agents=[];this.sites=[];this.queues.clear();this.junctions.clear();this.waiting.clear()}
 }
