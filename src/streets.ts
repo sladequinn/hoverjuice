@@ -1,3 +1,4 @@
+import {VEHICLE_SCALE} from './data'
 import type { CityData, Pt, Road } from './map'
 
 export const SIDEWALK_WIDTH = 1.1
@@ -60,4 +61,13 @@ export function fitStreetWidths(city:CityData){
   const widths=new Map<string,number>()
   for(const road of city.roads)road.pts.forEach((p,i)=>{const key=streetKey(p,road.heights?.[i]);widths.set(key,Math.min(widths.get(key)??Infinity,road.width))})
   city.nodes.forEach(n=>{n.width=widths.get(streetKey([n.x,n.z],n.y))??n.width})
+}
+
+export const ROAD_MARKINGS={dash:3*VEHICLE_SCALE/.75,period:12*VEHICLE_SCALE/.75,paintWidth:.09*VEHICLE_SCALE/.75,railWidth:.06*VEHICLE_SCALE/.75}
+export const MAX_LANE_OFFSET=3.2*VEHICLE_SCALE/.75
+export function laneOffset(width:number,halfWidth=1.12*VEHICLE_SCALE){
+ const reference=1.12*VEHICLE_SCALE
+ // Alleys have a single guide, rather than three overlapping vehicle lanes.
+ if(width<reference*6+.4)return 0
+ return Math.min(MAX_LANE_OFFSET,Math.max(0,width/2-Math.max(reference,halfWidth)-.5*VEHICLE_SCALE/.75))
 }

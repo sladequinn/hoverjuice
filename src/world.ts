@@ -1,3 +1,5 @@
+import {SurfaceIndex} from './surfaces'
+import {ROAD_MARKINGS,laneOffset} from './streets'
 import {Territories} from './gangs'
 import {PavementLayout,appendPavement} from './pavement'
 import {fitStreetWidths,streetJunctions,streetCorner,streetKey} from './streets'
@@ -285,19 +287,20 @@ export class World {
           for(const side of [-1,1])tunnelWalls.push(x1+nx*side,y1,z1+nz*side,x2+nx*side,y2,z2+nz*side,x2+nx*side,0.1,z2+nz*side,x1+nx*side,y1,z1+nz*side,x2+nx*side,0.1,z2+nz*side,x1+nx*side,0.1,z1+nz*side)
           if(y1<=-3.5&&y2<=-3.5)tunnelCaps.push(x1+nx,0.1,z1+nz,x2+nx,0.1,z2+nz,x2-nx,0.1,z2-nz,x1+nx,0.1,z1+nz,x2-nx,0.1,z2-nz,x1-nx,0.1,z1-nz)
         }
-        for(let at=6;at<len-6;at+=12)for(const side of [-1,1]){
-          const a=at/len,b=Math.min(at+3,len-6)/len,offset=w*0.48*side,ux=nx/w,uz=nz/w
+        const lanes=laneOffset(road.width),startGap=branchesA.length>2?2:.2,endGap=branchesB.length>2?2:.2
+        const strip=(target:number[],start:number,end:number,offset:number,width:number,height:number)=>{
+          const ux=nx/w,uz=nz/w,r=width/2,a=start/len,b=end/len
           const ax=x1+(x2-x1)*a+ux*offset,az=z1+(z2-z1)*a+uz*offset,bx=x1+(x2-x1)*b+ux*offset,bz=z1+(z2-z1)*b+uz*offset
-          const ay=y1+(y2-y1)*a+0.07,by=y1+(y2-y1)*b+0.07,r=0.045
-          paint.push(ax-ux*r,ay,az-uz*r,bx-ux*r,by,bz-uz*r,bx+ux*r,by,bz+uz*r,ax-ux*r,ay,az-uz*r,bx+ux*r,by,bz+uz*r,ax+ux*r,ay,az+uz*r)
+          const ay=y1+(y2-y1)*a+height,by=y1+(y2-y1)*b+height
+          target.push(ax-ux*r,ay,az-uz*r,bx-ux*r,by,bz-uz*r,bx+ux*r,by,bz+uz*r,ax-ux*r,ay,az-uz*r,bx+ux*r,by,bz+uz*r,ax+ux*r,ay,az+uz*r)
         }
-        const target = road.major ? lineMajor : line
-        target.push(x1, y1 + 0.12, z1, x2, y2 + 0.12, z2)
-        if (road.major) {
-          const e = w * 0.85
-          const ex = (nx / w) * e, ez = (nz / w) * e
-          line.push(x1 + ex, y1 + 0.1, z1 + ez, x2 + ex, y2 + 0.1, z2 + ez, x1 - ex, y1 + 0.1, z1 - ez, x2 - ex, y2 + 0.1, z2 - ez)
+        const phase=(distance-len)%ROAD_MARKINGS.period
+        for(let at=-phase;at<len-endGap;at+=ROAD_MARKINGS.period){
+          const a=Math.max(startGap,at),b=Math.min(at+ROAD_MARKINGS.dash,len-endGap)
+          if(b>a&&lanes>0)for(const side of [-1,1])strip(paint,a,b,lanes*.5*side,ROAD_MARKINGS.paintWidth,.073)
         }
+        if(len>startGap+endGap)for(const offset of lanes>0?[-lanes,0,lanes]:[0])strip(road.major?lineMajor:line,startGap,len-endGap,offset,ROAD_MARKINGS.railWidth,.08)
+
       }
     }
     for(const arr of [tunnelWalls,tunnelCaps])if(arr.length){
@@ -309,6 +312,7 @@ export class World {
       const m=new THREE.MeshBasicMaterial({side:THREE.DoubleSide,colorWrite:false,depthWrite:false,depthTest:false,stencilWrite:true,stencilRef:1,stencilFunc:THREE.AlwaysStencilFunc,stencilZPass:THREE.ReplaceStencilOp})
       const cut=new THREE.Mesh(g,m);cut.renderOrder=1;group.add(cut)
     }
+    const surfaces=new SurfaceIndex();surfaces.add(pos);surfaces.add(sidewalks);group.userData.surfaces=surfaces
     const geo = new THREE.BufferGeometry()
     geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3))
     geo.computeVertexNormals()
@@ -324,7 +328,7 @@ export class World {
     const mk = (arr: number[], color: number, opacity: number) => {
       const g = new THREE.BufferGeometry()
       g.setAttribute('position', new THREE.Float32BufferAttribute(arr, 3))
-      return new THREE.LineSegments(g, new THREE.LineBasicMaterial({ color, transparent: true, opacity }))
+      const mesh=new THREE.Mesh(g, new THREE.MeshBasicMaterial({color,transparent:true,opacity,depthWrite:false,side:THREE.DoubleSide}));mesh.name='mag-lock-rails';return mesh
     }
     group.add(mk(line, 0x00a4b6, 0.24))
     group.add(mk(lineMajor, 0x00b9c9, 0.34))
@@ -418,6 +422,10 @@ export class World {
       if (pointInPoly(x, z, b.poly as Pt[])) return i
     }
     return -1
+  }
+
+  surfaceHeightAt(x:number,z:number,reference:number){
+    return (this.streets.userData.surfaces as SurfaceIndex|undefined)?.heightAt(x,z,reference,this.isWater(x,z)?-2.5:0)??0
   }
 
   groundHeightAt(x: number, z: number, y: number) {

@@ -70,7 +70,7 @@ test('idle pools spread; teleporting and high flight do not draw connecting pudd
  const spray=new HoverjuiceSpray(),car={},pos=new Vector3(0,1.3,0)
  for(let i=0;i<30;i++){spray.emit(car,1/60,pos,0,0,1,2,0);spray.update(1/60)}
  const effects=spray.mesh.geometry.attributes.appearance.array
- assert.ok(effects[768*4]>2.1,'Stationary liquid spreads beyond its initial footprint')
+ assert.ok(spray.mesh.geometry.attributes.growth.array[768]>.72,'Stationary liquid spreads within its projected footprint')
  spray.clear()
  spray.emit(car,.1,pos,0,60,1,2,0)
  pos.z=1000;spray.emit(car,.1,pos,0,60,1,2,0)

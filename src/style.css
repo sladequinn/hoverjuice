@@ -503,3 +503,4 @@ body.is-touch .contract.waypoint .muted{display:none}
 body:has(.modal.show) #hud{display:none}
 body.is-touch .hud-tl,body.is-touch .hud-bl{height:68px}
 body.is-touch #combat-status{font-size:9px;line-height:10px}
+.radio-stations{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin:16px 0}.radio-stations button{text-align:left;min-height:65px}.radio-stations small{display:block;margin-top:5px;color:#9bb0ba;font-size:11px}.radio-status{min-height:55px;line-height:1.4;color:#9dcbd1}.radio-volume{display:flex;align-items:center;gap:16px;margin:20px 0}.radio-volume input{flex:1;min-width:0;accent-color:#64bfc7}

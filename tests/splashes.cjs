@@ -22,9 +22,11 @@ const assert=require('node:assert/strict');
    const camera=new THREE.PerspectiveCamera(45,4/3,.1,100);camera.position.set(5,4,-8);camera.lookAt(0,.3,-1);
    const renderer=new THREE.WebGLRenderer({antialias:true});renderer.setSize(800,600);renderer.toneMapping=THREE.ACESFilmicToneMapping;renderer.toneMappingExposure=.85;
    const floor=new THREE.Mesh(new THREE.PlaneGeometry(40,40),new THREE.MeshStandardMaterial({color:0x12151c,roughness:.8}));floor.rotation.x=-Math.PI/2;scene.add(floor);
+   const road=new THREE.Mesh(new THREE.BoxGeometry(3.2,.05,40),new THREE.MeshBasicMaterial({color:0x28343e}));road.position.y=.025;scene.add(road);
+   const pavement=new THREE.Mesh(new THREE.BoxGeometry(1.1,.2,40),new THREE.MeshBasicMaterial({color:0x656b6a}));pavement.position.set(2.15,.1,0);scene.add(pavement);
    scene.add(new THREE.HemisphereLight(0xb8d9ee,0x34302b,2));
    const car=buildVehicleMesh(VEHICLES.find(v=>v.kind==='sedan')??VEHICLES[1]);car.position.y=1.3;scene.add(car);
-   const spray=new HoverjuiceSpray();scene.add(spray.mesh);
+   const spray=new HoverjuiceSpray();scene.add(spray.mesh);spray.surfaceHeight=(x,z,y)=>x>1.6&&x<2.7?.2:Math.abs(x)<=1.6?.05:0;
    const pos=new THREE.Vector3(0,1.3,0);
    // Freeze a boosted moving trail with the vehicle at its final location.
    for(let i=0;i<180;i++){
@@ -32,6 +34,7 @@ const assert=require('node:assert/strict');
     spray.emit(car,1/60,pos,0,35,car.userData.halfW,car.userData.halfL,0,true);
     spray.update(1/60);
    }
+   const parked={};for(let i=0;i<18;i++){spray.emit(parked,1/60,new THREE.Vector3(2.1,1.5,-3),0,0,.35,.5,.2);spray.update(1/60)}
    renderer.render(scene,camera);
    const canvas=renderer.domElement;canvas.style.cssText='position:fixed;inset:0;z-index:99999';document.body.append(canvas);
    const stats={active:spray.activeCount,calls:renderer.info.render.calls};

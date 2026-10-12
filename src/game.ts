@@ -1,3 +1,5 @@
+import {Radio} from './radio'
+import {STATIONS} from './radio-config'
 import { PAINTS, UPGRADES, normalizeBuilds, buildFor, tunedVehicle, upgradeCost, type GarageBuilds } from './customization'
 import {jobPair} from './jobs'
 import {GANG_INFO} from './gangs'
@@ -152,6 +154,7 @@ class Heap {
 export class Game {
   multiplayer: Multiplayer | null = null
   ownership = new OwnershipClient()
+  radio=new Radio(()=>({heat:this.run.heat,speed:this.player.groundSpeed*3.6,gang:this.world?.gangAt(this.actor.x,this.actor.z)??this.gang}))
   particles=new ParticlePool()
   spray=new HoverjuiceSpray()
   private fueling:{x:number;z:number;litres:number;limit:number}|null=null
@@ -200,6 +203,7 @@ export class Game {
 
   constructor(scene: THREE.Scene) {
     this.scene = scene
+    void this.radio.load().then(()=>{if($('modal').dataset.view==='radio')this.openModal('radio')})
     scene.add(this.particles.mesh, this.spray.mesh)
     this.save.mask = validMask(this.save.mask)
     this.save.masks = [...new Set(["balaclava", ...this.save.masks.map(validMask)])]
@@ -338,6 +342,7 @@ export class Game {
       this.world.dispose()
     }
     this.world = new World(city)
+    this.spray.surfaceHeight=(x,z,reference)=>this.world!.surfaceHeightAt(x,z,reference)
     this.scene.add(this.world.group)
     if(!city.procedural){this.multiplayer=new Multiplayer(city);this.scene.add(this.multiplayer.group)}
     void this.syncOwnership()
@@ -1013,6 +1018,7 @@ export class Game {
     body.querySelectorAll<HTMLElement>('[data-act]').forEach((b) =>
       b.addEventListener('click', () => this.onAction(b.dataset.act!, b.dataset.arg ?? '')),
     )
+    body.querySelector<HTMLInputElement>('#radio-volume')?.addEventListener('input',e=>this.radio.setVolume(Number((e.target as HTMLInputElement).value)/100))
     const form = body.querySelector<HTMLFormElement>('#search-form')
     form?.addEventListener('submit', (e) => {
       e.preventDefault()
@@ -1066,6 +1072,10 @@ export class Game {
         void this.warp(name.join('|'), Number(lat), Number(lon), act==='couch')
         break
       }
+      case 'radio-station': void this.radio.select(arg).then(()=>{if($('modal').dataset.view==='radio')this.openModal('radio')});break
+      case 'radio-refresh': void this.radio.load().then(()=>{if($('modal').dataset.view==='radio')this.openModal('radio')});break
+      case 'radio-play': if(this.radio.playing)this.radio.pause();else void this.radio.play();break
+      case 'radio-next': void this.radio.next();break
       case 'paint': this.customizeVehicle('paint',arg); break
       case 'upgrade': this.customizeVehicle('upgrade',arg); break
       case 'view': this.openModal(arg); break
@@ -1123,9 +1133,11 @@ export class Game {
     const s = this.save
     const w = this.world
     switch (view) {
+      case 'radio':
+        return `<h2>Radio</h2><p class="muted">Gang frequencies, municipal dispatch, and late-night talk.</p><div class="radio-stations">${STATIONS.map(station=>`<button class="btn ${this.radio.station===station.id?'buy':''}" data-act="radio-station" data-arg="${station.id}" aria-pressed="${this.radio.station===station.id}"><strong>${station.name}</strong><small>${station.host}</small></button>`).join('')}</div><p id="radio-status" class="radio-status" aria-live="polite">${esc(this.radio.status)}</p><div class="row"><button class="btn" data-act="radio-play">Play / pause</button><button class="btn" data-act="radio-next">Next</button><button class="btn ghost" data-act="radio-station" data-arg="off">Off</button></div><button class="btn ghost" data-act="radio-refresh">Refresh stations</button><label class="radio-volume">Volume <input id="radio-volume" type="range" min="0" max="100" value="${Math.round(this.radio.volume*100)}" /></label><p class="muted small">Music and talk use the configured station playlists. Scanner chatter follows local Heat. Radio pauses when this tab is hidden.</p>`
       case 'menu':
         return `<h2>Off the clock</h2><p class="muted">${esc(s.city?.name??'City')} · ${money(s.money)} available</p>
-          <div class="menu-links">${[['market','Dealers & cargo'],['holdings','Safehouses & vaults'],['gangs','Gangs & territory'],['masks','Mask perks'],['tutorial','First-night guide'],['help','Controls & settings']].map(([id,label])=>`<button class="btn ghost" data-act="view" data-arg="${id}">${label}<span>→</span></button>`).join('')}</div>
+          <div class="menu-links">${[['radio','Radio stations'],['market','Dealers & cargo'],['holdings','Safehouses & vaults'],['gangs','Gangs & territory'],['masks','Mask perks'],['tutorial','First-night guide'],['help','Controls & settings']].map(([id,label])=>`<button class="btn ghost" data-act="view" data-arg="${id}">${label}<span>→</span></button>`).join('')}</div>
           <details class="fold"><summary>City & account details</summary><p class="muted">Net worth ${money(this.netWorth)} · Notoriety ${this.run.notoriety}<br>Vault ${money(s.vaultCash)} · Income ${money(this.incomePerMin)}/min<br>${esc(this.multiplayer?.status??'Local save')} · ${esc($('city-tag').textContent??'')}</p></details>`
 
       case 'tutorial':
@@ -1556,6 +1568,7 @@ export class Game {
   }
 
   private updateHud() {
+    const radioStatus=document.getElementById('radio-status');if(radioStatus)radioStatus.textContent=this.radio.status
     const s = this.save
     const p = this.player
     const turf=this.world!.gangAt(p.pos.x,p.pos.z)

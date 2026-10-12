@@ -186,7 +186,7 @@ test('scaled vehicle envelopes fit the minimum carriageway and shadows stay at g
   const w=fixture();w.city.nodes.forEach(n=>n.width=3.2)
   const p=new Player(vehicleById(id),'balaclava');p.placeAtNode(w,0)
   for(let i=0;i<60;i++)p.update(1/60,{...neutral,steer:1},w,true)
-  assert.equal(p.mesh.scale.x,.75)
+  assert.equal(p.mesh.scale.x,.55)
   assert.ok(Math.abs(p.sway)+p.mesh.userData.halfW<=1.6-.49)
   const pad=p.mesh.getObjectByName('pad')!
   assert.ok(Math.abs(p.pos.y+pad.position.y*p.mesh.scale.y-.15)<.001)
