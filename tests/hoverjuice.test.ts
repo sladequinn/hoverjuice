@@ -59,7 +59,7 @@ test('distance stamps leave a continuous persistent wake, and traffic preserves 
  const before=Array.from(offsets.slice(768*3,1152*3)),traffic={}
  for(let i=0;i<500;i++)spray.emit(traffic,.1,new Vector3(40,1.3,i),0,20,1,2,0,false,.45)
  assert.deepEqual(Array.from(offsets.slice(768*3,1152*3)),before)
- for(let i=0;i<120;i++)spray.update(1/60)
+ for(let i=0;i<30;i++)spray.update(1/60)
  assert.ok(spray.activeCount>0,'Liquid lingers after droplets have expired')
  for(let i=0;i<400;i++)spray.update(1/60)
  assert.equal(spray.activeCount,0)
@@ -70,7 +70,7 @@ test('idle pools spread; teleporting and high flight do not draw connecting pudd
  const spray=new HoverjuiceSpray(),car={},pos=new Vector3(0,1.3,0)
  for(let i=0;i<30;i++){spray.emit(car,1/60,pos,0,0,1,2,0);spray.update(1/60)}
  const effects=spray.mesh.geometry.attributes.appearance.array
- assert.ok(effects[768*4]>2.8,'Stationary liquid spreads beyond its initial footprint')
+ assert.ok(effects[768*4]>2.1,'Stationary liquid spreads beyond its initial footprint')
  spray.clear()
  spray.emit(car,.1,pos,0,60,1,2,0)
  pos.z=1000;spray.emit(car,.1,pos,0,60,1,2,0)

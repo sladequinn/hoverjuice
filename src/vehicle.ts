@@ -201,8 +201,16 @@ export class Player {
   setSpec(spec: VehicleSpec) {
     const parent = this.mesh.parent
     const riderVisible = this.mesh.getObjectByName('rider')?.visible ?? true
-    parent?.remove(this.mesh)
+    const old=this.mesh
+    parent?.remove(old)
+    // Rider materials are shared by every character; only dispose its private geometry.
+    const rider=old.getObjectByName('rider')
+    if(rider){old.remove(rider);rider.traverse(obj=>{if(obj instanceof THREE.Mesh)obj.geometry.dispose()})}
+    const materials=new Set<THREE.Material>()
+    old.traverse(obj=>{if(obj instanceof THREE.Mesh){obj.geometry.dispose();for(const mat of Array.isArray(obj.material)?obj.material:[obj.material])materials.add(mat)}})
+    materials.forEach(mat=>mat.dispose())
     this.mesh = buildVehicleMesh(spec, this.mask)
+    this.mesh.position.copy(old.position);this.mesh.quaternion.copy(old.quaternion)
     parent?.add(this.mesh)
     this.spec = spec
     this.showRider(riderVisible)

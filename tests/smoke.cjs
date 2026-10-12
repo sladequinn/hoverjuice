@@ -86,6 +86,25 @@ const assert=require('node:assert/strict');
   await page.evaluate(()=>window.hoverghini.openDealer());
   assert.ok((await page.locator('#modal-body').innerText()).includes('SLADE'));
   assert.ok((await page.locator('#modal-body').innerText()).includes('SHINOBI'));
+  await page.evaluate(()=>{const g=window.hoverghini;g.save.money=100000;g.openModal('garage')});
+  await page.locator('[data-act="paint"][data-arg="rust"]').click();
+  const beforeUpgrade=await page.evaluate(()=>({fuel:window.hoverghini.juice,tank:window.hoverghini.player.spec.tank}));
+  await page.locator('[data-act="upgrade"][data-arg="efficiency"]').click();
+  const customized=await page.evaluate(()=>{const g=window.hoverghini;return {paint:g.save.builds.neonic.paint,level:g.save.builds.neonic.efficiency,tank:g.player.spec.tank,fuel:g.juice,body:g.player.spec.body}});
+  assert.equal(customized.paint,'rust');assert.equal(customized.level,1);assert.ok(customized.tank>beforeUpgrade.tank);assert.equal(customized.fuel,beforeUpgrade.fuel);assert.equal(customized.body,0x874c3f);
+  await page.evaluate(()=>{const g=window.hoverghini;g.selectVehicle('board');g.selectVehicle('neonic')});
+  assert.equal(await page.evaluate(()=>window.hoverghini.player.spec.body),0x874c3f);
+  await page.setViewportSize({width:390,height:844});await page.screenshot({path:'.test-artifacts/garage-upgrades-mobile.png'});
+  assert.ok(await page.locator('.paint-options button').evaluateAll(bs=>bs.length===9&&bs.every(b=>{const r=b.getBoundingClientRect();return r.left>=0&&r.right<=390})));
+  const limits=await page.evaluate(()=>{
+   const g=window.hoverghini;g.customizeVehicle('upgrade','drive');g.customizeVehicle('upgrade','drive');g.customizeVehicle('upgrade','drive');
+   const money=g.save.money;g.customizeVehicle('upgrade','drive');const afterMax=g.save.money;
+   g.save.money=0;g.customizeVehicle('upgrade','handling');
+   const stored=JSON.parse(localStorage.getItem('hoverghini.save.v1'));
+   return {money,afterMax,handling:g.save.builds.neonic.handling,saved:stored.builds.neonic};
+  });
+  assert.equal(limits.money,limits.afterMax);assert.equal(limits.handling,0);assert.equal(limits.saved.paint,'rust');assert.equal(limits.saved.drive,3);
+
   assert.deepEqual(errors,[]);console.log('WebGL shaders, vehicle-only controls, overclock, vaults, mask UI, test-flight keyboard controls, gang dealer cars and responsive layouts: passed.');
  }finally{if(browser)await browser.close();server.kill()}
 })().catch(e=>{console.error(e);process.exitCode=1});
