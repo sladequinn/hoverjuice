@@ -3,6 +3,8 @@ import * as THREE from 'three'
 import type { CityData } from './map'
 import { worldToLatLon } from './map'
 import type { Player } from './vehicle'
+import type { HoverjuiceSpray } from './hoverjuice'
+import type { World } from './world'
 import { crewInvite, mercator, nearbyTiles, tileKey, unproject, validTelemetry, type Telemetry } from './spatial'
 
 interface Peer {mesh:THREE.Group; state:Telemetry|null; received:number}
@@ -57,7 +59,7 @@ export class Multiplayer {
     const ll=unproject(p.x,p.z)
     return new THREE.Vector3((ll.lon-this.city.lon)*111320*Math.cos(this.city.lat*Math.PI/180),p.y,(this.city.lat-ll.lat)*110540)
   }
-  update(dt:number,player:Player) {
+  update(dt:number,player:Player,spray?:HoverjuiceSpray,terrain?:World,sprayDt=dt) {
     if(!this.host)return
     const ll=worldToLatLon(this.city,player.pos.x,player.pos.z),world=mercator(ll.lat,ll.lon)
     const own=this.crew?`crew_${this.crew}`:tileKey(ll.lat,ll.lon)
@@ -82,6 +84,11 @@ export class Multiplayer {
       const target=this.local(p),ahead=Math.min(0.2,age)
       target.x+=Math.sin(p.rotY)*p.velocity*ahead;target.z+=Math.cos(p.rotY)*p.velocity*ahead
       peer.mesh.position.lerp(target,1-Math.exp(-12*dt))
+      if(terrain&&peer.mesh.position.distanceToSquared(player.pos)<65*65){
+        const pos=peer.mesh.position
+        spray?.emit(peer,sprayDt,pos,p.rotY,p.velocity,1.05*VEHICLE_SCALE,2.3*VEHICLE_SCALE,
+          terrain.groundHeightAt(pos.x,pos.z,pos.y),p.boost,.45)
+      }
       peer.mesh.rotation.y+=Math.atan2(Math.sin(p.rotY-peer.mesh.rotation.y),Math.cos(p.rotY-peer.mesh.rotation.y))*(1-Math.exp(-12*dt))
     }
   }
