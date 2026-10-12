@@ -7,9 +7,12 @@ import { $, Game } from './game'
 import { createSky, Rain } from './fx'
 import type { Input } from './vehicle'
 
+const startingPixelRatio=()=>window.matchMedia('(pointer: coarse), (max-width: 760px)').matches
+  ?Math.min(window.devicePixelRatio,1,Math.sqrt(1000000/(innerWidth*innerHeight)))
+  :Math.min(window.devicePixelRatio,1.25,Math.sqrt(1600000/(innerWidth*innerHeight)))
 const canvas = $<HTMLCanvasElement>('scene')
 const renderer = new THREE.WebGLRenderer({ canvas, stencil: true, antialias: true, powerPreference: 'high-performance' })
-renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.25, Math.sqrt(1600000 / (innerWidth * innerHeight))))
+renderer.setPixelRatio(startingPixelRatio())
 renderer.setSize(window.innerWidth, window.innerHeight)
 renderer.toneMapping = THREE.ACESFilmicToneMapping
 renderer.toneMappingExposure = 1.0
@@ -25,13 +28,13 @@ scene.add(sky)
 const rain = new Rain()
 scene.add(rain.mesh)
 
-const camera = new THREE.PerspectiveCamera(62, window.innerWidth / window.innerHeight, 0.3, 4000)
+const camera = new THREE.PerspectiveCamera(62, window.innerWidth / window.innerHeight, 0.3, 1400)
 camera.position.set(0, 30, -40)
 
 // One antialiased forward pass. No full-screen bloom chain on the driving path.
 const fill = new THREE.DirectionalLight(0xb5d9ff, 1.4)
 scene.add(fill, fill.target)
-let renderScale = Math.min(window.devicePixelRatio, 1.25, Math.sqrt(1600000 / (innerWidth * innerHeight)))
+let renderScale = startingPixelRatio()
 let slowFrames = 0
 
 let renderTitle: (() => void) | undefined
@@ -39,7 +42,7 @@ function resize() {
   camera.aspect = window.innerWidth / window.innerHeight
   camera.updateProjectionMatrix()
   renderer.setSize(window.innerWidth, window.innerHeight)
-  renderScale = Math.min(window.devicePixelRatio, 1.25, Math.sqrt(1600000 / (innerWidth * innerHeight)))
+  renderScale = startingPixelRatio()
   renderer.setPixelRatio(renderScale)
   renderTitle?.()
 }
@@ -54,6 +57,26 @@ coarse.addEventListener('change', syncTouch)
 const game = new Game(scene)
 ;(window as unknown as { hoverghini: Game }).hoverghini = game
 ;(window as unknown as {hoverjuiceRenderStats:()=>unknown}).hoverjuiceRenderStats=()=>({calls:renderer.info.render.calls,triangles:renderer.info.render.triangles,geometries:renderer.info.memory.geometries,textures:renderer.info.memory.textures,pixelRatio:renderer.getPixelRatio()})
+
+// Compile materials and upload all starting geometry while the loading overlay is up.
+// The normal frame loop is suspended so warm-up cannot advance the game or cold open.
+game.prepareRender=async()=>{
+  const nextFrame=()=>new Promise<void>(resolve=>requestAnimationFrame(()=>resolve()))
+  updateCamera(1);sky.position.copy(camera.position)
+  await renderer.compileAsync(scene,camera)
+  const culled:{object:THREE.Object3D;value:boolean}[]=[]
+  scene.traverse(object=>{if(object instanceof THREE.Mesh||object instanceof THREE.LineSegments){culled.push({object,value:object.frustumCulled});object.frustumCulled=false}})
+  try{
+    renderer.render(scene,camera)
+    // Fence the initial upload/draw, allowing UI paints while the GPU completes it.
+    const gl=renderer.getContext() as WebGL2RenderingContext,fence=gl.fenceSync(gl.SYNC_GPU_COMMANDS_COMPLETE,0)
+    if(fence){gl.flush();try{while(gl.clientWaitSync(fence,0,0)===gl.TIMEOUT_EXPIRED)await nextFrame()}finally{gl.deleteSync(fence)}}
+  }finally{for(const {object,value} of culled)object.frustumCulled=value}
+  await nextFrame()
+  renderer.render(scene,camera)
+  await nextFrame()
+  last=performance.now();slowFrames=0
+}
 
 // ---------- input ----------
 const keys = new Set<string>()
@@ -292,7 +315,7 @@ function updateCamera(dt: number) {
 // ---------- loop ----------
 function frame() {
   const now = performance.now()
-  if (document.hidden || title.classList.contains('show')) { last = now; requestAnimationFrame(frame); return }
+  if (document.hidden || game.loading || title.classList.contains('show')) { last = now; requestAnimationFrame(frame); return }
   const frameMs = now - last
   const dt = Math.min(frameMs / 1000, 0.05)
   // Hysteresis: adapt only after sustained slow rendering, not one streaming hitch.
