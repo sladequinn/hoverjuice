@@ -174,6 +174,7 @@ export class Game {
   juice = 0
   scene: THREE.Scene
   paused = true
+  prepareRender?:()=>Promise<void>
   loading = false
   offers: Contract[] = []
   active: Contract | null = null
@@ -283,6 +284,7 @@ export class Game {
     overlay.classList.add('show')
     $('loading-city').textContent = name
     $('loading-status').textContent = 'Connecting to city uplink…'
+    $('btn-load-sim').style.display=''
     $('btn-load-cancel').style.display = this.world ? '' : 'none'
     const ctrl = new AbortController()
     let choice: 'sim' | 'cancel' | null = null
@@ -307,16 +309,19 @@ export class Game {
         city = proceduralCity(name, lat, lon)
       }
     } finally {
-      clearInterval(tick)
       $('btn-load-sim').removeEventListener('click', onSim)
       $('btn-load-cancel').removeEventListener('click', onCancel)
     }
     if (!city) {
+      clearInterval(tick)
+      this.paused=!this.world
       overlay.classList.remove('show')
       this.loading = false
       this.toast('City transfer cancelled', 'info')
       return
     }
+    $('btn-load-cancel').style.display='none'
+    $('btn-load-sim').style.display='none'
     $('loading-status').textContent = `Extruding ${city.buildings.length.toLocaleString()} towers…`
     await new Promise((r) => setTimeout(r, 30))
 
@@ -343,7 +348,7 @@ export class Game {
       this.scene.remove(this.world.group)
       this.world.dispose()
     }
-    this.world = new World(city)
+    this.world = await World.create(city,s=>{$('loading-status').textContent=s})
     this.spray.surfaceHeight=(x,z,reference)=>this.world!.surfaceHeightAt(x,z,reference)
     this.scene.add(this.world.group)
     if(!city.procedural){this.multiplayer=new Multiplayer(city);this.scene.add(this.multiplayer.group)}
@@ -379,12 +384,19 @@ export class Game {
     this.save.city = { name, lat, lon }
     this.persist()
 
-    overlay.classList.remove('show')
+    $('loading-status').textContent='Preparing cockpit and navigation…'
     this.maskThumbs()
     $<HTMLImageElement>('mask-portrait').src=this.thumbs.get(this.save.mask)!
     $('hud').classList.add('show')
     $('city-name').textContent = city.name
     $('city-tag').textContent = city.procedural ? 'SIM GRID' : `OSM · ${streamerFor(city)?.tileCount ?? 0} SECTORS`
+    this.computeRoute();this.drawRoute();this.routeTimer=1.5
+    this.updateHud();this.drawMinimap();this.hudTimer=.1
+    this.refreshDealers()
+    this.streamTimer=5
+    $('loading-status').textContent='Warming graphics · preparing your first drive…'
+    try{await this.prepareRender?.()}finally{clearInterval(tick)}
+    overlay.classList.remove('show')
     this.loading = false
     this.closeModal()
     this.toast(
@@ -918,7 +930,7 @@ export class Game {
     this.openModal('garage')
   }
 
-  selectVehicle(id: string) {
+  selectVehicle(id: string, showGarage=true) {
     if (!this.save.owned.includes(id)) return
     const v = tunedVehicle(id,this.save.builds)
     const ratio = this.juice / this.player.spec.tank
@@ -927,7 +939,7 @@ export class Game {
     this.save.current = id
     if (this.player.mode === 'free' && this.player.targetAlt > v.maxAlt) this.player.targetAlt = v.maxAlt
     this.persist()
-    this.openModal('garage')
+    if(showGarage)this.openModal('garage')
   }
 
   customizeVehicle(kind:'paint'|'upgrade',arg:string){
@@ -1101,6 +1113,15 @@ export class Game {
         break
       }
       case 'locate-dealer': this.locateDealer(arg); break
+      case 'test-hoverghini': {
+        const v=vehicleById('hoverghini')
+        if(!this.save.owned.includes(v.id)){
+          if(this.save.money<v.price){this.toast('Add test funds first.','bad');break}
+          this.save.money-=v.price;this.save.owned.push(v.id)
+        }
+        this.selectVehicle(v.id,false);this.juice=v.tank;this.persist();this.openModal('help')
+        this.toast('Hoverghini ready · full tank.','good');break
+      }
       case 'test-flight': this.toggleTestFlight(); this.openModal('help'); break
       case 'cheat':
         this.earn(5_000_000)
@@ -1340,6 +1361,7 @@ export class Game {
             <div><h3>Drive modes</h3><p class="muted"><b>Mag-Lock</b> snaps you between three rail lanes. Tap A/D to slide and queue a turn for 6 seconds; hold to keep your turn queued. Corner assist slows you through sharp turns. Heavy ramming can break lock. <b>Free Hover</b> carries your momentum across the road plane. Water breaks rail cohesion.</p></div>
           </div>
           <details class="fold" data-fold="testing"><summary>Testing tools</summary><div class="row test-funds"><span class="muted small">Playtesting?</span><button class="btn buy" data-act="cheat">+$5,000,000 test funds</button></div>
+          <div class="row"><button class="btn buy" data-act="test-hoverghini" ${!this.save.owned.includes('hoverghini')&&this.save.money<vehicleById('hoverghini').price?'disabled':''}>${this.save.owned.includes('hoverghini')?'Drive Hoverghini':`Buy Hoverghini · ${money(vehicleById('hoverghini').price)}`}</button><span class="muted small">Test purchase. Bypasses the pink-slip unlock.</span></div>
           <div class="row"><button class="btn" data-act="test-flight">Test flight: ${this.player.testFlight?'ON':'OFF'} (Y)</button><span class="muted">Free Hover: Space / C climb / descend. Touch: RISE / DESCEND. Turning off restores street height.</span></div>
           </details><div class="row"><span class="muted">${s.deliveries} deliveries · ${money(s.earned)} earned lifetime</span><button class="btn danger ghost" data-act="reset">Reset save</button></div>`
       case 'win':

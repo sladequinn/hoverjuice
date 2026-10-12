@@ -30,11 +30,13 @@ export class World {
   private ownedGroup = new THREE.Group()
   private pumpRings: THREE.Mesh[] = []
   private time = 0
+  private trimCount=0
   private streets=new THREE.Group()
 
-  constructor(city: CityData) {
+  constructor(city: CityData, deferred=false) {
     this.city = city
     this.group.add(this.streets)
+    if(deferred)return
     fitStreetWidths(city)
     this.buildGround()
     this.buildBuildings()
@@ -44,6 +46,20 @@ export class World {
     this.placePumps()
     this.group.add(this.ownedGroup)
     this.indexBuildings(0)
+  }
+
+  /** Build behind the loading screen, yielding so status/progress stays responsive. */
+  static async create(city:CityData,status:(text:string)=>void){
+    const world=new World(city,true),yieldFrame=()=>new Promise<void>(resolve=>setTimeout(resolve,0))
+    fitStreetWidths(city);world.buildGround()
+    for(let from=0;from<city.buildings.length;from+=256){
+      status(`Building district · ${Math.min(from+256,city.buildings.length).toLocaleString()} / ${city.buildings.length.toLocaleString()} buildings`)
+      world.buildBuildings(from,Math.min(from+256,city.buildings.length));await yieldFrame()
+    }
+    status('Laying streets, sidewalks and lighting…')
+    for(const _ of world.buildRoadBatches(0,world.streets,world.roadGrid)){void _;await yieldFrame()}
+    world.buildTerrain();world.buildWater();world.placePumps();world.group.add(world.ownedGroup);world.indexBuildings(0)
+    return world
   }
 
   private indexBuildings(from: number) {
@@ -128,13 +144,15 @@ export class World {
     const trims: THREE.Matrix4[] = []
     const trimObject=new THREE.Object3D()
     const trim=(x:number,y:number,z:number,w:number,h:number,d:number,angle:number)=>{
+      if(this.trimCount>=6000)return
+      this.trimCount++
       trimObject.position.set(x,y,z);trimObject.rotation.set(0,angle,0);trimObject.scale.set(w,h,d);trimObject.updateMatrix();trims.push(trimObject.matrix.clone())
     }
     const col = new THREE.Color()
     const roofC = new THREE.Color()
 
-    this.city.buildings.forEach((b, bi) => {
-      if (bi < from || bi >= end) return
+    for(let bi=from;bi<Math.min(end,this.city.buildings.length);bi++){
+      const b=this.city.buildings[bi]
       const tint = TINTS[(bi * 7 + (bi >> 2)) % TINTS.length]
       col.set(tint).multiplyScalar(0.6 + ((bi * 97) % 40) / 100)
       roofC.set(tint).multiplyScalar(0.65)
@@ -157,7 +175,7 @@ export class World {
         const [x1, z1] = b.poly[i]
         const [x2, z2] = b.poly[(i + 1) % n]
         const len = Math.hypot(x2 - x1, z2 - z1)
-        if(len>5 && trims.length<6000){
+        if(len>5 && this.trimCount<6000){
           const angle=Math.atan2(-(z2-z1),x2-x1)
           trim((x1+x2)/2,h,(z1+z2)/2,len+.25,.32,.45,angle)
           trim((x1+x2)/2,base+3.8,(z1+z2)/2,len,.22,.4,angle)
@@ -189,7 +207,7 @@ export class World {
           roofGang.push(0)
         }
       ranges.push({bi,start:roofStart,count:roofPos.length/3-roofStart})
-    })
+    }
 
     if(trims.length){
       const mesh=new THREE.InstancedMesh(new THREE.BoxGeometry(1,1,1),new THREE.MeshStandardMaterial({color:0x424a4d,roughness:.9}),trims.length)
