@@ -1,3 +1,4 @@
+import {TERRAIN_SIZE,TERRAIN_STEP} from './terrain'
 import {SurfaceIndex} from './surfaces'
 import {ROAD_MARKINGS,laneOffset} from './streets'
 import {Territories} from './gangs'
@@ -38,6 +39,7 @@ export class World {
     this.buildGround()
     this.buildBuildings()
     this.buildRoads()
+    this.buildTerrain()
     this.buildWater()
     this.placePumps()
     this.group.add(this.ownedGroup)
@@ -78,6 +80,7 @@ export class World {
     this.group.remove(oldStreets)
     oldStreets.traverse(obj=>{if(obj instanceof THREE.Mesh || obj instanceof THREE.LineSegments){obj.geometry.dispose();for(const mat of Array.isArray(obj.material)?obj.material:[obj.material])mat.dispose()}})
     this.streets=replacement;this.roadGrid=roadGrid;this.group.add(replacement)
+    this.buildTerrain()
     this.buildWater()
     this.placePumps()
     this.indexBuildings(delta.buildingsFrom)
@@ -87,7 +90,7 @@ export class World {
     const size = this.city.procedural ? this.city.radius * 6 : 40000
     const ground = new THREE.Mesh(new THREE.PlaneGeometry(size, size), asphaltMaterial(0x191f23))
     ground.name="terrain-backdrop"
-    ground.position.y = 0
+    ground.position.y = this.city.terrain?.enabled ? -12000 : 0
     ground.renderOrder = 2
     const material=ground.material as THREE.MeshStandardMaterial
     // A 40 km, two-triangle backdrop must not occlude centimetre-raised streets.
@@ -96,6 +99,23 @@ export class World {
     material.stencilFail=THREE.KeepStencilOp;material.stencilZFail=THREE.KeepStencilOp;material.stencilZPass=THREE.KeepStencilOp
     ground.rotation.x = -Math.PI / 2
     this.group.add(ground)
+  }
+
+  terrainHeightAt(x:number,z:number){return this.city.terrain?.heightAt(x,z)??0}
+  private terrainPatches=new Set<string>()
+  private buildTerrain(){
+    for(const [key,data] of this.city.terrain?.patches??[]){
+      if(this.terrainPatches.has(key))continue
+      this.terrainPatches.add(key)
+      const [px,pz]=key.split(',').map(Number),geo=new THREE.PlaneGeometry(TERRAIN_SIZE,TERRAIN_SIZE,64,64)
+      geo.rotateX(-Math.PI/2)
+      const pos=geo.attributes.position
+      for(let i=0;i<pos.count;i++)pos.setXYZ(i,px*TERRAIN_SIZE+(i%65)*TERRAIN_STEP,data[i]-.025,pz*TERRAIN_SIZE+Math.floor(i/65)*TERRAIN_STEP)
+      geo.computeVertexNormals()
+      const material=asphaltMaterial(0x191f23);material.depthWrite=false
+      material.stencilWrite=true;material.stencilRef=1;material.stencilFunc=THREE.NotEqualStencilFunc
+      const mesh=new THREE.Mesh(geo,material);mesh.name='terrain-elevation';mesh.renderOrder=2;this.group.add(mesh)
+    }
   }
 
   private buildBuildings(from = 0, end = this.city.buildings.length) {
@@ -120,7 +140,8 @@ export class World {
       roofC.set(tint).multiplyScalar(0.65)
       const bk = buckets[bi % 3 === 0 ? 1 : 0]
       const tall = b.height > 45
-      const h = b.height
+      const base=b.base??(b.base=Math.max(...b.poly.map(([x,z])=>this.terrainHeightAt(x,z))))
+      const h = base+b.height
       if (b.area > 90 && (bi * 17) % 5 < 3) {
         const sx = Math.min(8, Math.max(2.2, (b.maxX - b.minX) * 0.22))
         const sz = Math.min(7, Math.max(2, (b.maxZ - b.minZ) * 0.2))
@@ -139,20 +160,21 @@ export class World {
         if(len>5 && trims.length<6000){
           const angle=Math.atan2(-(z2-z1),x2-x1)
           trim((x1+x2)/2,h,(z1+z2)/2,len+.25,.32,.45,angle)
-          trim((x1+x2)/2,3.8,(z1+z2)/2,len,.22,.4,angle)
-          if(bi%3===0)for(let t=0;t<len;t+=10)trim(x1+(x2-x1)*t/len,h/2,z1+(z2-z1)*t/len,.26,h,.38,angle)
-          if(bi%5===0)trim((x1+x2)/2,1.0,(z1+z2)/2,1.1,2,.65,angle)
+          trim((x1+x2)/2,base+3.8,(z1+z2)/2,len,.22,.4,angle)
+          if(bi%3===0)for(let t=0;t<len;t+=10)trim(x1+(x2-x1)*t/len,base+b.height/2,z1+(z2-z1)*t/len,.26,b.height,.38,angle)
+          if(bi%5===0)trim((x1+x2)/2,base+1.0,(z1+z2)/2,1.1,2,.65,angle)
         }
-        const u1 = d / 32, u2 = (d + len) / 32, v = h / 32
+        const u1 = d / 32, u2 = (d + len) / 32, v = b.height / 32
         d += len
-        bk.pos.push(x1, 0, z1, x2, 0, z2, x2, h, z2, x1, 0, z1, x2, h, z2, x1, h, z1)
+        const bottom1=this.terrainHeightAt(x1,z1)-.15,bottom2=this.terrainHeightAt(x2,z2)-.15
+        bk.pos.push(x1, bottom1, z1, x2, bottom2, z2, x2, h, z2, x1, bottom1, z1, x2, h, z2, x1, h, z1)
         bk.uv.push(u1, 0, u2, 0, u2, v, u1, 0, u2, v, u1, v)
         for (let k = 0; k < 6; k++) bk.col.push(col.r, col.g, col.b)
         const e = 0.15
         edgePos.push(x1, h, z1, x2, h, z2)
         edgeCol.push(col.r * e, col.g * e, col.b * e, col.r * e, col.g * e, col.b * e)
         if (tall && len > 6) {
-          edgePos.push(x1, 0, z1, x1, h, z1)
+          edgePos.push(x1, this.terrainHeightAt(x1,z1), z1, x1, h, z1)
           edgeCol.push(col.r * 0.4, col.g * 0.4, col.b * 0.4, col.r * e, col.g * e, col.b * e)
         }
       }
@@ -263,7 +285,7 @@ export class World {
           const a:Pt=[x1,z1],b:Pt=[x2,z2]
           const innerA=streetCorner(a,y1,dX,dZ,w,side,branchesA,true),innerB=streetCorner(b,y2,dX,dZ,w,side,branchesB,false)
           const outerA=streetCorner(a,y1,dX,dZ,w+pavement,side,branchesA,true),outerB=streetCorner(b,y2,dX,dZ,w+pavement,side,branchesB,false)
-          const polygons=paving.cut([innerA,innerB,outerB,outerA],(y1+y2)/2)
+          const polygons=paving.cut([innerA,innerB,outerB,outerA],(y1+y2)/2,Math.min(y1,y2),Math.max(y1,y2))
           const heightAt=(p:Pt)=>y1+(y2-y1)*Math.max(0,Math.min(1,((p[0]-x1)*dX+(p[1]-z1)*dZ)/len))
           appendPavement(sidewalks,polygons,heightAt)
           // World-distance stations, not one lamp for every short MVT segment.
@@ -276,16 +298,18 @@ export class World {
         if (road.bridge) {
           while(nextPillar<=distance+len){
             const t=(nextPillar-distance)/len,h=y1+(y2-y1)*t
-            if(h>1)pillars.push(new THREE.Matrix4().compose(new THREE.Vector3(x1+(x2-x1)*t,h/2,z1+(z2-z1)*t),new THREE.Quaternion(),new THREE.Vector3(1.5,h,1.5)))
+            const floor=this.terrainHeightAt(x1+(x2-x1)*t,z1+(z2-z1)*t)
+            if(h-floor>1)pillars.push(new THREE.Matrix4().compose(new THREE.Vector3(x1+(x2-x1)*t,(h+floor)/2,z1+(z2-z1)*t),new THREE.Quaternion(),new THREE.Vector3(1.5,h-floor,1.5)))
             nextPillar+=25
           }
         }
 
         distance+=len
         if(road.tunnel) {
-          tunnelCuts.push(x1+nx,0.02,z1+nz,x2+nx,0.02,z2+nz,x2-nx,0.02,z2-nz,x1+nx,0.02,z1+nz,x2-nx,0.02,z2-nz,x1-nx,0.02,z1-nz)
-          for(const side of [-1,1])tunnelWalls.push(x1+nx*side,y1,z1+nz*side,x2+nx*side,y2,z2+nz*side,x2+nx*side,0.1,z2+nz*side,x1+nx*side,y1,z1+nz*side,x2+nx*side,0.1,z2+nz*side,x1+nx*side,0.1,z1+nz*side)
-          if(y1<=-3.5&&y2<=-3.5)tunnelCaps.push(x1+nx,0.1,z1+nz,x2+nx,0.1,z2+nz,x2-nx,0.1,z2-nz,x1+nx,0.1,z1+nz,x2-nx,0.1,z2-nz,x1-nx,0.1,z1-nz)
+          const g1=this.terrainHeightAt(x1,z1),g2=this.terrainHeightAt(x2,z2)
+          tunnelCuts.push(x1+nx,g1+.02,z1+nz,x2+nx,g2+.02,z2+nz,x2-nx,g2+.02,z2-nz,x1+nx,g1+.02,z1+nz,x2-nx,g2+.02,z2-nz,x1-nx,g1+.02,z1-nz)
+          for(const side of [-1,1])tunnelWalls.push(x1+nx*side,y1,z1+nz*side,x2+nx*side,y2,z2+nz*side,x2+nx*side,g2+.1,z2+nz*side,x1+nx*side,y1,z1+nz*side,x2+nx*side,g2+.1,z2+nz*side,x1+nx*side,g1+.1,z1+nz*side)
+          if(y1-g1<=-3.5&&y2-g2<=-3.5)tunnelCaps.push(x1+nx,g1+.1,z1+nz,x2+nx,g2+.1,z2+nz,x2-nx,g2+.1,z2-nz,x1+nx,g1+.1,z1+nz,x2-nx,g2+.1,z2-nz,x1-nx,g1+.1,z1-nz)
         }
         const lanes=laneOffset(road.width),startGap=branchesA.length>2?2:.2,endGap=branchesB.length>2?2:.2
         const strip=(target:number[],start:number,end:number,offset:number,width:number,height:number)=>{
@@ -375,7 +399,7 @@ export class World {
       const i = p.node, n = { ...this.city.nodes[i], x: p.x, z: p.z }
       this.pumps.push(p)
       const g = new THREE.Group()
-      g.position.set(n.x, 0, n.z)
+      g.position.set(n.x, this.terrainHeightAt(n.x,n.z), n.z)
       const m = this.city.nodes[n.adj[0] ?? i]
       const len = Math.hypot(m.x - n.x, m.z - n.z) || 1
       const pillar = new THREE.Mesh(pillarGeo, pillarMat)
@@ -413,23 +437,22 @@ export class World {
 
   /** Returns the building index if (x,z) at altitude y is inside a building. */
   hitBuilding(x: number, z: number, y: number) {
-    if(y<0)return -1
     const list = this.grid.get(`${Math.floor(x / CELL)},${Math.floor(z / CELL)}`)
     if (!list) return -1
     for (const i of list) {
       const b = this.city.buildings[i]
-      if (y > b.height || x < b.minX || x > b.maxX || z < b.minZ || z > b.maxZ) continue
+      if (y > (b.base??0)+b.height || y<this.terrainHeightAt(x,z)-.2 || x < b.minX || x > b.maxX || z < b.minZ || z > b.maxZ) continue
       if (pointInPoly(x, z, b.poly as Pt[])) return i
     }
     return -1
   }
 
   surfaceHeightAt(x:number,z:number,reference:number){
-    return (this.streets.userData.surfaces as SurfaceIndex|undefined)?.heightAt(x,z,reference,this.isWater(x,z)?-2.5:0)??0
+    return (this.streets.userData.surfaces as SurfaceIndex|undefined)?.heightAt(x,z,reference,this.terrainHeightAt(x,z)+(this.isWater(x,z)?-2.5:0))??0
   }
 
   groundHeightAt(x: number, z: number, y: number) {
-    let height = this.isWater(x,z) ? -2.5 : 0, best=Infinity
+    let height = this.terrainHeightAt(x,z)+(this.isWater(x,z) ? -2.5 : 0), best=Infinity
     for(const entry of this.roadGrid.get(`${Math.floor(x/CELL)},${Math.floor(z/CELL)}`)??[]) {
       const road=this.city.roads[entry.road],i=entry.edge
       const a=road.pts[i-1],b=road.pts[i],dx=b[0]-a[0],dz=b[1]-a[1]
@@ -442,7 +465,7 @@ export class World {
   }
 
   isTunnel(x:number,z:number,y:number){
-    if(y>=0.5)return false
+    if(y>=this.terrainHeightAt(x,z)+.5)return false
     return (this.roadGrid.get(`${Math.floor(x/CELL)},${Math.floor(z/CELL)}`)??[]).some(({road:ri,edge:i})=>{
       const road=this.city.roads[ri];if(!road.tunnel)return false
       const a=road.pts[i-1],b=road.pts[i],dx=b[0]-a[0],dz=b[1]-a[1]
@@ -476,11 +499,13 @@ export class World {
       const shape=new THREE.Shape(water.poly.map(([x,z])=>new THREE.Vector2(x,-z)))
       shape.holes=water.holes.map(h=>new THREE.Path(h.map(([x,z])=>new THREE.Vector2(x,-z))))
       const mesh=new THREE.Mesh(new THREE.ShapeGeometry(shape),new THREE.MeshStandardMaterial({color:0x12151c,roughness:0.12,metalness:0.5,side:THREE.DoubleSide,stencilWrite:true,stencilRef:1,stencilFunc:THREE.AlwaysStencilFunc,stencilZPass:THREE.ReplaceStencilOp}))
-      mesh.renderOrder=1;mesh.rotation.x=-Math.PI/2; mesh.position.y=-2.5;this.group.add(mesh)
+      mesh.renderOrder=1;mesh.rotation.x=-Math.PI/2; mesh.position.y=-2.5;
+      const wp=mesh.geometry.attributes.position;for(let i=0;i<wp.count;i++)wp.setZ(i,this.terrainHeightAt(wp.getX(i),-wp.getY(i)));mesh.geometry.computeVertexNormals();this.group.add(mesh)
       const wall:number[]=[]
       for(const ring of [water.poly,...water.holes]) for(let i=0;i<ring.length;i++) {
         const [x,z]=ring[i], [a,b]=ring[(i+1)%ring.length]
-        wall.push(x,0,z,a,0,b,a,-2.5,b,x,0,z,a,-2.5,b,x,-2.5,z)
+        const h1=this.terrainHeightAt(x,z),h2=this.terrainHeightAt(a,b)
+        wall.push(x,h1,z,a,h2,b,a,h2-2.5,b,x,h1,z,a,h2-2.5,b,x,h1-2.5,z)
       }
       const geo=new THREE.BufferGeometry();geo.setAttribute('position',new THREE.Float32BufferAttribute(wall,3));geo.computeVertexNormals()
       this.group.add(new THREE.Mesh(geo,new THREE.MeshStandardMaterial({color:0x454846,roughness:0.9,side:THREE.DoubleSide})))

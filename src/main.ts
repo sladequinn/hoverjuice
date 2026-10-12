@@ -277,6 +277,7 @@ function updateCamera(dt: number) {
   camTarget.set(subject.x, subject.y + 1.2, subject.z)
   camPos.set(camTarget.x - Math.sin(yaw) * dist, camTarget.y + height, camTarget.z - Math.cos(yaw) * dist)
   if (!top) unblock(camTarget, camPos)
+  if(game.world&&!game.world.isTunnel(subject.x,subject.z,subject.y))camPos.y=Math.max(camPos.y,game.world.terrainHeightAt(camPos.x,camPos.z)+2)
   camera.position.lerp(camPos, Math.min(1, dt * 9))
   const lead = top ? 3 : 6
   const heading = p.heading

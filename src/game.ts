@@ -514,7 +514,7 @@ export class Game {
     const tgt = w.city.nodes[c.stage === 'pickup' ? c.from : c.to]
     const d = Math.hypot(tgt.x - this.actor.x, tgt.z - this.actor.z)
     if (c.stage === 'dropoff'&&!c.tutorial) c.remaining -= dt
-    if (d < 16 && this.actor.y < 30) {
+    if (d < 16 && Math.abs(this.actor.y-(tgt.y??0)) < 30) {
       if (c.stage === 'pickup') {
         c.stage = 'dropoff'
         c.remaining = c.time
@@ -1543,7 +1543,7 @@ export class Game {
           w.groundHeightAt(boss.position.x,boss.position.z,boss.position.y),true)
       }
       this.spray.update(dt)
-      for(const slick of this.slicks){slick.life-=dt;this.particles.emit(slick.x+(Math.random()-0.5)*5,0.4,slick.z+(Math.random()-0.5)*5);if(Math.hypot(this.actor.x-slick.x,this.actor.z-slick.z)<3)this.run.hull=Math.max(0,this.run.hull-dt*2)}
+      for(const slick of this.slicks){slick.life-=dt;this.particles.emit(slick.x+(Math.random()-0.5)*5,w.groundHeightAt(slick.x,slick.z,this.actor.y)+.4,slick.z+(Math.random()-0.5)*5);if(Math.hypot(this.actor.x-slick.x,this.actor.z-slick.z)<3)this.run.hull=Math.max(0,this.run.hull-dt*2)}
       this.slicks=this.slicks.filter(s=>s.life>0)
       this.particles.update(dt)
     }
@@ -1563,7 +1563,7 @@ export class Game {
     this.arrow.visible = !!t
     if (!t) return
     const color = this.active ? (this.active.stage === 'pickup' ? 0x00f0ff : 0xff9d00) : 0x19ffe6
-    this.beacon.position.set(t.x, 0, t.z)
+    this.beacon.position.set(t.x, this.world!.groundHeightAt(t.x,t.z,this.actor.y), t.z)
     this.beacon.children.forEach((c) => ((c as THREE.Mesh).material as THREE.MeshBasicMaterial).color.setHex(color))
     this.beacon.getObjectByName('ring')!.rotation.z += dt
     ;(this.arrow.material as THREE.MeshBasicMaterial).color.setHex(color)

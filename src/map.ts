@@ -1,3 +1,4 @@
+import {TerrainField} from './terrain'
 import { buildingId, criminalEligible, protectedVenue, syndicate, type Tags, type Gang } from './filter'
 import { LANDMARK_NAMES } from './data'
 import { VectorTile } from '@mapbox/vector-tile'
@@ -6,6 +7,7 @@ import { PbfReader } from 'pbf'
 export type Pt = [number, number]
 
 export interface Building {
+  base?: number
   id?: string
   tile?: string
   tags?: Tags
@@ -58,6 +60,7 @@ export interface Venue { x: number; z: number; tags: Tags; name: string }
 export interface Zone { poly: Pt[]; tags: Tags; gang: Gang }
 export interface Water { poly: Pt[]; holes: Pt[][] }
 export interface CityData {
+  terrain?: TerrainField
   venues: Venue[]
   zones: Zone[]
   waters: Water[]
@@ -318,11 +321,11 @@ export class MapStreamer {
 
   private addRoad(line: LngLat[], width: number, major: boolean, tags: Tags) {
     let pts = line.map((p) => this.project(p))
-    if (tags.brunnel || tags.bridge === 'yes' || tags.tunnel === 'yes') {
+    if (this.city.terrain?.enabled || tags.brunnel || tags.bridge === 'yes' || tags.tunnel === 'yes') {
       const dense: Pt[] = [pts[0]]
       for (let i = 1; i < pts.length; i++) {
         const a = pts[i - 1], b = pts[i]
-        const steps = Math.max(6, Math.ceil(Math.hypot(b[0] - a[0], b[1] - a[1]) / 10))
+        const steps = Math.max(tags.brunnel || tags.bridge === 'yes' || tags.tunnel === 'yes' ? 6 : 1, Math.ceil(Math.hypot(b[0] - a[0], b[1] - a[1]) / 25))
         for (let j = 1; j <= steps; j++) dense.push([a[0] + (b[0] - a[0]) * j / steps, a[1] + (b[1] - a[1]) * j / steps])
       }
       pts = dense
@@ -337,9 +340,9 @@ export class MapStreamer {
     const bridge = tags.bridge === 'yes' || tags.brunnel === 'bridge'
     const tunnel = tags.tunnel === 'yes' || tags.brunnel === 'tunnel'
     const deck = bridge ? Math.max(1, Number(tags.layer) || 1) * 5 : tunnel ? -4 : 0
-    const heights = kept.map((_, i) => {
+    const heights = kept.map(([x,z], i) => {
       const t = Math.min(1, i / 3, (kept.length - 1 - i) / 3)
-      return deck * t * t * (3 - 2 * t)
+      return (this.city.terrain?.heightAt(x,z)??0) + deck * t * t * (3 - 2 * t)
     })
     this.city.roads.push({ pts: kept, heights, width, major, bridge, tunnel, name: String(tags.name || '') })
     let prev = this.node(kept[0], heights[0], tunnel, width)
@@ -458,6 +461,15 @@ export class MapStreamer {
       }
       if (!jobs.length) return null
       const settled = await Promise.allSettled(jobs.map((j) => j.data))
+      // Finish elevation first: a failed stream must not leave half-appended map data.
+      for(const [i,result] of settled.entries())if(result.status==='fulfilled'){
+        const job=jobs[i]
+          if(this.city.terrain){
+            const lon=(tx:number)=>tx/2**TILE_ZOOM*360-180,lat=(ty:number)=>Math.atan(Math.sinh(Math.PI*(1-2*ty/2**TILE_ZOOM)))*180/Math.PI
+            const a=this.project([lon(job.x),lat(job.y)]),b=this.project([lon(job.x+1),lat(job.y+1)])
+            await this.city.terrain.ensure(a[0]-64,a[1]-64,b[0]+64,b[1]+64,signal)
+          }
+      }
       let tiles = 0
       for (const [i,result] of settled.entries()) {
         const job = jobs[i]
@@ -495,14 +507,15 @@ export async function fetchCity(
 ): Promise<CityData> {
   const key = cityKey(lat, lon)
   const city: CityData = { key, name, lat, lon, radius: RADIUS, buildings: [], roads: [], nodes: [], landmarks: [], venues: [], zones: [], waters: [], procedural: false }
-  onStatus('Connecting to the global OpenStreetMap tile network…')
+  city.terrain=new TerrainField(lat,lon)
+  onStatus('Connecting to street and terrain data…')
   const streamer = new MapStreamer(city, await tileTemplate(signal))
   streamers.set(city, streamer)
   onStatus('Streaming the first map sector…')
   await streamer.loadAround(0, 0, 0, signal)
   if (city.nodes.length < 20) throw new Error('No driveable streets found here')
   city.landmarks = pickLandmarks(key, city.buildings)
-  onStatus(`Loaded ${streamer.tileCount} sectors · ${city.buildings.length.toLocaleString()} real buildings`)
+  onStatus(`Loaded ${streamer.tileCount} sectors · ${city.buildings.length.toLocaleString()} real buildings · ${city.terrain.enabled?'terrain ready':'terrain unavailable, flat fallback'}`)
   return city
 }
 

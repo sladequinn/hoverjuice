@@ -257,7 +257,7 @@ export class Player {
 
   /** Snap onto the closest conduit segment. Returns false if none is close enough. */
   snap(world: World, range = 45) {
-    if (world.isWater(this.pos.x,this.pos.z) && world.groundHeightAt(this.pos.x,this.pos.z,this.pos.y) < 0) return false
+    if (world.isWater(this.pos.x,this.pos.z) && world.groundHeightAt(this.pos.x,this.pos.z,this.pos.y) < world.terrainHeightAt(this.pos.x,this.pos.z)-1) return false
     const nodes = world.city.nodes
     let best = -1, bestB = -1, bd = range, bt = 0
     const px = this.pos.x, pz = this.pos.z
@@ -443,7 +443,7 @@ export class Player {
           this.edgeA=oldA;this.edgeB=oldB;this.edgeS=oldS;this.pos.x=oldX;this.pos.z=oldZ
         }
       }
-      if(world.isWater(this.pos.x,this.pos.z) && world.groundHeightAt(this.pos.x,this.pos.z,this.pos.y)<0 && this.pos.y<3) this.unsnap()
+      if(world.isWater(this.pos.x,this.pos.z) && world.groundHeightAt(this.pos.x,this.pos.z,this.pos.y)<world.terrainHeightAt(this.pos.x,this.pos.z)-1 && this.pos.y<world.terrainHeightAt(this.pos.x,this.pos.z)+3) this.unsnap()
     } else {
       const spd = this.vel.length()
       const turnScale = 0.55 + 0.45 * Math.min(1, spd / 10)
@@ -499,7 +499,7 @@ export class Player {
       const desired=this.testFlight?Math.max(floor,this.targetAlt):floor
       let y = desired + Math.sin(performance.now() / 300) * 0.06
       if(y<this.pos.y && world.hitBuilding(this.pos.x,this.pos.z,y-0.5)>=0)y=this.pos.y
-      this.pos.y += (y - this.pos.y) * Math.min(1, dt * 3)
+      this.pos.y = Math.max(floor-.06,this.pos.y + (y - this.pos.y) * Math.min(1, dt * 3))
       this.speed = this.vel.length()
       this.nextNode = -1
     }
@@ -517,7 +517,7 @@ export class Player {
     }
     const pad = this.mesh.getObjectByName('pad') as THREE.Mesh | undefined
     if (pad) {
-      pad.position.y = (-this.pos.y + 0.15) / VEHICLE_SCALE
+      pad.position.y = (world.surfaceHeightAt(this.pos.x,this.pos.z,this.pos.y-1.3)-this.pos.y + 0.1) / VEHICLE_SCALE
       const shadow=this.mesh.getObjectByName('contact-shadow');if(shadow)shadow.position.y=pad.position.y-0.01
       ;(pad.material as THREE.MeshBasicMaterial).opacity = (hasJuice ? 0.055 + Math.random() * 0.015 : 0.04) * (this.spec.kind === 'board' ? 0.25 : 1)
     }

@@ -50,7 +50,7 @@ test('malformed or out-of-range telemetry is rejected',()=>{
 })
 function fixture(){
  const city=proceduralCity('test',43.45,-80.49)
- return {city,hitBuilding:()=>-1,isWater:()=>false,groundHeightAt:()=>0} as unknown as World
+ return {city,hitBuilding:()=>-1,isWater:()=>false,groundHeightAt:()=>0,surfaceHeightAt:()=>.05,terrainHeightAt:()=>0} as unknown as World
 }
 test('holding a lane input advances only once; release enables next lane',()=>{
  const w=fixture(),p=new Player(vehicleById('board'),'balaclava');p.placeAtNode(w,0)
@@ -67,7 +67,7 @@ test('highway circuit consists entirely of adjacent nodes and closes',()=>{
 test('high-speed corner assist keeps Mag-Lock and sheds speed',()=>{
  const city=proceduralCity('test',0,0)
  city.nodes=[{x:0,z:0,adj:[1],main:true},{x:0,z:20,adj:[0,2],main:true},{x:20,z:20,adj:[1],main:true}]
- const w={city,hitBuilding:()=>-1,isWater:()=>false,groundHeightAt:()=>0} as unknown as World
+ const w={city,hitBuilding:()=>-1,isWater:()=>false,groundHeightAt:()=>0,surfaceHeightAt:()=>.05,terrainHeightAt:()=>0} as unknown as World
  const p=new Player(vehicleById('hovercedes'),'balaclava');p.placeAtNode(w,0);p.speed=60;p.edgeS=19
  p.update(0.05,{throttle:1,brake:0,steer:0,boost:false,up:false,down:false},w,true)
  assert.equal(p.mode,'mag');assert.equal(p.edgeB,2);assert.ok(p.speed<38)

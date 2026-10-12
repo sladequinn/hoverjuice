@@ -5,7 +5,7 @@ import {ShapeUtils,Vector2} from 'three'
 import {pointInPoly,type CityData,type Pt} from './map'
 import {streetCorner,streetJunctions,streetKey} from './streets'
 
-type Mask={polygon:Polygon;y:number;building:boolean;minX:number;maxX:number;minZ:number;maxZ:number}
+type Mask={polygon:Polygon;y:number;minY:number;maxY:number;building:boolean;minX:number;maxX:number;minZ:number;maxZ:number}
 export type Lamp={x:number;y:number;z:number;heading:number}
 const CELL=32
 // Clipper performs all intersections on an integer centimetre grid, including intermediate vertices.
@@ -39,23 +39,23 @@ export class PavementLayout {
       const dx=(b[0]-a[0])/len,dz=(b[1]-a[1])/len,w=road.width/2
       const first=junctions.get(streetKey(a,ay))??[],last=junctions.get(streetKey(b,by))??[]
       const ring=[streetCorner(a,ay,dx,dz,w,1,first,true),streetCorner(b,by,dx,dz,w,1,last,false),streetCorner(b,by,dx,dz,w,-1,last,false),streetCorner(a,ay,dx,dz,w,-1,first,true)]
-      this.add([ring],(ay+by)/2,false)
+      this.add([ring],(ay+by)/2,false,Math.min(ay,by),Math.max(ay,by))
     }
     for(const b of city.buildings)this.add([b.poly],0,true)
   }
   private cells(b:ReturnType<typeof bounds>){const keys:string[]=[];for(let x=Math.floor(b.minX/CELL);x<=Math.floor(b.maxX/CELL);x++)for(let z=Math.floor(b.minZ/CELL);z<=Math.floor(b.maxZ/CELL);z++)keys.push(`${x},${z}`);return keys}
-  private add(polygon:Polygon,y:number,building:boolean){
-    const mask={polygon,y,building,...bounds(polygon[0])},i=this.masks.length;this.masks.push(mask)
+  private add(polygon:Polygon,y:number,building:boolean,minY=y,maxY=y){
+    const mask={polygon,y,minY,maxY,building,...bounds(polygon[0])},i=this.masks.length;this.masks.push(mask)
     for(const key of this.cells(mask)){const list=this.grid.get(key)??[];list.push(i);this.grid.set(key,list)}
   }
-  cut(ring:Pt[],y:number):MultiPolygon{
+  cut(ring:Pt[],y:number,minY=y,maxY=y):MultiPolygon{
     if(area(ring)<.01)return []
     const box=bounds(ring),ids=new Set<number>()
     for(const key of this.cells(box))for(const id of this.grid.get(key)??[])ids.add(id)
-    const masks=[...ids].map(i=>this.masks[i]).filter(m=>(m.building||Math.abs(m.y-y)<.5)&&m.maxX>=box.minX&&m.minX<=box.maxX&&m.maxZ>=box.minZ&&m.minZ<=box.maxZ).map(m=>m.polygon)
+    const masks=[...ids].map(i=>this.masks[i]).filter(m=>(m.building||(m.minY<=maxY+.5&&m.maxY>=minY-.5))&&m.maxX>=box.minX&&m.minX<=box.maxX&&m.maxZ>=box.minZ&&m.minZ<=box.maxZ).map(m=>m.polygon)
     const result=(masks.length?subtractPavement([ring],masks):[[ring]]).filter(p=>area(p[0])-p.slice(1).reduce((sum,h)=>sum+area(h),0)>.15)
     // Reserving the result also removes duplicate and partially overlapping tile features.
-    for(const polygon of result)this.add(polygon,y,false)
+    for(const polygon of result)this.add(polygon,y,false,minY,maxY)
     return result
   }
   addLamp(lamp:Lamp,polygons:MultiPolygon){
