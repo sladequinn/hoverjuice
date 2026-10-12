@@ -461,3 +461,45 @@ body.training .turn{top:245px}
 /* Paint choices must remain reachable on narrow touch screens. */
 .paint-options{display:grid;grid-template-columns:repeat(auto-fit,minmax(96px,1fr));gap:8px;margin:12px 0 20px}
 .paint-options .btn{min-width:0;min-height:48px;white-space:normal;font-size:12px;padding:10px 6px}
+
+/* Lean driving HUD and four-destination menu. */
+body:has(.modal.show) #hud{visibility:hidden}
+body:has(.modal.show) #hud *{pointer-events:none}
+#hud .brand,#hud #mask-portrait,#hud #income,#hud #network-status,#hud #city-tag,.vehicle-name{display:none}
+.hud-tl{min-width:0;padding:8px 10px}.hud-tl .city{margin-top:2px}
+.menu-btn{display:flex;position:absolute;right:16px;bottom:16px;width:48px;height:48px;align-items:center;justify-content:center;flex-direction:column;gap:4px;cursor:pointer}
+.menu-btn span{width:20px;height:2px;background:#b9cbd0}
+.modal-card{background:#10171d;border-color:#35434c;box-shadow:0 16px 64px #0008;border-radius:10px}
+.tabs{display:grid;grid-template-columns:repeat(4,minmax(0,1fr)) 44px;overflow:visible;background:#10171d;gap:2px}
+.tab,.tab-close{min-width:0;border-radius:4px;font-family:inherit;letter-spacing:0;padding:10px 4px;font-size:.9rem;background:transparent;box-shadow:none}
+.tab-close{position:static;min-height:44px}.tabs .tab.on{background:#263840;color:#dbecef}
+.modal-card h2{font:700 1.4rem 'Rajdhani',sans-serif;letter-spacing:.01em;color:#edf0eb}
+.btn{border-color:#526c78;background:#1a2b33;color:#c1dce1;letter-spacing:.01em;box-shadow:none;border-radius:5px;min-height:44px}
+.card{border-radius:5px;box-shadow:none!important}.card.current{border-color:#668e97}
+.fold{border-top:1px solid #35434c;padding:0;margin-top:12px}
+.fold summary{cursor:pointer;padding:16px 2px;font-weight:700;min-height:48px;list-style:none;display:flex;gap:8px;align-items:center}
+.fold summary::before{content:'+';color:#76bec7;width:14px;flex:none}.fold[open]>summary::before{content:'−'}
+.fold summary span{margin-left:auto;color:#94a7af;font-size:.85rem;font-weight:500}
+.fold>p{padding:0 4px 12px}.garage-current{margin:20px 0 12px}.garage-current h3{font-size:1.4rem}.garage-current p{margin:5px 0;color:#abbcc4}
+.upgrade-row{display:flex;gap:12px;align-items:center;justify-content:space-between;border-top:1px solid #263740;padding:12px 0}.upgrade-row p{margin:4px 0;max-width:320px}.upgrade-row .btn{flex:none;min-width:80px}
+.garage-vault{margin-top:20px;width:100%}
+.menu-links{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:20px 0}.menu-links button{display:flex;align-items:center;justify-content:space-between;text-align:left;gap:8px;min-height:58px}
+.legend-items{display:flex;flex-wrap:wrap;gap:8px;margin-top:8px}.map-legend{display:block;max-width:min(430px,calc(100% - 98px))}.map-legend summary{cursor:pointer;min-height:32px;display:flex;align-items:center}
+body.is-touch .hud-tl,body.is-touch .hud-bl{height:64px}
+body.is-touch .hud-tl{width:calc(43% - 12px)}body.is-touch .hud-bl{width:calc(57% - 12px)}
+body.is-touch #mode{border:0;font-size:8px;padding:0;pointer-events:none}
+body.is-touch .menu-btn{top:auto;bottom:calc(170px + env(safe-area-inset-bottom));width:44px;height:44px;right:12px}
+body.is-touch #minimap{top:calc(80px + env(safe-area-inset-top));width:76px;height:76px}
+body.is-touch .contract{top:calc(80px + env(safe-area-inset-top));left:8px;right:94px;width:auto;min-height:0;padding:6px 8px}
+body.is-touch .contract .client,body.is-touch .contract .pill{display:none}
+body.is-touch .contract .row{gap:4px;font-size:10px}.contract .pay{font-family:monospace}
+body.is-touch .tutorial-tip{top:calc(132px + env(safe-area-inset-top));left:8px;width:calc(100% - 102px);font-size:10px;padding:6px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+body.is-touch .tutorial-tip[hidden]{display:none}
+body.is-touch .turn,body.is-touch.training .turn{top:calc(178px + env(safe-area-inset-top));font-size:10px}
+@media(max-width:760px){.tabs{margin-bottom:16px}.modal-card{max-height:94dvh}.menu-links{grid-template-columns:1fr}.title-statement{font-size:26px}.title-status{margin-bottom:18px}.title-actions .btn{width:100%}}
+
+body.is-touch .contract.waypoint .client{display:block;margin:0;font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+body.is-touch .contract.waypoint .muted{display:none}
+body:has(.modal.show) #hud{display:none}
+body.is-touch .hud-tl,body.is-touch .hud-bl{height:68px}
+body.is-touch #combat-status{font-size:9px;line-height:10px}

@@ -994,15 +994,19 @@ export class Game {
     const m = $('modal')
     m.dataset.view = view
     const body = $('modal-body')
-    const tabs: [string, string][] = [['contracts', 'Contracts'], ['tutorial','First night'], ['gangs','Gangs'], ['market', 'Night Market'], ['garage', 'Garage'], ['masks', 'Masks'], ['holdings', 'Turf & vaults'], ['warp', 'City'], ['help', 'Help']]
+    const tabs: [string, string][] = [['contracts','Jobs'],['garage','Garage'],['warp','City'],['menu','More']]
+    const activeTab=tabs.some(([id])=>id===view)?view:'menu'
     const tabBar = this.world && view !== 'win' && view !== 'couch'
-      ? `<nav class="tabs">${tabs.map(([id, label]) => `<button class="tab ${id === view ? 'on' : ''}" data-act="view" data-arg="${id}">${label}</button>`).join('')}<button class="tab-close" data-act="close" aria-label="Close">✕</button></nav>`
+      ? `<nav class="tabs" aria-label="Game sections">${tabs.map(([id, label]) => `<button class="tab ${id === activeTab ? 'on' : ''}" data-act="view" data-arg="${id}">${label}</button>`).join('')}<button class="tab-close" data-act="close" aria-label="Close">✕</button></nav>`
       : ''
     $('modal-close').style.display = tabBar || view === 'win' || !this.world ? 'none' : ''
     const card = body.parentElement!
     const scroll = view === m.dataset.lastView ? card.scrollTop : 0
     m.dataset.lastView = view
+    const expanded=view===m.dataset.lastDetailsView ? [...body.querySelectorAll<HTMLDetailsElement>('details[data-fold][open]')].map(d=>d.dataset.fold) : []
     body.innerHTML = tabBar + this.renderView(view)
+    for(const detail of body.querySelectorAll<HTMLDetailsElement>('details[data-fold]'))detail.open=expanded.includes(detail.dataset.fold)
+    m.dataset.lastDetailsView=view
     card.scrollTop = scroll
     m.classList.add('show')
     this.paused = true
@@ -1119,6 +1123,11 @@ export class Game {
     const s = this.save
     const w = this.world
     switch (view) {
+      case 'menu':
+        return `<h2>Off the clock</h2><p class="muted">${esc(s.city?.name??'City')} · ${money(s.money)} available</p>
+          <div class="menu-links">${[['market','Dealers & cargo'],['holdings','Safehouses & vaults'],['gangs','Gangs & territory'],['masks','Mask perks'],['tutorial','First-night guide'],['help','Controls & settings']].map(([id,label])=>`<button class="btn ghost" data-act="view" data-arg="${id}">${label}<span>→</span></button>`).join('')}</div>
+          <details class="fold"><summary>City & account details</summary><p class="muted">Net worth ${money(this.netWorth)} · Notoriety ${this.run.notoriety}<br>Vault ${money(s.vaultCash)} · Income ${money(this.incomePerMin)}/min<br>${esc(this.multiplayer?.status??'Local save')} · ${esc($('city-tag').textContent??'')}</p></details>`
+
       case 'tutorial':
         return `<h2>Your first night</h2><p>${esc(tutorialText(s.tutorial))}</p><p class="muted">Deliver a legal parcel for $250, then sell a sealed sample to WHITE LIE for $100. Use the map’s P / X markers. Dealers use D. Return to a safehouse to stash cargo and clear Heat.</p>${s.tutorial.stage==='deal'?'<button class="btn buy" data-act="tutorial-dealer">Locate WHITE LIE</button>':''}${tutorialActive(s.tutorial)?'<button class="btn ghost" data-act="skip-tutorial">Skip tutorial</button>':''}`
       case 'gangs':
@@ -1224,12 +1233,11 @@ export class Game {
             </div>${btn}</div>`
         }).join('')
         const build=buildFor(s.builds,s.current)
-        const workshop=`<div class="card current"><p class="kicker">CUSTOM SHOP · ${esc(this.player.spec.name)}</p><h3>Paint & performance</h3><p class="muted">Paint is free. Upgrades stay with this vehicle. Three stages per system.</p>
-          <div class="paint-options"><button class="btn" data-act="paint" data-arg="factory" ${!build.paint?'disabled':''}>Factory paint</button>${PAINTS.map(p=>`<button class="btn" data-act="paint" data-arg="${p.id}" aria-pressed="${build.paint===p.id}" ${build.paint===p.id?'disabled':''}><span style="display:inline-block;width:14px;height:14px;background:#${p.color.toString(16).padStart(6,'0')};border:1px solid #aaa;margin-right:6px"></span>${p.name}</button>`).join('')}</div>
-          <div class="grid">${UPGRADES.map(u=>{const level=build[u.id],cost=upgradeCost(s.current,level);return `<div class="card"><h3>${u.name} · ${level}/3</h3><p class="muted">${u.description}</p><button class="btn" data-act="upgrade" data-arg="${u.id}" ${level>=3||s.money<cost?'disabled':''}>${level>=3?'Fully upgraded':`Stage ${level+1} · ${money(cost)}`}</button></div>`}).join('')}</div></div>`
-        return `<h2>Garage</h2><p>Net worth ${money(this.netWorth)} · Notoriety ${this.run.notoriety} · Vault ${money(s.vaultCash)}</p><div class="row"><button class="btn" data-act="stash">Bank cash & cargo (B)</button><button class="btn" data-act="withdraw">Withdraw (U)</button></div><p class="muted">From gutter deck to Hoverghini. Bigger rides unlock richer cargo classes, but drink more HJ-77.</p>
-          <div class="row test-funds"><span class="muted small">Playtesting?</span><button class="btn buy" data-act="cheat">+$5,000,000 test funds</button></div>
-          <div>${workshop}</div><div class="grid">${cards}</div>`
+        const workshop=`<details class="fold" data-fold="paint"><summary>Paint <span>${esc(PAINTS.find(p=>p.id===build.paint)?.name??'Factory')}</span></summary><div class="paint-options"><button class="btn" data-act="paint" data-arg="factory" ${!build.paint?'disabled':''}>Factory paint</button>${PAINTS.map(p=>`<button class="btn" data-act="paint" data-arg="${p.id}" aria-pressed="${build.paint===p.id}" ${build.paint===p.id?'disabled':''}><span style="display:inline-block;width:12px;height:12px;background:#${p.color.toString(16).padStart(6,'0')};margin-right:6px"></span>${p.name}</button>`).join('')}</div></details>
+          <details class="fold" data-fold="upgrades"><summary>Performance <span>${build.drive+build.handling+build.efficiency}/9 stages</span></summary><div class="upgrade-list">${UPGRADES.map(u=>{const level=build[u.id],cost=upgradeCost(s.current,level);return `<div class="upgrade-row"><div><strong>${u.name} · ${level}/3</strong><p class="muted small">${u.description}</p></div><button class="btn" data-act="upgrade" data-arg="${u.id}" ${level>=3||s.money<cost?'disabled':''}>${level>=3?'Max':money(cost)}</button></div>`}).join('')}</div></details>`
+        return `<h2>Garage</h2><p class="muted">${money(s.money)} available</p><div class="garage-current"><span class="kicker">CURRENT RIDE</span><h3>${esc(this.player.spec.name)}</h3><p>${Math.round(this.player.spec.maxSpeed*3.6)} km/h · ${this.player.spec.tank} L · Cargo ×${this.player.spec.payMult}</p></div>
+          ${workshop}<details class="fold" data-fold="vehicles"><summary>Vehicles <span>${s.owned.length} owned</span></summary><div class="grid">${cards}</div></details>
+          <button class="btn ghost garage-vault" data-act="view" data-arg="holdings">Safehouses & vaults →</button>`
       }
       case 'masks': {
         this.maskThumbs()
@@ -1314,9 +1322,9 @@ export class Game {
             Start in Free Hover. Use the lower <b>MAG-LOCK / UNLOCK</b> button to switch modes; <b>BOOST</b> burns extra HJ-77. <b>BURN</b> appears only when carrying Cyan-ade. Tap the fuel prompt at a pump to refuel.</p></div>
             <div><h3>Drive modes</h3><p class="muted"><b>Mag-Lock</b> snaps you between three rail lanes. Tap A/D to slide and queue a turn for 6 seconds; hold to keep your turn queued. Corner assist slows you through sharp turns. Heavy ramming can break lock. <b>Free Hover</b> carries your momentum across the road plane. Water breaks rail cohesion.</p></div>
           </div>
-          <div class="row test-funds"><span class="muted small">Playtesting?</span><button class="btn buy" data-act="cheat">+$5,000,000 test funds</button></div>
+          <details class="fold" data-fold="testing"><summary>Testing tools</summary><div class="row test-funds"><span class="muted small">Playtesting?</span><button class="btn buy" data-act="cheat">+$5,000,000 test funds</button></div>
           <div class="row"><button class="btn" data-act="test-flight">Test flight: ${this.player.testFlight?'ON':'OFF'} (Y)</button><span class="muted">Free Hover: Space / C climb / descend. Touch: RISE / DESCEND. Turning off restores street height.</span></div>
-          <div class="row"><span class="muted">${s.deliveries} deliveries · ${money(s.earned)} earned lifetime</span><button class="btn danger ghost" data-act="reset">Reset save</button></div>`
+          </details><div class="row"><span class="muted">${s.deliveries} deliveries · ${money(s.earned)} earned lifetime</span><button class="btn danger ghost" data-act="reset">Reset save</button></div>`
       case 'win':
         return `<div class="win"><h1>HOVERGHINI</h1><p>From the gutter to the skyline. You own the ultimate status symbol.</p>
           <p class="muted">${s.deliveries} deliveries · ${s.holdings.length} properties · ${money(s.earned)} earned</p>
@@ -1566,7 +1574,7 @@ export class Game {
     $('minimap').style.visibility=tunnel?'hidden':'visible'
     $('alt').textContent=tunnel?'GPS LOST':`${Math.round(p.pos.y)} m${p.testFlight?' · TEST FLIGHT':''}`
     document.body.classList.toggle('test-flight',p.testFlight && p.mode==='free')
-    $('combat-status').textContent = `HULL ${Math.ceil(this.run.hull)}% · HEAT ${this.run.heat.toFixed(1)} · +FLOW ${this.run.flow.toFixed(2)}×${this.run.limp>=0 ? ' · LIMP '+Math.ceil(this.run.limp)+'s' : ''}`
+    $('combat-status').textContent = `HULL ${Math.ceil(this.run.hull)}%${this.run.heat>0?' · HEAT '+this.run.heat.toFixed(1):''}${this.run.flow>1?' · FLOW '+this.run.flow.toFixed(1)+'×':''}${this.run.limp>=0?' · LIMP '+Math.ceil(this.run.limp)+'s':''}`
     $('speed').textContent = String(Math.round(p.groundSpeed * 3.6))
     const mode = $('mode')
     setHtml(mode, p.mode === 'mag' ? 'MAG-LOCK' : 'FREE HOVER')
@@ -1600,6 +1608,7 @@ export class Game {
     const c = this.active
     const panel = $('contract')
     panel.classList.toggle('idle',!c && !this.waypoint)
+    panel.classList.toggle('waypoint',!c && !!this.waypoint)
     if (c) {
       panel.classList.add('show')
       const w = this.world!
@@ -1614,7 +1623,7 @@ export class Game {
       panel.classList.add('show')
       setHtml(panel, `<div class="client">Waypoint: ${esc(this.waypoint.label)}</div><div class="muted">${touch ? 'Tap for contracts' : 'Press <kbd>J</kbd> for contracts'}</div>`)
     } else {
-      panel.classList.add('show')
+      panel.classList.remove('show')
       setHtml(panel, `<span class="muted">DISPATCH</span> · ${touch?'Tap for work':'<kbd>J</kbd> Find a contract'}`)
     }
 

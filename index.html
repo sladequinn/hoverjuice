@@ -42,21 +42,13 @@
       <canvas id="minimap" data-tap="map" title="Expand city map"></canvas>
       <div class="cam-label">MAP</div>
       <button id="contract" class="panel contract" data-tap="contracts"></button>
-      <button class="menu-btn panel" data-tap="contracts" aria-label="Open menu"><span></span><span></span><span></span></button>
+      <button class="menu-btn panel" data-tap="menu" aria-label="Open menu"><span></span><span></span><span></span></button>
 
       <div id="turn" class="turn"></div>
       <button id="prompt" class="prompt" data-tap="prompt"></button>
       <div id="toast" class="toast"></div>
 
-      <nav class="menu">
-        <button data-tap="contracts" title="Contracts (J)"><b>J</b>Contracts</button>
-        <button data-tap="market" title="Night Market (N)"><b>N</b>Market</button>
-        <button data-tap="garage" title="Garage (G)"><b>G</b>Garage</button>
-        <button data-tap="holdings" title="Turf and vaults (P)"><b>P</b>Turf</button>
-        <button data-tap="warp" title="City uplink (M)"><b>M</b>City</button>
-        <button data-tap="masks" title="Masks (K)"><b>K</b>Masks</button>
-        <button data-tap="help" title="Help (H)"><b>H</b>Help</button>
-      </nav>
+
 
       <div class="touch">
         <div class="left-pad">
@@ -89,7 +81,7 @@
         <button id="map-plus" aria-label="Zoom map in">+</button>
       </div>
       <div id="map-selection" class="panel map-selection" hidden></div>
-      <div class="map-attribution">Map data © <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap contributors</a></div><div class="map-legend panel"><span>▲ You</span><span style="color:#df8dcc">D Dealer</span><span style="color:#78c6ff">C Contract</span><span style="color:#ffba4b">P Pickup · X Drop-off</span><span style="color:#fff280">W Waypoint</span><span style="color:#94e4b2">H Home</span><span style="color:#00d8e8">F Fuel</span><span>Teal buildings: homes for sale</span><span style="color:#45c4cb">SHINOBI</span><span style="color:#dce0da">LIARS</span><span style="color:#d7a35f">HYENAS</span><span style="color:#c879af">JESTERS</span></div>
+      <div class="map-attribution">Map data © <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap contributors</a></div><details class="map-legend panel"><summary>Map key</summary><div class="legend-items"><span>▲ You</span><span style="color:#df8dcc">D Dealer</span><span style="color:#78c6ff">C Contract</span><span style="color:#ffba4b">P Pickup · X Drop-off</span><span style="color:#fff280">W Waypoint</span><span style="color:#94e4b2">H Home</span><span style="color:#00d8e8">F Fuel</span><span>Teal buildings: homes for sale</span><span style="color:#45c4cb">SHINOBI</span><span style="color:#dce0da">LIARS</span><span style="color:#d7a35f">HYENAS</span><span style="color:#c879af">JESTERS</span></div></details>
     </div>
 
     <div id="title" class="title show">
@@ -98,17 +90,17 @@
         <p class="kicker">The city runs on borrowed fuel.</p>
         <h1>HOVER<span>JUICE</span></h1>
         <p class="title-statement">MAKE THE DROP.<br>MAKE IT HOME.</p>
-        <p class="lede">One board. Borrowed fuel. Move hot cargo through real streets and build a garage worth coming back to.</p>
-        <div class="title-brief"><span><b>01</b> RUN CARGO</span><span><b>02</b> KEEP YOUR HULL</span><span><b>03</b> CLAIM YOUR TURF</span></div>
+        <p class="lede">Run hot cargo through real streets. Build your garage. Make it home.</p>
+
         <div class="title-actions">
           <button id="btn-continue" class="btn buy big" style="display: none"></button>
           <button id="btn-new" class="btn big">Start a night shift ↗</button>
         </div>
-        <p class="muted small desktop-only">W/A/S/D drive · E switch Mag-Lock / Free Hover · Shift boost · Q overclock · V camera · H manual</p>
+
       </div>
     </div>
 
-    <div id="modal" class="modal">
+    <div id="modal" class="modal" role="dialog" aria-modal="true" aria-label="Game menu">
       <div class="modal-card">
         <button id="modal-close" class="close" aria-label="Close">✕</button>
         <div id="modal-body"></div>
