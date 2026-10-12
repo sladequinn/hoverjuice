@@ -1,4 +1,5 @@
 import {VEHICLE_SCALE} from './data'
+import {PAINTS} from './customization'
 import * as THREE from 'three'
 import type { World } from './world'
 import type { HoverjuiceSpray } from './hoverjuice'
@@ -12,11 +13,15 @@ export class TrafficSystem {
  private fleets:THREE.InstancedMesh[]=[]
  private matrix=new THREE.Matrix4()
  private rotation=new THREE.Quaternion()
+ private scale=new THREE.Vector3()
+ private tint=new THREE.Color()
+ private nearby:number[]=[]
+ private recycleClock=0
  private up=new THREE.Vector3(0,1,0)
  constructor(world:World){
   this.world=world
-  for(const color of [0x596d79,0x79694e,0x495e73]){
-   const mesh=new THREE.InstancedMesh(new THREE.BoxGeometry(2.1,1.1,4.6),new THREE.MeshStandardMaterial({color,roughness:0.72,metalness:0.15}),48)
+  for(let kind=0;kind<3;kind++){
+   const mesh=new THREE.InstancedMesh(new THREE.BoxGeometry(2.1,1.1,4.6),new THREE.MeshStandardMaterial({color:0xffffff,roughness:0.72,metalness:0.15}),64)
    mesh.count=0;mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);mesh.frustumCulled=false
    this.fleets.push(mesh);this.group.add(mesh)
   }
@@ -25,15 +30,28 @@ export class TrafficSystem {
  ensurePopulation(){
   const nodes=this.world.city.nodes,candidates=nodes.map((n,i)=>({n,i})).filter(({n})=>n.main&&n.adj.length)
   if(!candidates.length)return
-  const desired=Math.min(96,Math.max(24,Math.floor(nodes.length/70)))
+  const desired=Math.min(192,Math.max(72,Math.floor(nodes.length/35)))
   while(this.agents.length<desired){
    const seed=this.agents.length+1,a=candidates[(seed*7919)%candidates.length].i,b=nodes[a].adj[0]
-   this.agents.push({a,b,distance:0,speed:12,seed,kind:seed%3,pos:new THREE.Vector3(nodes[a].x,1.3,nodes[a].z),near:false,cooldown:0})
+   this.agents.push({a,b,distance:Math.hypot(nodes[b].x-nodes[a].x,nodes[b].z-nodes[a].z)*((seed*.61803398875)%1),speed:12,seed,kind:seed%3,pos:new THREE.Vector3(nodes[a].x,1.3,nodes[a].z),near:false,cooldown:0})
   }
  }
  update(dt:number,player:THREE.Vector3,playerSpeed=0,heat=0,spray?:HoverjuiceSpray):TrafficEvents {
   const events={nearMisses:0,impact:0,boxed:false},nodes=this.world.city.nodes,counts=[0,0,0]
   let closeHostiles=0
+  this.recycleClock-=dt
+  if(dt>0&&this.recycleClock<=0){
+   this.recycleClock=.5
+   const nearby=this.nearby;nearby.length=0
+   for(let i=0;i<nodes.length;i++){const n=nodes[i];if(!n.main||!n.adj.length)continue;const d=(n.x-player.x)**2+(n.z-player.z)**2;if(d>110**2&&d<450**2)nearby.push(i)}
+   let budget=3
+   for(const car of this.agents){
+    if(!nearby.length||budget<=0)break
+    if(car.pos.distanceToSquared(player)<700*700)continue
+    const pick=nearby[(car.seed*7919)%nearby.length]
+    car.a=pick;car.b=nodes[pick].adj[car.seed%nodes[pick].adj.length];car.distance=0;car.near=false;car.cooldown=1;budget--
+   }
+  }
   for(const car of this.agents){
    car.cooldown=Math.max(0,car.cooldown-dt)
    let a=nodes[car.a],b=nodes[car.b],len=Math.hypot(b.x-a.x,b.z-a.z)||1
@@ -61,12 +79,14 @@ export class TrafficSystem {
     if(d>9&&car.near){if(playerSpeed>25&&car.cooldown===0)events.nearMisses++;car.near=false}
    }
    this.rotation.setFromAxisAngle(this.up,heading)
-   const scale=car.kind===1?new THREE.Vector3(1.25,2,1.8):car.kind===0?new THREE.Vector3(0.7,0.5,0.8):new THREE.Vector3(1,1,1)
+   const scale=car.kind===1?this.scale.set(1.25,2,1.8):car.kind===0?this.scale.set(.7,.5,.8):this.scale.set(1,1,1)
    this.matrix.compose(car.pos,this.rotation,scale.multiplyScalar(VEHICLE_SCALE))
-   this.fleets[car.kind].setMatrixAt(counts[car.kind]++,this.matrix)
+   const slot=counts[car.kind]++
+   this.fleets[car.kind].setMatrixAt(slot,this.matrix)
+   this.fleets[car.kind].setColorAt(slot,this.tint.setHex(PAINTS[car.seed%PAINTS.length].color))
    if(d<65)spray?.emit(car,dt,car.pos,heading,car.speed,1.05*scale.x,2.3*scale.z,car.pos.y-1.3,false,.45)
   }
-  for(let i=0;i<3;i++){this.fleets[i].count=counts[i];this.fleets[i].instanceMatrix.needsUpdate=true}
+  for(let i=0;i<3;i++){this.fleets[i].count=counts[i];this.fleets[i].instanceMatrix.needsUpdate=true;if(this.fleets[i].instanceColor)this.fleets[i].instanceColor!.needsUpdate=true}
   events.boxed=closeHostiles>=3&&playerSpeed<2
   return events
  }

@@ -41,13 +41,13 @@ export class HoverjuiceSpray {
     }`,
    fragmentShader: `varying vec2 vUv; varying vec4 vEffect;
     void main(){
-     vec2 p=vUv*2.-1.; float r=length(p);
+     vec2 p=vUv*2.-1.; p.x*=.85+.3*sin(vEffect.w); float r=length(p);
      float angle=atan(p.y,p.x);
      float edge=.82+.07*sin(angle*7.+vEffect.w)+.05*sin(angle*11.-vEffect.w);
      float drop=1.-smoothstep(.3,1.,r);
      float filled=1.-smoothstep(edge-.16,edge,r);
      float rim=1.-smoothstep(.025,.09,abs(r-edge+.09));
-     float fingers=(1.-smoothstep(.06,.17,abs(r-(.62+.13*sin(angle*9.+vEffect.w)))));
+     float fingers=(1.-smoothstep(.06,.17,abs(r-(.62+.13*sin(angle*(5.+floor(mod(vEffect.w,4.)))+vEffect.w)))));
      float shape=vEffect.z>1.5 ? filled*.68+rim*.3 : (vEffect.z>.5 ? filled*.25+fingers*.75 : drop);
      float alpha=shape*vEffect.y;
      if(alpha<.008)discard;
@@ -103,7 +103,7 @@ export class HoverjuiceSpray {
    this.offsets[j] = pos.x + forwardZ * lateral + forwardX * longitudinal
    this.offsets[j+1] = Math.max(surfaceY + .12, pos.y - .55)
    this.offsets[j+2] = pos.z - forwardX * lateral + forwardZ * longitudinal
-   const rear = 1.5 + Math.min(7, Math.abs(speed) * .16), fan = side * (2 + Math.random() * 3.5)
+   const rear = 1.5 + Math.min(7, Math.abs(speed) * .16), fan = side * (.35 + Math.random() * 1.1)
    this.velocity[j] = -forwardX * rear + forwardZ * fan
    this.velocity[j+1] = -.7 - Math.random() * 1.2
    this.velocity[j+2] = -forwardZ * rear - forwardX * fan
@@ -118,8 +118,8 @@ export class HoverjuiceSpray {
   const lane=density>=1?0:1
   const i=768+lane*384+(this.poolCursor[lane]++%384),j=i*3,k=i*4
   this.offsets[j]=x;this.offsets[j+1]=y+.045;this.offsets[j+2]=z
-  this.age[i]=0;this.alive[i]=1;this.duration[i]=lane===0?6:2.8
-  this.size[i]=Math.max(.9,halfW*2.8)*(boosting?1.2:1)
+  this.age[i]=0;this.alive[i]=1;this.duration[i]=lane===0?2:.95
+  this.size[i]=Math.max(.9,halfW*(2.1+Math.random()*.65))*(boosting?1.2:1)
   this.appearance[k]=this.size[i];this.appearance[k+1]=.78
   this.appearance[k+2]=2;this.appearance[k+3]=Math.random()*6.28
  }
@@ -142,7 +142,7 @@ export class HoverjuiceSpray {
     this.appearance[k]=this.size[i]*(1+Math.min(1,this.age[i])* .4)
     this.appearance[k+1]=.78*Math.pow(Math.max(0,1-t),.65)
    } else {
-    this.appearance[k] = .45 + this.age[i] * 4.5
+    this.appearance[k] = .45 + this.age[i] * (2.2+this.appearance[k+3]*.22)
     this.appearance[k+1] = .85 * Math.max(0, 1 - this.age[i] / .65)
    }
    if (this.age[i] >= (this.appearance[k+2]===2 ? this.duration[i] : this.appearance[k+2]===1 ? .65 : .8)) {

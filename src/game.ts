@@ -1,3 +1,4 @@
+import { PAINTS, UPGRADES, normalizeBuilds, buildFor, tunedVehicle, upgradeCost, type GarageBuilds } from './customization'
 import {jobPair} from './jobs'
 import {GANG_INFO} from './gangs'
 import {GANGS,type Gang} from './filter'
@@ -31,6 +32,7 @@ interface Holding {
 }
 
 interface SaveData {
+  builds: GarageBuilds
   tutorial: TutorialState
   allegiance: Gang
   gangRep: Record<Gang,number>
@@ -81,6 +83,7 @@ export const money = (n: number) => '$' + Math.floor(n).toLocaleString('en-US')
 
 function defaultSave(): SaveData {
   return {
+    builds:{},
     tutorial:{stage:'ready'},
     allegiance:'SHINOBI',
     gangRep:{SHINOBI:0,LIARS:0,HYENAS:0,JESTERS:0},
@@ -104,7 +107,7 @@ function defaultSave(): SaveData {
 function loadSave(): SaveData {
   try {
     const raw = localStorage.getItem(SAVE_KEY)
-    if (raw) {const parsed=JSON.parse(raw);return { ...defaultSave(), ...parsed,tutorial:parsed.tutorial??{stage:'skipped'},allegiance:parsed.allegiance??(parsed.mask==='liar'?'LIARS':parsed.mask==='oni'?'HYENAS':parsed.mask==='jester'?'JESTERS':'SHINOBI')} }
+    if (raw) {const parsed=JSON.parse(raw);return { ...defaultSave(), ...parsed,builds:normalizeBuilds(parsed.builds),tutorial:parsed.tutorial??{stage:'skipped'},allegiance:parsed.allegiance??(parsed.mask==='liar'?'LIARS':parsed.mask==='oni'?'HYENAS':parsed.mask==='jester'?'JESTERS':'SHINOBI')} }
   } catch {
     /* corrupted save: start fresh */
   }
@@ -200,7 +203,7 @@ export class Game {
     scene.add(this.particles.mesh, this.spray.mesh)
     this.save.mask = validMask(this.save.mask)
     this.save.masks = [...new Set(["balaclava", ...this.save.masks.map(validMask)])]
-    this.player = new Player(vehicleById(this.save.current), this.save.mask)
+    this.player = new Player(tunedVehicle(this.save.current,this.save.builds), this.save.mask)
     this.run.hull=this.save.hull;this.run.heat=this.save.heat;this.run.notoriety=this.save.notoriety
     this.juice = this.player.spec.tank
     scene.add(this.player.mesh)
@@ -908,12 +911,35 @@ export class Game {
 
   selectVehicle(id: string) {
     if (!this.save.owned.includes(id)) return
-    const v = vehicleById(id)
+    const v = tunedVehicle(id,this.save.builds)
     const ratio = this.juice / this.player.spec.tank
     this.player.setSpec(v)
     this.juice = v.tank * ratio
     this.save.current = id
     if (this.player.mode === 'free' && this.player.targetAlt > v.maxAlt) this.player.targetAlt = v.maxAlt
+    this.persist()
+    this.openModal('garage')
+  }
+
+  customizeVehicle(kind:'paint'|'upgrade',arg:string){
+    const id=this.save.current
+    if(!this.save.owned.includes(id))return
+    const build={...buildFor(this.save.builds,id)}
+    if(kind==='paint'){
+      if(arg!=='factory'&&!PAINTS.some(p=>p.id===arg))return
+      build.paint=arg==='factory'?undefined:arg
+    }else{
+      const upgrade=UPGRADES.find(u=>u.id===arg)
+      if(!upgrade)return
+      const level=build[upgrade.id],cost=upgradeCost(id,level)
+      if(level>=3||this.save.money<cost)return
+      this.save.money-=cost;build[upgrade.id]++
+    }
+    this.save.builds[id]=build
+    // Preserve litres: fitting a larger tank does not dispense free fuel.
+    const fuel=this.juice
+    this.selectVehicle(id)
+    this.juice=Math.min(fuel,this.player.spec.tank)
     this.persist()
     this.openModal('garage')
   }
@@ -1036,6 +1062,8 @@ export class Game {
         void this.warp(name.join('|'), Number(lat), Number(lon), act==='couch')
         break
       }
+      case 'paint': this.customizeVehicle('paint',arg); break
+      case 'upgrade': this.customizeVehicle('upgrade',arg); break
       case 'view': this.openModal(arg); break
       case 'close': this.closeModal(); break
       case 'challenge': this.challenge(); break
@@ -1175,7 +1203,8 @@ export class Game {
       case 'garage': {
         const max = { speed: 95, tank: 120, pay: 15 }
         const bar = (v: number, m: number) => `<div class="bar"><i style="width:${Math.min(100, (v / m) * 100)}%"></i></div>`
-        const cards = VEHICLES.map((v) => {
+        const cards = VEHICLES.map((base) => {
+          const v=tunedVehicle(base.id,s.builds)
           const owned = s.owned.includes(v.id)
           const current = s.current === v.id
           const afford = s.money >= v.price
@@ -1194,9 +1223,13 @@ export class Game {
               <label>Evaporation <span>${v.evap.toFixed(3)} L/s</span></label>
             </div>${btn}</div>`
         }).join('')
+        const build=buildFor(s.builds,s.current)
+        const workshop=`<div class="card current"><p class="kicker">CUSTOM SHOP · ${esc(this.player.spec.name)}</p><h3>Paint & performance</h3><p class="muted">Paint is free. Upgrades stay with this vehicle. Three stages per system.</p>
+          <div class="paint-options"><button class="btn" data-act="paint" data-arg="factory" ${!build.paint?'disabled':''}>Factory paint</button>${PAINTS.map(p=>`<button class="btn" data-act="paint" data-arg="${p.id}" aria-pressed="${build.paint===p.id}" ${build.paint===p.id?'disabled':''}><span style="display:inline-block;width:14px;height:14px;background:#${p.color.toString(16).padStart(6,'0')};border:1px solid #aaa;margin-right:6px"></span>${p.name}</button>`).join('')}</div>
+          <div class="grid">${UPGRADES.map(u=>{const level=build[u.id],cost=upgradeCost(s.current,level);return `<div class="card"><h3>${u.name} · ${level}/3</h3><p class="muted">${u.description}</p><button class="btn" data-act="upgrade" data-arg="${u.id}" ${level>=3||s.money<cost?'disabled':''}>${level>=3?'Fully upgraded':`Stage ${level+1} · ${money(cost)}`}</button></div>`}).join('')}</div></div>`
         return `<h2>Garage</h2><p>Net worth ${money(this.netWorth)} · Notoriety ${this.run.notoriety} · Vault ${money(s.vaultCash)}</p><div class="row"><button class="btn" data-act="stash">Bank cash & cargo (B)</button><button class="btn" data-act="withdraw">Withdraw (U)</button></div><p class="muted">From gutter deck to Hoverghini. Bigger rides unlock richer cargo classes, but drink more HJ-77.</p>
           <div class="row test-funds"><span class="muted small">Playtesting?</span><button class="btn buy" data-act="cheat">+$5,000,000 test funds</button></div>
-          <div class="grid">${cards}</div>`
+          <div>${workshop}</div><div class="grid">${cards}</div>`
       }
       case 'masks': {
         this.maskThumbs()

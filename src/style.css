@@ -457,3 +457,7 @@ body.is-touch.test-flight .toast{bottom:calc(388px + env(safe-area-inset-bottom)
 body.is-touch .territory-status{font-size:8px}
 body.is-touch .tutorial-tip{top:145px;left:10px;width:calc(100% - 105px);font-size:11px;padding:8px}
 body.training .turn{top:245px}
+
+/* Paint choices must remain reachable on narrow touch screens. */
+.paint-options{display:grid;grid-template-columns:repeat(auto-fit,minmax(96px,1fr));gap:8px;margin:12px 0 20px}
+.paint-options .btn{min-width:0;min-height:48px;white-space:normal;font-size:12px;padding:10px 6px}
