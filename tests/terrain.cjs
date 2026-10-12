@@ -21,6 +21,7 @@ const assert=require('node:assert/strict');
    const {HoverjuiceSpray}=await import('/src/hoverjuice.ts');
    const {buildVehicleMesh}=await import('/src/vehicle.ts');
    const {VEHICLES}=await import('/src/data.ts');
+   const {routeGuide}=await import('/src/route-guide.ts');
    const originalFetch=window.fetch;
    window.fetch=async(url,options)=>{
     if(!String(url).includes('elevation-tiles-prod'))return originalFetch(url,options);
@@ -32,16 +33,19 @@ const assert=require('node:assert/strict');
    if(!dem.enabled)throw Error('Terrarium decoding failed');
    window.fetch=originalFetch;
    const datum=dem.datum,range=[dem.heightAt(-500,-500),dem.heightAt(500,500)];
-   // Deterministic steep slope exercises actual World receivers and road depth bias.
+   // Uneven DEM cells exercise asphalt draping, depth occlusion and route receivers.
    const terrain=new TerrainField(43.45,-80.49);
    for(let px=-1;px<=0;px++)for(let pz=-1;pz<=0;pz++){
-    const data=new Float32Array(4225);for(let z=0;z<65;z++)for(let x=0;x<65;x++)data[z*65+x]=(pz*2048+z*32)*.12;
+    const data=new Float32Array(4225);for(let z=0;z<65;z++)for(let x=0;x<65;x++)data[z*65+x]=(pz*2048+z*32)*.12+2*Math.sin((px*2048+x*32)/23)*Math.sin((pz*2048+z*32)/27);
     terrain.patches.set(`${px},${pz}`,data);
    }
    const city=proceduralCity('Slope test',43.45,-80.49);city.procedural=false;city.terrain=terrain;city.buildings=[];city.roads=[];city.nodes=[];city.waters=[];city.venues=[];
    const stream=new MapStreamer(city,'unused');stream.addRoad([[-80.49,43.4504],[-80.49,43.4496]],6,true,{});
    city.buildings.push(makeBuilding([[10,5],[17,5],[17,18],[10,18]],10));
    const world=new World(city),scene=new THREE.Scene();scene.background=new THREE.Color(0x080e16);scene.add(world.group,new THREE.HemisphereLight(0xb8d9ee,0x34302b,2));
+   const points=routeGuide(world,city.roads[0].nodeIds);
+   scene.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(points),new THREE.LineBasicMaterial({color:0xffbb00})));
+   if(!world.group.children.filter(o=>o.name==='terrain-elevation').every(o=>o.material.depthWrite))throw Error('Terrain must occlude hidden geometry');
    const camera=new THREE.PerspectiveCamera(45,4/3,.1,500);camera.position.set(7,6,-11);camera.lookAt(0,0,3);
    const car=buildVehicleMesh(VEHICLES.find(v=>v.kind==='sedan')??VEHICLES[1]);car.position.set(0,1.3,0);scene.add(car);
    const spray=new HoverjuiceSpray();spray.surfaceHeight=(x,z,y)=>world.surfaceHeightAt(x,z,y);scene.add(spray.mesh);

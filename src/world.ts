@@ -1,3 +1,4 @@
+import {drapeTriangles} from './terrain-drape'
 import {TERRAIN_SIZE,TERRAIN_STEP} from './terrain'
 import {SurfaceIndex} from './surfaces'
 import {ROAD_MARKINGS,laneOffset} from './streets'
@@ -128,7 +129,7 @@ export class World {
       const pos=geo.attributes.position
       for(let i=0;i<pos.count;i++)pos.setXYZ(i,px*TERRAIN_SIZE+(i%65)*TERRAIN_STEP,data[i]-.025,pz*TERRAIN_SIZE+Math.floor(i/65)*TERRAIN_STEP)
       geo.computeVertexNormals()
-      const material=asphaltMaterial(0x191f23);material.depthWrite=false
+      const material=asphaltMaterial(0x191f23);material.depthWrite=true
       material.stencilWrite=true;material.stencilRef=1;material.stencilFunc=THREE.NotEqualStencilFunc
       const mesh=new THREE.Mesh(geo,material);mesh.name='terrain-elevation';mesh.renderOrder=2;this.group.add(mesh)
     }
@@ -279,6 +280,7 @@ export class World {
     for (let ri = from; ri < this.city.roads.length; ri++) {
       if((ri-from)%16===0)yield
       const road = this.city.roads[ri]
+      const starts=[pos.length,paint.length,line.length,lineMajor.length]
       for(let edge=1;edge<road.pts.length;edge++) {
         const a=road.pts[edge-1],b=road.pts[edge],pad=road.width
         for(let x=Math.floor((Math.min(a[0],b[0])-pad)/CELL);x<=Math.floor((Math.max(a[0],b[0])+pad)/CELL);x++)for(let z=Math.floor((Math.min(a[1],b[1])-pad)/CELL);z<=Math.floor((Math.max(a[1],b[1])+pad)/CELL);z++){
@@ -304,7 +306,7 @@ export class World {
           const innerA=streetCorner(a,y1,dX,dZ,w,side,branchesA,true),innerB=streetCorner(b,y2,dX,dZ,w,side,branchesB,false)
           const outerA=streetCorner(a,y1,dX,dZ,w+pavement,side,branchesA,true),outerB=streetCorner(b,y2,dX,dZ,w+pavement,side,branchesB,false)
           const polygons=paving.cut([innerA,innerB,outerB,outerA],(y1+y2)/2,Math.min(y1,y2),Math.max(y1,y2))
-          const heightAt=(p:Pt)=>y1+(y2-y1)*Math.max(0,Math.min(1,((p[0]-x1)*dX+(p[1]-z1)*dZ)/len))
+          const heightAt=(p:Pt)=>this.city.terrain?.enabled?this.terrainHeightAt(p[0],p[1]):y1+(y2-y1)*Math.max(0,Math.min(1,((p[0]-x1)*dX+(p[1]-z1)*dZ)/len))
           appendPavement(sidewalks,polygons,heightAt)
           // World-distance stations, not one lamp for every short MVT segment.
           const phase=((-(x1*dX+z1*dZ))%32+32)%32
@@ -343,6 +345,9 @@ export class World {
         }
         if(len>startGap+endGap)for(const offset of lanes>0?[-lanes,0,lanes]:[0])strip(road.major?lineMajor:line,startGap,len-endGap,offset,ROAD_MARKINGS.railWidth,.08)
 
+      }
+      if(this.city.terrain?.enabled&&!road.bridge&&!road.tunnel){
+        [pos,paint,line,lineMajor].forEach((arr,j)=>drapeTriangles(arr,starts[j],(x,z)=>this.terrainHeightAt(x,z),[.05,.073,.08,.08][j]))
       }
     }
     for(const arr of [tunnelWalls,tunnelCaps])if(arr.length){
@@ -479,7 +484,7 @@ export class World {
       const h=(road.heights?.[i-1]??0)*(1-t)+(road.heights?.[i]??0)*t
       if(d<road.width/2 && Math.abs(h+1.3-y)<best) {height=h;best=Math.abs(h+1.3-y)}
     }
-    return height
+    return this.surfaceHeightAt(x,z,height)
   }
 
   isTunnel(x:number,z:number,y:number){

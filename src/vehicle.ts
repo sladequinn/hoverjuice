@@ -431,8 +431,10 @@ export class Player {
       this.hopV -= 26 * dt
       this.hopY = Math.max(0, this.hopY + this.hopV * dt)
       if (this.hopY === 0) this.hopV = Math.max(0, this.hopV)
-      const hoverY = (a.y??0)*(1-t)+(b.y??0)*t + (hasJuice ? HOVER : 0.55) + this.hopY + Math.sin(performance.now() / 300) * 0.05
-      this.pos.y += (hoverY - this.pos.y) * Math.min(1, dt * (this.hopY > 0 ? 20 : 4))
+      const railY=(a.y??0)*(1-t)+(b.y??0)*t
+      const surfaceY=world.surfaceHeightAt(this.pos.x,this.pos.z,railY)
+      const hoverY = surfaceY + (hasJuice ? HOVER : 0.55) + this.hopY + Math.sin(performance.now() / 300) * 0.05
+      this.pos.y = Math.max(surfaceY+.65,this.pos.y + (hoverY - this.pos.y) * Math.min(1, dt * (this.hopY > 0 ? 20 : 4)))
       this.vel.set(Math.sin(this.heading) * this.speed, Math.cos(this.heading) * this.speed)
       if(world.hitBuilding(this.pos.x,this.pos.z,this.pos.y-0.5)>=0) {
         const cx=a.x+(b.x-a.x)*t, cz=a.z+(b.z-a.z)*t

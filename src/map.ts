@@ -1,3 +1,4 @@
+import {gradeStructures} from './road-profile'
 import {TerrainField} from './terrain'
 import { buildingId, criminalEligible, protectedVenue, syndicate, type Tags, type Gang } from './filter'
 import { LANDMARK_NAMES } from './data'
@@ -37,6 +38,8 @@ export interface RoadNode {
 }
 
 export interface Road {
+  nodeIds?:number[]
+  deck?:number
   requestedWidth?: number
   sidewalkWidth?: number
   heights?: number[]
@@ -344,10 +347,13 @@ export class MapStreamer {
       const t = Math.min(1, i / 3, (kept.length - 1 - i) / 3)
       return (this.city.terrain?.heightAt(x,z)??0) + deck * t * t * (3 - 2 * t)
     })
-    this.city.roads.push({ pts: kept, heights, width, major, bridge, tunnel, name: String(tags.name || '') })
+    const nodeIds:number[]=[]
+    this.city.roads.push({ pts: kept, heights, width, major, bridge, tunnel, deck, nodeIds, name: String(tags.name || '') })
     let prev = this.node(kept[0], heights[0], tunnel, width)
+    nodeIds.push(prev)
     for (let i = 1; i < kept.length; i++) {
       const next = this.node(kept[i], heights[i], tunnel, width)
+      nodeIds.push(next)
       const edge = prev < next ? `${prev}:${next}` : `${next}:${prev}`
       if (!this.roadSegments.has(edge)) {
         this.roadSegments.add(edge)
@@ -481,6 +487,7 @@ export class MapStreamer {
         }
       }
       if (!tiles) throw new Error('Map tile network unavailable')
+      gradeStructures(this.city)
       finalizeGraph(this.city.nodes)
       this.city.landmarks=pickLandmarks(this.city.key,this.city.buildings)
       let extent = RADIUS

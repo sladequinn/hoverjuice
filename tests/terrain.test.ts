@@ -56,3 +56,27 @@ test('unavailable initial DEM stays flat for the session and aborts do not disab
   await assert.rejects(g.ensure(-10,-10,10,10,controller.signal));assert.equal(g.enabled,true)
  }finally{globalThis.fetch=original}
 })
+
+import {gradeStructures} from '../src/road-profile'
+import {drapeTriangles} from '../src/terrain-drape'
+import {routeGuide} from '../src/route-guide'
+test('connected bridge fragments keep a continuous deck and only ramp at span ends',()=>{
+ const city=proceduralCity('bridge',0,0);city.roads=[];city.nodes=[];city.buildings=[];city.waters=[];city.venues=[]
+ const stream=new MapStreamer(city,'unused') as any
+ stream.addRoad([[0,0],[.001,0]],6,true,{bridge:'yes'})
+ stream.addRoad([[.001,0],[.002,0]],6,true,{bridge:'yes'})
+ gradeStructures(city)
+ const joint=city.roads[0].nodeIds!.at(-1)!
+ assert.equal(city.nodes[joint].y,5);assert.equal(city.roads[1].heights![0],5)
+ assert.equal(city.roads[0].heights![0],0);assert.equal(city.roads[1].heights!.at(-1),0)
+ const w=new World(city),points=routeGuide(w,[...city.roads[0].nodeIds!,...city.roads[1].nodeIds!.slice(1)])
+ for(const p of points)assert.ok(Math.abs(p.y-w.surfaceHeightAt(p.x,p.z,p.y-.1)-.1)<.001)
+ w.dispose()
+})
+test('road draping follows both halves of uneven terrain cells without buried triangle interiors',()=>{
+ const field=new TerrainField(0,0),data=new Float32Array(4225);data[66]=8;data[1]=2;data[65]=-3;field.patches.set('0,0',data)
+ const vertices=[1,0,1,31,0,1,31,0,31,1,0,1,31,0,31,1,0,31]
+ drapeTriangles(vertices,0,(x,z)=>field.heightAt(x,z),.05)
+ assert.ok(vertices.length>18)
+ for(let i=0;i<vertices.length;i+=9){const x=(vertices[i]+vertices[i+3]+vertices[i+6])/3,z=(vertices[i+2]+vertices[i+5]+vertices[i+8])/3,y=(vertices[i+1]+vertices[i+4]+vertices[i+7])/3;assert.ok(Math.abs(y-field.heightAt(x,z)-.05)<.0001)}
+})
