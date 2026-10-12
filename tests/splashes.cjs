@@ -27,8 +27,8 @@ const assert=require('node:assert/strict');
    const spray=new HoverjuiceSpray();scene.add(spray.mesh);
    const pos=new THREE.Vector3(0,1.3,0);
    // Freeze a boosted moving trail with the vehicle at its final location.
-   for(let i=0;i<60;i++){
-    pos.z=(i-59)*.13;
+   for(let i=0;i<180;i++){
+    pos.z=(i-179)*.35;
     spray.emit(car,1/60,pos,0,35,car.userData.halfW,car.userData.halfL,0,true);
     spray.update(1/60);
    }
