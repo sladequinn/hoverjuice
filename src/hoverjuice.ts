@@ -3,8 +3,10 @@ import * as THREE from 'three'
 interface Emitter { credit:number; distance:number; idle:number; x:number; z:number; y:number }
 /** Airborne spray, impact splashes and persistent liquid share one bounded draw call. */
 export class HoverjuiceSpray {
+ surfaceHeight?: (x:number,z:number,reference:number)=>number
  readonly capacity = 1536
  readonly mesh: THREE.Mesh<THREE.InstancedBufferGeometry, THREE.ShaderMaterial>
+ private growth = new Float32Array(1536)
  private offsets = new Float32Array(this.capacity * 3)
  private appearance = new Float32Array(this.capacity * 4)
  private velocity = new Float32Array(this.capacity * 3)
@@ -17,31 +19,37 @@ export class HoverjuiceSpray {
  private poolCursor = [0, 0]
  private cursor = 0
  constructor() {
-  const plane = new THREE.PlaneGeometry(1, 1)
+  const plane = new THREE.PlaneGeometry(1, 1, 4, 4)
   const geometry = new THREE.InstancedBufferGeometry()
   geometry.index = plane.index
   geometry.setAttribute('position', plane.attributes.position)
   geometry.setAttribute('uv', plane.attributes.uv)
   geometry.setAttribute('offset', new THREE.InstancedBufferAttribute(this.offsets, 3).setUsage(THREE.DynamicDrawUsage))
   geometry.setAttribute('appearance', new THREE.InstancedBufferAttribute(this.appearance, 4).setUsage(THREE.DynamicDrawUsage))
+  for(let row=0;row<7;row++)geometry.setAttribute('surface'+row,new THREE.InstancedBufferAttribute(new Float32Array(this.capacity*4),4).setUsage(THREE.DynamicDrawUsage))
+  geometry.setAttribute('growth',new THREE.InstancedBufferAttribute(this.growth,1).setUsage(THREE.DynamicDrawUsage))
   geometry.instanceCount = this.capacity
   const material = new THREE.ShaderMaterial({
    transparent: true, depthWrite: false, side: THREE.DoubleSide,
    blending: THREE.NormalBlending,
    vertexShader: `attribute vec3 offset;
-    attribute vec4 appearance;
-    varying vec2 vUv; varying vec4 vEffect;
+    attribute vec4 appearance; attribute vec4 surface0; attribute vec4 surface1; attribute vec4 surface2; attribute vec4 surface3; attribute vec4 surface4; attribute vec4 surface5; attribute vec4 surface6; attribute float growth;
+    varying vec2 vUv; varying vec4 vEffect; varying float vGrowth;
     void main(){
-     vUv=uv; vEffect=appearance;
+     vUv=uv; vEffect=appearance;vGrowth=growth;
      vec4 center=modelViewMatrix*vec4(offset,1.);
      if(appearance.z>.5){
-      center=modelViewMatrix*vec4(offset+vec3(position.x,0.,position.y)*appearance.x,1.);
+      float index=floor(2.-position.y*4.+.5)*5.+floor(position.x*4.+2.+.5);
+      float bank=floor(index/4.),component=mod(index,4.);
+      vec4 row=bank<.5?surface0:bank<1.5?surface1:bank<2.5?surface2:bank<3.5?surface3:bank<4.5?surface4:bank<5.5?surface5:surface6;
+      float h=component<.5?row.x:component<1.5?row.y:component<2.5?row.z:row.w;
+      center=modelViewMatrix*vec4(offset.x+position.x*appearance.x,h,offset.z+position.y*appearance.x,1.);
      }else{center.xy+=position.xy*vec2(.6,1.5)*appearance.x;}
      gl_Position=projectionMatrix*center;
     }`,
-   fragmentShader: `varying vec2 vUv; varying vec4 vEffect;
+   fragmentShader: `varying vec2 vUv; varying vec4 vEffect; varying float vGrowth;
     void main(){
-     vec2 p=vUv*2.-1.; p.x*=.85+.3*sin(vEffect.w); float r=length(p);
+     vec2 p=(vUv*2.-1.)/(vEffect.z>.5?max(.1,vGrowth):1.); p.x*=.85+.3*sin(vEffect.w); float r=length(p);
      float angle=atan(p.y,p.x);
      float edge=.82+.07*sin(angle*7.+vEffect.w)+.05*sin(angle*11.-vEffect.w);
      float drop=1.-smoothstep(.3,1.,r);
@@ -60,6 +68,7 @@ export class HoverjuiceSpray {
   this.mesh = new THREE.Mesh(geometry, material)
   this.mesh.name = 'hoverjuice-splashes'
   this.mesh.frustumCulled = false
+  this.mesh.renderOrder=5
  }
  get activeCount() { return this.alive.reduce((sum, n) => sum + n, 0) }
  emit(key: object, dt: number, pos: THREE.Vector3, heading: number, speed: number,
@@ -119,9 +128,19 @@ export class HoverjuiceSpray {
   const i=768+lane*384+(this.poolCursor[lane]++%384),j=i*3,k=i*4
   this.offsets[j]=x;this.offsets[j+1]=y+.045;this.offsets[j+2]=z
   this.age[i]=0;this.alive[i]=1;this.duration[i]=lane===0?2:.95
-  this.size[i]=Math.max(.9,halfW*(2.1+Math.random()*.65))*(boosting?1.2:1)
+  this.size[i]=Math.max(.65,halfW*(2.1+Math.random()*.65))*(boosting?1.2:1)*1.4
   this.appearance[k]=this.size[i];this.appearance[k+1]=.78
   this.appearance[k+2]=2;this.appearance[k+3]=Math.random()*6.28
+  this.growth[i]=.72;this.project(i,y)
+ }
+ private project(i:number,reference:number){
+  const j=i*3,size=this.appearance[i*4]
+  for(let row=0;row<5;row++)for(let col=0;col<5;col++){
+   const x=this.offsets[j]+(col-2)*size/4,z=this.offsets[j+2]+(2-row)*size/4
+   const h=(this.surfaceHeight?.(x,z,reference)??reference)+.025
+   const vertex=row*5+col
+   ;(this.mesh.geometry.attributes['surface'+Math.floor(vertex/4)].array as Float32Array)[i*4+vertex%4]=h
+  }
  }
  update(dt: number) {
   if (dt <= 0) return
@@ -134,21 +153,24 @@ export class HoverjuiceSpray {
     this.velocity[j+1] -= 12 * dt
     for (let axis=0; axis<3; axis++) this.offsets[j+axis] += this.velocity[j+axis] * dt
     this.appearance[k+1] = .9 * Math.max(0, 1 - this.age[i] / .8)
+    if(this.surfaceHeight && this.offsets[j+1]<this.floor[i]+.5)this.floor[i]=this.surfaceHeight(this.offsets[j],this.offsets[j+2],this.floor[i])+.025
     if (this.offsets[j+1] <= this.floor[i]) {
      this.offsets[j+1] = this.floor[i]; this.appearance[k+2] = 1; this.age[i] = 0
+     this.appearance[k]=.8+Math.random()*.6;this.growth[i]=.35;this.project(i,this.floor[i]-.025)
     }
    } else if(this.appearance[k+2]===2){
     const t=this.age[i]/this.duration[i]
-    this.appearance[k]=this.size[i]*(1+Math.min(1,this.age[i])* .4)
+    this.growth[i]=.72+Math.min(1,this.age[i])*.28
     this.appearance[k+1]=.78*Math.pow(Math.max(0,1-t),.65)
    } else {
-    this.appearance[k] = .45 + this.age[i] * (2.2+this.appearance[k+3]*.22)
+    this.growth[i] = Math.min(1,.35+this.age[i]*1.4)
     this.appearance[k+1] = .85 * Math.max(0, 1 - this.age[i] / .65)
    }
    if (this.age[i] >= (this.appearance[k+2]===2 ? this.duration[i] : this.appearance[k+2]===1 ? .65 : .8)) {
     this.alive[i] = 0; this.appearance[k+1] = 0
    }
   }
+  for(const name of ['surface0','surface1','surface2','surface3','surface4','surface5','surface6','growth'])this.mesh.geometry.attributes[name].needsUpdate=true
   this.mesh.geometry.attributes.offset.needsUpdate = true
   this.mesh.geometry.attributes.appearance.needsUpdate = true
  }

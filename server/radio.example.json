@@ -1,0 +1,7 @@
+{
+  "shinobi": [{"title":"Slade's rotation","url":"https://your-audio-host.example/slade.mp3"}],
+  "liars": [{"title":"White Lie's rotation","url":"https://your-audio-host.example/white-lie.mp3"}],
+  "hyenas": [{"title":"Fasa's rotation","url":"https://your-audio-host.example/fasa.mp3"}],
+  "jesters": [{"title":"Freckles' rotation","url":"https://your-audio-host.example/freckles.mp3"}],
+  "talk": [{"title":"Dead Air: Episode 1","url":"https://your-audio-host.example/talk-01.mp3"}]
+}

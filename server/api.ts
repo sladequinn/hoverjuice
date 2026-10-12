@@ -1,5 +1,6 @@
+import {parseRadioConfig} from '../src/radio-config'
 export { Geocoder } from './geocoder'
-interface Env {DB:D1Database; ALLOWED_ORIGIN:string; GEOCODER:DurableObjectNamespace}
+interface Env {RADIO_CONFIG_JSON?:string;DB:D1Database; ALLOWED_ORIGIN:string; GEOCODER:DurableObjectNamespace}
 /** Read gateway. Do not expose claim/record writes until server-side identity and economy validation exist. */
 export default {
  async fetch(request:Request,env:Env):Promise<Response>{
@@ -9,6 +10,10 @@ export default {
   if(url.pathname==='/api/geocode'){
     try{const res=await env.GEOCODER.get(env.GEOCODER.idFromName('global')).fetch(request);return new Response(res.body,{status:res.status,headers})}
     catch{return new Response('{"error":"Geocoder unavailable"}',{status:503,headers})}
+  }
+  if(url.pathname==='/api/radio'){
+   try{return new Response(JSON.stringify(parseRadioConfig(JSON.parse(env.RADIO_CONFIG_JSON??'{}'))),{headers:{...headers,'Cache-Control':'public, max-age=60'}})}
+   catch{return new Response('{"error":"Invalid radio configuration"}',{status:503,headers})}
   }
   const tile=url.searchParams.get('tile')??''
   if(!/^14_\d{1,5}_\d{1,5}$/.test(tile)||tile.split('_').slice(1).some(n=>Number(n)>16383))return new Response('{"error":"Invalid tile"}',{status:400,headers})

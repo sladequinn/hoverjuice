@@ -1,3 +1,4 @@
+import {laneOffset,MAX_LANE_OFFSET} from './streets'
 import { OVERCLOCK_SPEED } from './dynamics'
 import * as THREE from 'three'
 import {softDisc} from './art'
@@ -19,7 +20,7 @@ export interface Input {
 export type FlightMode = 'mag' | 'free'
 
 const HOVER = 1.3
-const SWAY_MAX = 3.2
+const SWAY_MAX = MAX_LANE_OFFSET
 
 function wedge(w: number, h: number, l: number, taper: number) {
   const g = new THREE.BoxGeometry(w, h, l, 1, 1, 4)
@@ -286,7 +287,7 @@ export class Player {
     const h = fwd ? dir : dir + Math.PI
     const side = (this.pos.x - cx) * Math.cos(h) - (this.pos.z - cz) * Math.sin(h)
     this.sway = Math.max(-SWAY_MAX, Math.min(SWAY_MAX, side))
-    this.laneIndex = Math.max(0, Math.min(2, 1 - Math.round(this.sway / 3.2)))
+    this.laneIndex = Math.max(0, Math.min(2, 1 - Math.round(this.sway / Math.max(.01,laneOffset(Math.min(world.city.nodes[this.edgeA].width??5,world.city.nodes[this.edgeB].width??5),this.mesh.userData.halfW)))))
     this.swayV = 0
     this.mode = 'mag'
     this.turnRequest=this.turnMemory=this.steerLatch=0
@@ -418,7 +419,7 @@ export class Player {
       this.steerLatch=steer
       const oldSway=this.sway
       const chassisHalfWidth=this.mesh.userData.halfW as number
-      const laneWidth=Math.min(3.2,Math.max(0,Math.min(a.width??5,b.width??5)/2-chassisHalfWidth-0.5))
+      const laneWidth=laneOffset(Math.min(a.width??5,b.width??5),chassisHalfWidth)
       this.sway += (((1-this.laneIndex)*laneWidth)-this.sway)*(1-Math.exp(-18*dt))
       this.swayV=(this.sway-oldSway)/Math.max(dt,0.001)
       const lx = Math.cos(target), lz = -Math.sin(target)

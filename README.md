@@ -80,3 +80,13 @@ Fresh saves automatically start a short, untimed legal courier tutorial. The pic
 Normal jobs have pickup sites at least 900 m apart, 650 m–4 km from the player, and endpoints 1.6–5 km apart. Distance ranges are straight-line selection bounds; actual street routes may be longer. Sparse loaded maps return fewer offers rather than crowding them together. The introductory courier route deliberately stays short.
 
 Gangs: SHINOBI / SLADE, LIARS / WHITE LIE, HYENAS / FASA, JESTERS / FRECKLES. Map colours and borders, driving HUD and Heat rules share one territory resolver. OSM commercial, industrial, residential and retail districts define control; stable geographic cells fill unknown areas and retain their identity across city origins. Gangs tab lets the player select affiliation independently of mask perks. Successful deliveries add local respect; the first WHITE LIE deal adds LIARS respect. Rival cargo Heat increases and Balaclava mitigation remain active. This is local faction affiliation/respect and territory control, not multiplayer turf conquest or new gang combat AI.
+
+### Radio playlists
+
+Open **More → Radio stations**. There are four gang frequencies, a procedural Police Scanner, and the Dead Air talk station. Playback starts only after a tap, continues while driving, and pauses when the tab is hidden. The scanner uses the browser's speech voice when available and always displays its dispatch transcript. It responds to local Heat, speed, and gang territory. Volume is saved locally.
+
+**Backend playlist control:** in the existing Cloudflare API Worker's variables, set `RADIO_CONFIG_JSON` to the JSON structure in `server/radio.example.json`, replacing the placeholder URLs. You can also edit the variable in `wrangler.toml` and deploy the Worker. Each station accepts up to 100 `{ "title": "...", "url": "https://..." }` entries. `GET /api/radio` publishes the validated playlist with a 60-second cache. The game uses this endpoint when `VITE_API_BASE` is configured. Tap **Refresh stations** after changes (allow for that cache). No frontend redeploy is needed for backend playlist edits. Keep dashboard-managed variables synchronized before a later Wrangler deployment.
+
+**GitHub Pages without an API:** edit `public/radio.json` with the same structure and deploy the site. Leave `VITE_API_BASE` unset. There is no requirement to move the game to Vercel.
+
+Use direct HTTPS audio files or browser-playable live streams, not Spotify/YouTube webpage links. Entries play in order and loop; live streams continue until stopped or skipped. Audio URLs are public, so do not embed private credentials. No music is bundled: empty stations report “No broadcast configured.” The Police Scanner needs no URL or backend.

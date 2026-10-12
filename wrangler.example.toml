@@ -3,6 +3,8 @@ main = "server/api.ts"
 compatibility_date = "2026-10-01"
 
 [vars]
+# Public playlist JSON; may also be set in the deployed Worker dashboard.
+RADIO_CONFIG_JSON = '{"shinobi":[],"liars":[],"hyenas":[],"jesters":[],"talk":[]}'
 ALLOWED_ORIGIN = "https://YOUR-HOVERJUICE-HOST"
 APP_CONTACT = "mailto:YOUR-CONTACT-EMAIL"
 NOMINATIM_URL = "https://nominatim.openstreetmap.org/search"

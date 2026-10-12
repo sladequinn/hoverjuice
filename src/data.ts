@@ -1,5 +1,5 @@
 // Shared world scale for player, dealer, boss, traffic and remote vehicles.
-export const VEHICLE_SCALE = 0.75
+export const VEHICLE_SCALE = 0.55
 export type VehicleKind = 'board' | 'compact' | 'truck' | 'luxury' | 'super'
 
 export interface VehicleSpec {
