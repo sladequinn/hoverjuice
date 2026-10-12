@@ -106,7 +106,7 @@ export class DealerSystem {
     const missing=SYNDICATE_LEADERS.map((leader,index)=>({leader,index})).filter(({leader})=>!this.dealers.some(d=>d.gang===leader.gang && Math.hypot(d.x-this.centerX,d.z-this.centerZ)<4500))
     if(!missing.length)return
     const candidates = city.nodes.map((node,i)=>({node,i}))
-      .filter(({node,i})=>node.adj.length>0 && Math.hypot(node.x-this.centerX,node.z-this.centerZ)<3800 && !node.tunnel && Math.abs(node.y??0)<0.5 &&
+      .filter(({node,i})=>node.adj.length>0 && Math.hypot(node.x-this.centerX,node.z-this.centerZ)<3800 && !node.tunnel && Math.abs((node.y??0)-(this.world.city.terrain?.heightAt(node.x,node.z)??0))<0.5 &&
         !this.dealers.some(d=>d.node===i) && this.world.eligibleAt(node.x,node.z))
       .sort((a,b)=>Math.hypot(a.node.x,a.node.z)-Math.hypot(b.node.x,b.node.z) || hash(`${city.key}:${a.i}`)-hash(`${city.key}:${b.i}`))
     for(const {leader,index} of missing) {
@@ -129,7 +129,7 @@ export class DealerSystem {
             // Check the parked car envelope, not just its centre.
             const spec=vehicleById(leader.chassis),halfL=spec.kind==='truck'?3.2:2.1
             const clear=[-halfL,0,halfL].every(l=>[-1,0,1].every(w=>
-              this.world.hitBuilding(x+Math.sin(heading)*l+Math.cos(heading)*w,z+Math.cos(heading)*l-Math.sin(heading)*w,1)<0))
+              this.world.hitBuilding(x+Math.sin(heading)*l+Math.cos(heading)*w,z+Math.cos(heading)*l-Math.sin(heading)*w,(city.terrain?.heightAt(x,z)??0)+1)<0))
             if(clear){parked={node,i,x,z,heading};break}
           }
           if(parked)break
@@ -145,7 +145,7 @@ export class DealerSystem {
         gang: leader.gang,
         bio: leader.bio,
         heading,
-        y: node.y??0,
+        y: city.terrain?.heightAt(x,z)??node.y??0,
         node: i,
         x,
         z,

@@ -65,7 +65,7 @@ export class TrafficSystem {
   const venues=[...(this.world.pumps??[]).map(p=>({...p,id:`fuel:${p.node}`,gang:undefined as Gang|undefined})),...dealers]
    .filter(p=>Math.hypot(p.x-center.x,p.z-center.z)<900).sort((a,b)=>Math.hypot(a.x-center.x,a.z-center.z)-Math.hypot(b.x-center.x,b.z-center.z)).slice(0,8)
   for(const venue of venues){
-   const node=nodes[venue.node];if(!node?.adj.length||Math.hypot(node.x-venue.x,node.z-venue.z)>60||node.tunnel||Math.abs(node.y??0)>.5)continue
+   const node=nodes[venue.node];if(!node?.adj.length||Math.hypot(node.x-venue.x,node.z-venue.z)>60||node.tunnel||Math.abs((node.y??0)-(this.world.city.terrain?.heightAt(node.x,node.z)??0))>.5)continue
    const adjacent=node.adj[0],b=nodes[adjacent],heading=Math.atan2(b.x-node.x,b.z-node.z)
    for(let slot=0;slot<2;slot++){
     const id=`${venue.id}:${venue.node}:${slot}`
@@ -79,11 +79,11 @@ export class TrafficSystem {
      let clear=true
      for(const l of [-2.5,0,2.5])for(const w of [-.9,0,.9]){
       const px=x+Math.sin(heading)*l+Math.cos(heading)*w,pz=z+Math.cos(heading)*l-Math.sin(heading)*w
-      if(this.world.isWater(px,pz)||this.world.hitBuilding(px,pz,1)>=0)clear=false
+      if(this.world.isWater(px,pz)||this.world.hitBuilding(px,pz,(this.world.city.terrain?.heightAt(px,pz)??0)+1)>=0)clear=false
      }
      // Also validate the short approach so visitors do not cut through a facade.
-     for(let step=0;step<=8;step++){const t=step/8,px=node.x+(x-node.x)*t,pz=node.z+(z-node.z)*t;if(this.world.isWater(px,pz)||this.world.hitBuilding(px,pz,1)>=0)clear=false}
-     if(clear){next.push({id,node:venue.node,next:adjacent,x,y:(node.y??0)+1.3,z,heading,gang:venue.gang,occupant:null});break}
+     for(let step=0;step<=8;step++){const t=step/8,px=node.x+(x-node.x)*t,pz=node.z+(z-node.z)*t;if(this.world.isWater(px,pz)||this.world.hitBuilding(px,pz,(this.world.city.terrain?.heightAt(px,pz)??0)+1)>=0)clear=false}
+     if(clear){next.push({id,node:venue.node,next:adjacent,x,y:(this.world.city.terrain?.heightAt(x,z)??node.y??0)+1.3,z,heading,gang:venue.gang,occupant:null});break}
     }
    }
   }
@@ -143,7 +143,8 @@ export class TrafficSystem {
      const blocked=car.phase==='exit'&&(this.agents.some(other=>other!==car&&other.phase==='drive'&&Math.hypot(other.pos.x-mergeX,other.pos.z-mergeZ)<7)||Math.hypot(player.x-mergeX,player.z-mergeZ)<7)
      if(!blocked)car.progress=Math.min(1,car.progress+dt/(car.phase==='enter'?2.5:3))
      const t=car.progress*car.progress*(3-2*car.progress),targetX=car.phase==='enter'?site.x:mergeX,targetZ=car.phase==='enter'?site.z:mergeZ
-     car.pos.set(car.from.x+(targetX-car.from.x)*t,site.y,car.from.z+(targetZ-car.from.z)*t);car.heading=site.heading;car.speed=blocked?0:3
+     const targetY=car.phase==='enter'?site.y:(node.y??0)+((next.y??0)-(node.y??0))*mergeAt/len+1.3
+     car.pos.set(car.from.x+(targetX-car.from.x)*t,car.from.y+(targetY-car.from.y)*t,car.from.z+(targetZ-car.from.z)*t);car.heading=site.heading;car.speed=blocked?0:3
      if(car.progress>=1){
       if(car.phase==='enter'){car.phase='park';car.wait=8+(car.seed+car.visits)%15;car.visits++}
       else{car.a=site.node;car.b=site.next;car.distance=mergeAt;this.release(car);car.wait=25;car.speed=4}

@@ -66,6 +66,7 @@ export class Campaign {
    this.intro=Math.max(0,this.intro-dt)
    const distance=120-(this.intro*60)
    this.boss.position.copy(this.introOrigin).add(new THREE.Vector3(Math.sin(this.introHeading)*distance+Math.cos(this.introHeading)*3,0,Math.cos(this.introHeading)*distance-Math.sin(this.introHeading)*3))
+   this.boss.position.y=this.world.groundHeightAt(this.boss.position.x,this.boss.position.z,this.boss.position.y)+1.3
    this.boss.rotation.y=this.introHeading
    if(!this.intro)this.boss.visible=false
   }

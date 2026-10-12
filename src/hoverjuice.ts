@@ -31,6 +31,7 @@ export class HoverjuiceSpray {
   geometry.instanceCount = this.capacity
   const material = new THREE.ShaderMaterial({
    transparent: true, depthWrite: false, side: THREE.DoubleSide,
+   polygonOffset:true,polygonOffsetFactor:-5,polygonOffsetUnits:-5,
    blending: THREE.NormalBlending,
    vertexShader: `attribute vec3 offset;
     attribute vec4 appearance; attribute vec4 surface0; attribute vec4 surface1; attribute vec4 surface2; attribute vec4 surface3; attribute vec4 surface4; attribute vec4 surface5; attribute vec4 surface6; attribute float growth;
@@ -51,15 +52,14 @@ export class HoverjuiceSpray {
     void main(){
      vec2 p=(vUv*2.-1.)/(vEffect.z>.5?max(.1,vGrowth):1.); p.x*=.85+.3*sin(vEffect.w); float r=length(p);
      float angle=atan(p.y,p.x);
-     float edge=.82+.07*sin(angle*7.+vEffect.w)+.05*sin(angle*11.-vEffect.w);
-     float drop=1.-smoothstep(.3,1.,r);
-     float filled=1.-smoothstep(edge-.16,edge,r);
-     float rim=1.-smoothstep(.025,.09,abs(r-edge+.09));
-     float fingers=(1.-smoothstep(.06,.17,abs(r-(.62+.13*sin(angle*(5.+floor(mod(vEffect.w,4.)))+vEffect.w)))));
-     float shape=vEffect.z>1.5 ? filled*.68+rim*.3 : (vEffect.z>.5 ? filled*.25+fingers*.75 : drop);
+     float edge=.83+.045*sin(angle*3.+vEffect.w)+.025*sin(angle*5.-vEffect.w);
+     float drop=1.-smoothstep(.1,1.,r);
+     float filled=1.-smoothstep(edge-.24,edge,r);
+     float sheen=exp(-18.*dot(p-vec2(-.18,.2),p-vec2(-.18,.2)));
+     float shape=vEffect.z>.5 ? filled : drop;
      float alpha=shape*vEffect.y;
      if(alpha<.008)discard;
-     vec3 liquid=mix(vec3(0.,.48,.55),vec3(.12,1.,.93),vEffect.z>1.5 ? rim : .65);
+     vec3 liquid=mix(vec3(0.,.38,.42),vec3(.06,.72,.68),vEffect.z>.5 ? .25+sheen*.35 : .75);
      gl_FragColor=vec4(liquid,alpha);
      #include <tonemapping_fragment>
      #include <colorspace_fragment>
@@ -156,7 +156,7 @@ export class HoverjuiceSpray {
     if(this.surfaceHeight && this.offsets[j+1]<this.floor[i]+.5)this.floor[i]=this.surfaceHeight(this.offsets[j],this.offsets[j+2],this.floor[i])+.025
     if (this.offsets[j+1] <= this.floor[i]) {
      this.offsets[j+1] = this.floor[i]; this.appearance[k+2] = 1; this.age[i] = 0
-     this.appearance[k]=.8+Math.random()*.6;this.growth[i]=.35;this.project(i,this.floor[i]-.025)
+     this.appearance[k]=.35+Math.random()*.35;this.growth[i]=.35;this.project(i,this.floor[i]-.025)
     }
    } else if(this.appearance[k+2]===2){
     const t=this.age[i]/this.duration[i]
