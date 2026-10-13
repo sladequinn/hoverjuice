@@ -1,4 +1,4 @@
-import { renderGaragePreview } from './menu-scene'
+import { AlleyPreview } from './menu-scene'
 import { crewInvite } from './spatial'
 import { CITIES } from './data'
 import './style.css'
@@ -224,7 +224,9 @@ window.addEventListener('wheel', (e) => { zoom = Math.min(2.5, Math.max(0.5, zoo
 
 // ---------- title ----------
 const title = $('title')
-renderTitle = () => { if(title.classList.contains('show')) renderGaragePreview(renderer, innerWidth, innerHeight) }
+const alley=new AlleyPreview()
+let menuFrame=0
+renderTitle = () => { if(title.classList.contains('show')){alley.resize(innerWidth,innerHeight);alley.render(renderer,performance.now()/1000)} }
 renderTitle()
 const cont = $('btn-continue')
 if (game.hasSave) {
@@ -315,6 +317,8 @@ function updateCamera(dt: number) {
 // ---------- loop ----------
 function frame() {
   const now = performance.now()
+  if(title.classList.contains('show')&&!document.hidden&&!game.loading&&now-menuFrame>1000/30){alley.render(renderer,now/1000);menuFrame=now}
+  if(!title.classList.contains('show'))alley.dispose()
   if (document.hidden || game.loading || title.classList.contains('show')) { last = now; requestAnimationFrame(frame); return }
   const frameMs = now - last
   const dt = Math.min(frameMs / 1000, 0.05)

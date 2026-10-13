@@ -504,3 +504,32 @@ body:has(.modal.show) #hud{display:none}
 body.is-touch .hud-tl,body.is-touch .hud-bl{height:68px}
 body.is-touch #combat-status{font-size:9px;line-height:10px}
 .radio-stations{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin:16px 0}.radio-stations button{text-align:left;min-height:65px}.radio-stations small{display:block;margin-top:5px;color:#9bb0ba;font-size:11px}.radio-status{min-height:55px;line-height:1.4;color:#9dcbd1}.radio-volume{display:flex;align-items:center;gap:16px;margin:20px 0}.radio-volume input{flex:1;min-width:0;accent-color:#64bfc7}
+
+/* HOVERGHINI: alley title and explicit startup stages. */
+.title{background:linear-gradient(90deg,rgba(5,10,14,.94),rgba(5,10,14,.74) 30%,transparent 65%)}
+.title-inner{border:0;padding:0;max-width:650px}
+.title h1{font-size:clamp(46px,6.5vw,94px);letter-spacing:-.045em;white-space:nowrap;margin:12px 0 24px}
+.title h1 span{color:#b38ea8}.title .kicker{font:10px/1.6 monospace;letter-spacing:.14em;color:#9faeb5}
+.title-status{border:0;color:#71838c;font-size:10px;margin-bottom:52px}
+.title-statement{font-size:22px;letter-spacing:.18em;color:#c9d2d5}
+.title .lede{font-size:17px;color:#8fa0a9}.title-actions .btn{background:#c7e1df;color:#0d2025;border-color:#c7e1df}
+.loading{background:#090f15;gap:20px;padding:clamp(24px,6vw,72px);text-align:left;align-items:stretch}
+.loading>*{width:min(100%,600px);margin-left:auto;margin-right:auto}
+.loading-brand{font:900 clamp(32px,7vw,58px)/1 Impact,'Arial Narrow',sans-serif;letter-spacing:-.025em;color:#dbe4e8}
+.loading-brand span{display:block;font:10px monospace;letter-spacing:.25em;color:#6d8895;margin-top:16px}
+.loading-city{font:600 clamp(24px,5vw,38px)/1.2 'Rajdhani',sans-serif;margin-top:30px}
+.loading-stages{display:flex;justify-content:space-between;gap:8px;font:10px monospace;color:#52616a}.loading-stages .active{color:#78d3d8}
+#loading-progress{height:5px;background:#202f38;overflow:hidden}
+#loading-fill{height:100%;width:0;background:#55c9d3;transition:width .25s ease;position:relative}
+#loading-fill:after{content:'';position:absolute;inset:0;width:60px;background:linear-gradient(90deg,transparent,#c3f8f5,transparent);animation:load-sweep 1.6s linear infinite}
+@keyframes load-sweep{from{left:-60px}to{left:100%}}
+.loading-readout{display:flex;justify-content:space-between;gap:20px;min-height:44px;color:#a4b8c4;font-size:16px}#loading-percent{font:18px monospace;color:#d1e4e9;flex-shrink:0}
+.loading-time{font:11px monospace;color:#617986}.loading-actions{justify-content:flex-start}.loading .small{margin-top:30px;color:#687f8c;font-size:11px}
+@media(max-width:760px){
+ .title{align-items:stretch;padding:32px 24px max(24px,env(safe-area-inset-bottom));background:linear-gradient(180deg,rgba(5,10,14,.82),transparent 33%,transparent 55%,rgba(5,10,14,.95) 79%)}
+ .title-inner{display:flex;flex-direction:column;max-width:none;min-height:100%}
+ .title-status{margin:0 0 18px;padding:0;font-size:9px}.title h1{font-size:clamp(38px,11.4vw,80px);margin:8px 0}.title .kicker{font-size:8px;letter-spacing:.1em;margin:0}
+ .title-statement{margin-top:auto;font-size:20px;padding-top:260px;margin-bottom:0}.title .lede{font-size:15px;margin:10px 0}.title-actions{margin:12px 0 0;gap:10px}.title-actions .btn{width:100%}
+ .loading-stages{font-size:9px}.loading-readout{font-size:14px}
+}
+@media(prefers-reduced-motion:reduce){#loading-fill{transition:none}#loading-fill:after{animation:none}}
