@@ -50,15 +50,16 @@ export class World {
   }
 
   /** Build behind the loading screen, yielding so status/progress stays responsive. */
-  static async create(city:CityData,status:(text:string)=>void){
+  static async create(city:CityData,status:(text:string,progress?:number)=>void){
     const world=new World(city,true),yieldFrame=()=>new Promise<void>(resolve=>setTimeout(resolve,0))
     fitStreetWidths(city);world.buildGround()
     for(let from=0;from<city.buildings.length;from+=256){
-      status(`Building district · ${Math.min(from+256,city.buildings.length).toLocaleString()} / ${city.buildings.length.toLocaleString()} buildings`)
+      status(`Building district · ${Math.min(from+256,city.buildings.length).toLocaleString()} / ${city.buildings.length.toLocaleString()} buildings`,55+15*Math.min(1,(from+256)/Math.max(1,city.buildings.length)))
       world.buildBuildings(from,Math.min(from+256,city.buildings.length));await yieldFrame()
     }
-    status('Laying streets, sidewalks and lighting…')
-    for(const _ of world.buildRoadBatches(0,world.streets,world.roadGrid)){void _;await yieldFrame()}
+    status('Laying streets, sidewalks and lighting…',72)
+    let batches=0
+    for(const _ of world.buildRoadBatches(0,world.streets,world.roadGrid)){void _;status('Laying streets, sidewalks and lighting…',72+14*Math.min(1,++batches/Math.max(1,Math.ceil(city.roads.length/16))));await yieldFrame()}
     world.buildTerrain();world.buildWater();world.placePumps();world.group.add(world.ownedGroup);world.indexBuildings(0)
     return world
   }

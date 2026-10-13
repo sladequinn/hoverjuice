@@ -241,7 +241,8 @@ export function worldToLatLon(city: CityData, x: number, z: number) {
   return { lat: city.lat - z / 110540, lon: city.lon + x / kx }
 }
 
-async function fetchWithTimeout(url: string, signal: AbortSignal | undefined, timeout = 12000) {
+async function fetchWithTimeout<T>(url: string, signal: AbortSignal | undefined, read:(response:Response)=>Promise<T>, timeout = 12000) {
+  signal?.throwIfAborted()
   const ctrl = new AbortController()
   const stop = () => ctrl.abort()
   signal?.addEventListener('abort', stop)
@@ -249,7 +250,7 @@ async function fetchWithTimeout(url: string, signal: AbortSignal | undefined, ti
   try {
     const res = await fetch(url, { signal: ctrl.signal })
     if (!res.ok) throw new Error(`${new URL(url).host}: HTTP ${res.status}`)
-    return res
+    return await read(res)
   } finally {
     clearTimeout(timer)
     signal?.removeEventListener('abort', stop)
@@ -258,11 +259,14 @@ async function fetchWithTimeout(url: string, signal: AbortSignal | undefined, ti
 
 async function tileTemplate(signal: AbortSignal) {
   const cached = localStorage.getItem('hoverghini.tile-template')
+  const age=Date.now()-Number(localStorage.getItem('hoverghini.tile-template-time')??0)
+  if(cached&&age<24*60*60*1000)return cached
   try {
-    const json = await (await fetchWithTimeout(TILEJSON_URL, signal, 8000)).json() as { tiles?: string[] }
+    const json = await fetchWithTimeout(TILEJSON_URL, signal, r=>r.json(), 8000) as { tiles?: string[] }
     const template = json.tiles?.[0]
     if (!template) throw new Error('Tile catalog has no tile URL')
     localStorage.setItem('hoverghini.tile-template', template)
+    localStorage.setItem('hoverghini.tile-template-time',String(Date.now()))
     return template
   } catch (e) {
     if (signal.aborted || !cached) throw e
@@ -277,7 +281,7 @@ async function downloadTile(url: string, signal?: AbortSignal) {
   let last: unknown
   for (let attempt = 0; attempt < 3; attempt++) {
     try {
-      const data = await (await fetchWithTimeout(url, signal, 14000 + attempt * 5000)).arrayBuffer()
+      const data = await fetchWithTimeout(url, signal, r=>r.arrayBuffer(), 14000 + attempt * 5000)
       void cachePut(key, data)
       return new Uint8Array(data)
     } catch (e) {
@@ -447,35 +451,36 @@ export class MapStreamer {
     }
   }
 
-  async loadAround(x: number, z: number, ring = 1, signal?: AbortSignal): Promise<MapDelta | null> {
+  async loadAround(x: number, z: number, ring = 1, signal?: AbortSignal, options:{radius?:number;progress?:(text:string,fraction:number)=>void;deadlineMs?:number}={}): Promise<MapDelta | null> {
     if (this.busy) return null
     this.busy = true
     const beforeB = this.city.buildings.length, beforeR = this.city.roads.length
     try {
       const ll = worldToLatLon(this.city, x, z)
       const center = tileFor(ll.lat, ll.lon, TILE_ZOOM)
+      const bounds:{a:Pt;b:Pt}[]=[]
+      const requestSignal=options.deadlineMs?AbortSignal.any([...(signal?[signal]:[]),AbortSignal.timeout(options.deadlineMs)]):signal
+      let downloaded=0
       const jobs: { key: string; x: number; y: number; data: Promise<Uint8Array> }[] = []
       for (let dx = -ring; dx <= ring; dx++) for (let dy = -ring; dy <= ring; dy++) {
         const tx = center.x + dx, ty = center.y + dy, key = `${TILE_ZOOM}/${tx}/${ty}`
         if (this.loaded.has(key)) continue
+        const longitude=(t:number)=>t/2**TILE_ZOOM*360-180,latitude=(t:number)=>Math.atan(Math.sinh(Math.PI*(1-2*t/2**TILE_ZOOM)))*180/Math.PI
+        const a=this.project([longitude(tx),latitude(ty)]),b=this.project([longitude(tx+1),latitude(ty+1)])
+        if(options.radius!==undefined&&Math.hypot(Math.max(a[0]-x,0,x-b[0]),Math.max(a[1]-z,0,z-b[1]))>options.radius)continue
+        bounds.push({a,b})
         let data = this.pending.get(key)
         if (!data) {
-          data = downloadTile(this.template.replace('{z}', String(TILE_ZOOM)).replace('{x}', String(tx)).replace('{y}', String(ty)), signal)
+          data = downloadTile(this.template.replace('{z}', String(TILE_ZOOM)).replace('{x}', String(tx)).replace('{y}', String(ty)), requestSignal)
           this.pending.set(key, data)
         }
-        jobs.push({ key, x: tx, y: ty, data })
+        jobs.push({ key, x: tx, y: ty, data:data.then(value=>{downloaded++;options.progress?.(`Street sectors received · ${downloaded} / ${jobs.length}`,downloaded/jobs.length*.5);return value}) })
       }
       if (!jobs.length) return null
-      const settled = await Promise.allSettled(jobs.map((j) => j.data))
-      // Finish elevation first: a failed stream must not leave half-appended map data.
-      for(const [i,result] of settled.entries())if(result.status==='fulfilled'){
-        const job=jobs[i]
-          if(this.city.terrain){
-            const lon=(tx:number)=>tx/2**TILE_ZOOM*360-180,lat=(ty:number)=>Math.atan(Math.sinh(Math.PI*(1-2*ty/2**TILE_ZOOM)))*180/Math.PI
-            const a=this.project([lon(job.x),lat(job.y)]),b=this.project([lon(job.x+1),lat(job.y+1)])
-            await this.city.terrain.ensure(a[0]-64,a[1]-64,b[0]+64,b[1]+64,signal)
-          }
-      }
+      // Fetch one DEM coverage area concurrently with street tiles, then bake once.
+      const elevation=this.city.terrain?.ensure(Math.min(...bounds.map(p=>p.a[0]))-64,Math.min(...bounds.map(p=>p.a[1]))-64,Math.max(...bounds.map(p=>p.b[0]))+64,Math.max(...bounds.map(p=>p.b[1]))+64,signal)
+      const [settled]=await Promise.all([Promise.allSettled(jobs.map(j=>j.data)),elevation])
+      signal?.throwIfAborted()
       let tiles = 0
       for (const [i,result] of settled.entries()) {
         const job = jobs[i]
@@ -484,6 +489,7 @@ export class MapStreamer {
           await this.parse(result.value, job.x, job.y)
           this.loaded.add(job.key)
           tiles++
+          options.progress?.(`Reading district · ${tiles} / ${jobs.length} sectors`,.5+.5*(i+1)/jobs.length)
         }
       }
       if (!tiles) throw new Error('Map tile network unavailable')
@@ -509,17 +515,17 @@ export async function fetchCity(
   name: string,
   lat: number,
   lon: number,
-  onStatus: (s: string) => void,
+  onStatus: (s: string, progress?:number) => void,
   signal: AbortSignal,
 ): Promise<CityData> {
   const key = cityKey(lat, lon)
   const city: CityData = { key, name, lat, lon, radius: RADIUS, buildings: [], roads: [], nodes: [], landmarks: [], venues: [], zones: [], waters: [], procedural: false }
   city.terrain=new TerrainField(lat,lon)
-  onStatus('Connecting to street and terrain data…')
+  onStatus('Connecting to street and terrain data…',4)
   const streamer = new MapStreamer(city, await tileTemplate(signal))
   streamers.set(city, streamer)
   onStatus('Loading starting district · streets and terrain…')
-  await streamer.loadAround(0, 0, 1, signal)
+  await streamer.loadAround(0, 0, 1, signal,{radius:1100,deadlineMs:12000,progress:(s,p)=>onStatus(s,10+p*40)})
   if (city.nodes.length < 20) throw new Error('No driveable streets found here')
   city.landmarks = pickLandmarks(key, city.buildings)
   onStatus(`Loaded ${streamer.tileCount} sectors · ${city.buildings.length.toLocaleString()} real buildings · ${city.terrain.enabled?'terrain ready':'terrain unavailable, flat fallback'}`)

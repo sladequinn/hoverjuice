@@ -284,7 +284,9 @@ export class Game {
     const overlay = $('loading')
     overlay.classList.add('show')
     $('loading-city').textContent = name
-    $('loading-status').textContent = 'Connecting to city uplink…'
+    let progress=0
+    const status=(text:string,value=progress)=>{progress=Math.max(progress,value);$('loading-status').textContent=text;$('loading-progress').setAttribute('aria-valuenow',String(Math.round(progress)));$('loading-fill').style.width=`${progress}%`;$('loading-percent').textContent=`${Math.round(progress)}%`;for(const el of document.querySelectorAll<HTMLElement>('[data-load-stage]'))el.classList.toggle('active',progress>=Number(el.dataset.loadStage))}
+    status('Connecting to city uplink…',2)
     $('btn-load-sim').style.display=''
     $('btn-load-cancel').style.display = this.world ? '' : 'none'
     const ctrl = new AbortController()
@@ -299,13 +301,13 @@ export class Game {
 
     let city: CityData | null = null
     try {
-      city = await fetchCity(name, lat, lon, (s) => ($('loading-status').textContent = s), ctrl.signal)
+      city = await fetchCity(name, lat, lon, status, ctrl.signal)
     } catch (e) {
       if (choice !== 'cancel') {
         if (choice !== 'sim') {
           console.warn('Map fetch failed, using simulation grid', e)
           $('loading-status').textContent = 'Map servers unreachable. Compiling a simulation grid…'
-          await new Promise((r) => setTimeout(r, 900))
+          await new Promise((r) => setTimeout(r, 0))
         }
         city = proceduralCity(name, lat, lon)
       }
@@ -349,7 +351,7 @@ export class Game {
       this.scene.remove(this.world.group)
       this.world.dispose()
     }
-    this.world = await World.create(city,s=>{$('loading-status').textContent=s})
+    this.world = await World.create(city,status)
     this.spray.surfaceHeight=(x,z,reference)=>this.world!.surfaceHeightAt(x,z,reference)
     this.scene.add(this.world.group)
     if(!city.procedural){this.multiplayer=new Multiplayer(city);this.scene.add(this.multiplayer.group)}
@@ -385,7 +387,7 @@ export class Game {
     this.save.city = { name, lat, lon }
     this.persist()
 
-    $('loading-status').textContent='Preparing cockpit and navigation…'
+    status('Preparing cockpit and navigation…',88)
     this.maskThumbs()
     $<HTMLImageElement>('mask-portrait').src=this.thumbs.get(this.save.mask)!
     $('hud').classList.add('show')
@@ -395,8 +397,8 @@ export class Game {
     this.updateHud();this.drawMinimap();this.hudTimer=.1
     this.refreshDealers()
     this.streamTimer=5
-    $('loading-status').textContent='Warming graphics · preparing your first drive…'
-    try{await this.prepareRender?.()}finally{clearInterval(tick)}
+    status('Warming graphics · preparing your first drive…',94)
+    try{await this.prepareRender?.();status('Ready. Stay dangerous.',100)}finally{clearInterval(tick)}
     overlay.classList.remove('show')
     this.loading = false
     this.closeModal()

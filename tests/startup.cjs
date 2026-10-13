@@ -22,6 +22,7 @@ const assert=require('node:assert/strict');
   });
   await page.waitForFunction(()=>window.warmEntered,{},{timeout:60000});
   const before=await page.evaluate(()=>({loading:window.hoverghini.loading,paused:window.hoverghini.paused,overlay:document.getElementById('loading').classList.contains('show'),intro:window.hoverghini.campaign.intro}));
+  assert.equal(await page.locator("#loading-progress").getAttribute("aria-valuenow"),"94");
   assert.equal(before.loading,true);assert.equal(before.paused,true);assert.equal(before.overlay,true);
   await page.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));
   assert.equal(await page.evaluate(()=>window.hoverghini.campaign.intro),before.intro);

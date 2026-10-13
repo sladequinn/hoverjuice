@@ -80,3 +80,23 @@ test('road draping follows both halves of uneven terrain cells without buried tr
  assert.ok(vertices.length>18)
  for(let i=0;i<vertices.length;i+=9){const x=(vertices[i]+vertices[i+3]+vertices[i+6])/3,z=(vertices[i+2]+vertices[i+5]+vertices[i+8])/3,y=(vertices[i+1]+vertices[i+4]+vertices[i+7])/3;assert.ok(Math.abs(y-field.heightAt(x,z)-.05)<.0001)}
 })
+
+test('startup overlaps one terrain request with nearby street downloads and tolerates a stalled sector',async()=>{
+ const originalFetch=globalThis.fetch,city=proceduralCity('startup',43.45,-80.49)
+ city.nodes=[];city.roads=[];city.buildings=[]
+ let terrainCalls=0,requests=0,terrainStarted=false
+ city.terrain={enabled:true,heightAt:()=>0,ensure:async()=>{terrainCalls++;terrainStarted=true}} as any
+ const stream=new MapStreamer(city,'https://example.test/{z}/{x}/{y}')
+ ;(stream as any).parse=async()=>{}
+ globalThis.fetch=async(_url,init)=>{
+  requests++;assert.ok(terrainStarted,'terrain starts before street network completes')
+  if(requests===1)return new Response(new ReadableStream({start(controller){init?.signal?.addEventListener('abort',()=>controller.error(new Error('fixture body timeout')),{once:true})}}))
+  return new Response(new Uint8Array([0]))
+ }
+ const progress:number[]=[]
+ try{
+  const delta=await stream.loadAround(0,0,1,undefined,{radius:1100,deadlineMs:40,progress:(_,p)=>progress.push(p)})
+  assert.equal(terrainCalls,1);assert.ok(requests>1&&requests<9);assert.equal(delta?.tiles,requests-1)
+  assert.ok(progress.every((v,i)=>i===0||v>=progress[i-1]))
+ }finally{globalThis.fetch=originalFetch}
+})
