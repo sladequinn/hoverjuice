@@ -49,12 +49,18 @@ Publishing `main` directly from its root serves uncompiled TypeScript and will s
 
 Pages hosts the client only. Address search now defaults to Photon over HTTPS, so no Vercel migration is needed. Search runs only on explicit submission, caches results for the session, and limits repeat requests. Photon’s public endpoint permits reasonable project use but has no availability guarantee: https://github.com/komoot/photon#demo-server. Configure your own provider for larger audiences. Online multiplayer and global persistence still need their own hosting.
 
+## Phase 1 backend foundation
+
+Persistent GitHub-backed player identity, manual cloud backup/restore, and a separate server-authoritative global wallet are implemented. **Existing gameplay money remains local legacy progress; it never credits the global wallet.** Cloud accounts default off until configured. No Phase 2 feature is enabled.
+
+See [backend foundation, migration and deployment guide](docs/backend-foundation.md) for the audit, API contract, schemas, secrets, tests, failure recovery and remaining deployment gates. Account controls are available from the title screen and More menu. GitHub Pages/offline play remain supported; account APIs require the same HTTPS Cloudflare origin as the game.
+
 ## Optional online services
 
 - `server/rooms.ts`: PartyKit telemetry rooms. `npm run dev:rooms` starts development rooms. Configure `VITE_PARTYKIT_HOST` to enable them; unset means offline. `#toronto?crew=ironlungs` starts the matching preset and uses a shared crew room.
 - `server/schema.sql`: sparse Cloudflare D1 tables for ownership, dead drops, verified speed records and flashpoints.
-- `server/api.ts`: read-only ownership/record gateway. Set `VITE_API_BASE` after deploying it. **Global claims, transactions and leaderboard submissions are not enabled.** Never trust localStorage cash or client-supplied race times for global writes.
-- Copy `wrangler.example.toml` to `wrangler.toml`, supply the real D1 ID, application origin and contact email, apply the schema, and deploy with your Cloudflare tooling. No account, database or hosting deployment is created by this branch.
+- `server/api.ts`: account API plus the existing read-only ownership/record gateway. Set `VITE_API_BASE` after deploying it. **Global claims, transactions and leaderboard submissions are not enabled.** Never trust localStorage cash or client-supplied race times for global writes.
+- Copy `wrangler.example.toml` to `wrangler.toml`, supply the real D1 ID, application origin and contact email, apply the versioned migrations, and follow the backend deployment guide. No account, database or hosting deployment is created by this branch.
 - `server/geocoder.ts`: singleton Durable Object, query caching and an application-wide 1.1-second interval between Nominatim requests. To use this backend instead of Photon, set `public/config.json`'s `geocoder` URL to the deployed `/api/geocode` and `geocoderFormat` to `nominatim`; this runtime file allows provider changes without rebuilding the client.
 
 Nominatim public service use must follow its [usage policy](https://operations.osmfoundation.org/policies/nominatim/): the maximum is one request/second **across the entire app**, results must be cached, requests must identify the app, and autocomplete/systematic POI extraction are forbidden. Search runs only on explicit form submission. Larger audiences need a suitable hosted or self-hosted Nominatim provider. Presets and browser geolocation work without place search.

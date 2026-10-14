@@ -32,3 +32,6 @@ dist-ssr
 playwright-report
 test-results
 wrangler.toml
+
+.dev.vars
+.dev.vars.*

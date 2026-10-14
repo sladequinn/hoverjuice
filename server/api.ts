@@ -1,9 +1,29 @@
+import {foundation,foundationPath,cleanup,type FoundationEnv} from './foundation'
+import {HttpError} from './security'
 import {parseRadioConfig} from '../src/radio-config'
 export { Geocoder } from './geocoder'
-interface Env {RADIO_CONFIG_JSON?:string;DB:D1Database; ALLOWED_ORIGIN:string; GEOCODER:DurableObjectNamespace}
-/** Read gateway. Do not expose claim/record writes until server-side identity and economy validation exist. */
+interface Env extends FoundationEnv {ASSETS?:Fetcher;RADIO_CONFIG_JSON?:string;DB:D1Database; ALLOWED_ORIGIN:string; GEOCODER:DurableObjectNamespace}
+/** Public map reads and an isolated same-origin account API. */
 export default {
+ async scheduled(_event:ScheduledController,env:Env){await cleanup(env.DB)},
  async fetch(request:Request,env:Env):Promise<Response>{
+  const path=new URL(request.url).pathname
+  if(foundationPath(path)){
+   const requestId=crypto.randomUUID()
+   let response:Response
+   try{response=await foundation(request,env)}
+   catch(error){
+    const status=error instanceof HttpError?error.status:503
+    if(status>=500)console.error(JSON.stringify({event:'backend_failure',requestId,path,status}))
+    response=Response.json({requestId,error:error instanceof HttpError?error.message:'Service unavailable. Retry the same request safely.'},{status})
+   }
+   const headers=new Headers(response.headers)
+   headers.set('X-Request-ID',requestId);headers.set('Cache-Control','no-store');headers.set('X-Content-Type-Options','nosniff');headers.set('Referrer-Policy','no-referrer')
+   if(response.status===429)headers.set('Retry-After','60')
+   return new Response(response.body,{status:response.status,headers})
+  }
+  if(!path.startsWith('/api/'))return env.ASSETS?env.ASSETS.fetch(request):new Response('Not found',{status:404})
+  if(!['/api/geocode','/api/radio','/api/ownership','/api/records'].includes(path))return Response.json({error:'Not found'},{status:404})
   const headers={'Content-Type':'application/json','Access-Control-Allow-Origin':env.ALLOWED_ORIGIN,'Vary':'Origin'}
   const url=new URL(request.url)
   if(request.method!=='GET')return new Response('{"error":"Read-only gateway"}',{status:405,headers})

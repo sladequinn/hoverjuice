@@ -1,3 +1,4 @@
+import {CloudSave,CloudError,LOCAL_SAVE_KEY} from './cloud-save'
 import {routeGuide} from './route-guide'
 import {TrafficSound} from './traffic-sound'
 import {Radio} from './radio'
@@ -24,7 +25,7 @@ import { World } from './world'
 import { TrafficSystem } from './traffic'
 import { CONTRABAND, DealerSystem } from './dealers'
 
-const SAVE_KEY = 'hoverghini.save.v1'
+const SAVE_KEY = LOCAL_SAVE_KEY
 
 interface Holding {
   id: string
@@ -154,6 +155,7 @@ class Heap {
 }
 
 export class Game {
+  cloud = new CloudSave(localStorage)
   multiplayer: Multiplayer | null = null
   ownership = new OwnershipClient()
   radio=new Radio(()=>({heat:this.run.heat,speed:this.player.groundSpeed*3.6,gang:this.world?.gangAt(this.actor.x,this.actor.z)??this.gang}))
@@ -1013,7 +1015,7 @@ export class Game {
   // ---------- modals ----------
 
   openModal(view: string) {
-    if (!this.world && view !== 'warp' && view !== 'couch') return
+    if (!this.world && view !== 'warp' && view !== 'couch' && view !== 'cloud') return
     const m = $('modal')
     m.dataset.view = view
     const body = $('modal-body')
@@ -1052,8 +1054,36 @@ export class Game {
     if (!this.loading) this.paused = false
   }
 
+  private async cloudAction(act:string) {
+    if(this.cloud.busy)return
+    this.cloud.busy=true
+    try{
+      if(act==='cloud-login'){
+        this.persist();await this.cloud.prepareLogin();location.assign('/api/auth/login');return
+      }else if(act==='cloud-local-restore'){
+        if(!confirm('Restore the pre-cloud backup stored on this device?'))return
+        this.cloud.restoreLocalBackup();location.reload();return
+      }else if(act==='cloud-refresh')await this.cloud.refresh()
+      else if(act==='cloud-upload'){
+        if(this.cloud.snapshot?.payload&&!confirm('Replace the cloud legacy backup with this device’s progress?'))return
+        this.persist();await this.cloud.upload(this.save)
+      }else if(act==='cloud-retry')await this.cloud.retry()
+      else if(act==='cloud-discard'){
+        if(confirm('Discard the pending upload? Local progress stays. The server may already have accepted it.'))this.cloud.discardPending()
+      }else if(act==='cloud-restore'){
+        if(!confirm('Restore the cloud legacy backup? Current progress will be backed up on this device before reloading.'))return
+        this.persist();await this.cloud.restore();location.reload();return
+      }else await this.cloud.logout(act==='cloud-logout-all')
+    }catch(error){
+      if(error instanceof CloudError&&error.status===401){this.cloud.playerId=null;this.cloud.snapshot=null}
+      this.cloud.status=error instanceof Error?error.message:'Cloud unavailable. Local progress is safe.'
+    }finally{this.cloud.busy=false;if($('modal').dataset.view==='cloud')this.openModal('cloud')}
+  }
+
   private onAction(act: string, arg: string) {
     switch (act) {
+      case 'cloud-title': $('modal').classList.remove('show');$('title').classList.add('show');break
+      case 'cloud-login': case 'cloud-local-restore': case 'cloud-refresh': case 'cloud-upload': case 'cloud-retry': case 'cloud-restore': case 'cloud-discard': case 'cloud-logout': case 'cloud-logout-all': void this.cloudAction(act);break
       case 'skip-tutorial': this.skipTutorial();this.closeModal();break
       case 'tutorial-dealer': this.locateWhiteLie();this.closeModal();break
       case 'tutorial-sale': this.sellTutorialSample();break
@@ -1161,11 +1191,17 @@ export class Game {
     const s = this.save
     const w = this.world
     switch (view) {
+      case 'cloud':
+        return `<h2>Account & cloud saves</h2>${!this.world?'<button class="btn ghost" data-act="cloud-title">Back to title</button>':''}<p>Gameplay currently uses your legacy local save. Cloud backup carries that progress between devices. Local cash, property and test rewards never become global currency.</p><p role="status">${esc(this.cloud.status)}</p>
+          ${this.cloud.playerId?`<p class="muted">Player ${esc(this.cloud.playerId)}<br>Global wallet: ${(this.cloud.balance/100).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})} HG · No gameplay rewards enabled yet.<br>Cloud backup: ${this.cloud.snapshot?.payload?esc(String(this.cloud.snapshot.payload.city&&typeof this.cloud.snapshot.payload.city==='object'?(this.cloud.snapshot.payload.city as {name:string}).name:'No city')):'None'} · revision ${this.cloud.snapshot?.revision??'unknown'}</p>`:''}
+          <div class="row"><button class="btn" data-act="cloud-refresh">Check account / refresh</button><button class="btn" data-act="cloud-login">Sign in with GitHub</button></div>
+          ${this.cloud.playerId?`<div class="row"><button class="btn" data-act="cloud-upload" ${!this.cloud.snapshot||this.cloud.pending?'disabled':''}>Back up this device</button><button class="btn" data-act="cloud-restore" ${!this.cloud.snapshot?.payload||this.cloud.pending?'disabled':''}>Restore cloud backup</button></div>${this.cloud.pending?'<div class="row"><button class="btn" data-act="cloud-retry">Retry interrupted upload</button><button class="btn ghost" data-act="cloud-discard">Discard pending upload</button></div>':''}<div class="row"><button class="btn ghost" data-act="cloud-logout">Sign out</button><button class="btn ghost" data-act="cloud-logout-all">Sign out all devices</button></div>`:''}
+          <button class="btn ghost" data-act="cloud-local-restore">Recover pre-restore local backup</button><p class="muted small">Backups are manual. Playing offline, New Game and Reset affect this device only. Restore keeps a recovery copy on this device. Cloud accounts must be enabled on this game host.</p>`
       case 'radio':
         return `<h2>Radio</h2><p class="muted">Gang frequencies, municipal dispatch, and late-night talk.</p><div class="radio-stations">${STATIONS.map(station=>`<button class="btn ${this.radio.station===station.id?'buy':''}" data-act="radio-station" data-arg="${station.id}" aria-pressed="${this.radio.station===station.id}"><strong>${station.name}</strong><small>${station.host}</small></button>`).join('')}</div><p id="radio-status" class="radio-status" aria-live="polite">${esc(this.radio.status)}</p><div class="row"><button class="btn" data-act="radio-play">Play / pause</button><button class="btn" data-act="radio-next">Next</button><button class="btn ghost" data-act="radio-station" data-arg="off">Off</button></div><button class="btn ghost" data-act="radio-refresh">Refresh stations</button><label class="radio-volume">Volume <input id="radio-volume" type="range" min="0" max="100" value="${Math.round(this.radio.volume*100)}" /></label><p class="muted small">Music and talk use the configured station playlists. Scanner chatter follows local Heat. Radio pauses when this tab is hidden.</p>`
       case 'menu':
         return `<h2>Off the clock</h2><p class="muted">${esc(s.city?.name??'City')} · ${money(s.money)} available</p>
-          <div class="menu-links">${[['radio','Radio stations'],['market','Dealers & cargo'],['holdings','Safehouses & vaults'],['gangs','Gangs & territory'],['masks','Mask perks'],['tutorial','First-night guide'],['help','Controls & settings']].map(([id,label])=>`<button class="btn ghost" data-act="view" data-arg="${id}">${label}<span>→</span></button>`).join('')}</div>
+          <div class="menu-links">${[['cloud','Account & cloud saves'],['radio','Radio stations'],['market','Dealers & cargo'],['holdings','Safehouses & vaults'],['gangs','Gangs & territory'],['masks','Mask perks'],['tutorial','First-night guide'],['help','Controls & settings']].map(([id,label])=>`<button class="btn ghost" data-act="view" data-arg="${id}">${label}<span>→</span></button>`).join('')}</div>
           <details class="fold"><summary>City & account details</summary><p class="muted">Net worth ${money(this.netWorth)} · Notoriety ${this.run.notoriety}<br>Vault ${money(s.vaultCash)} · Income ${money(this.incomePerMin)}/min<br>${esc(this.multiplayer?.status??'Local save')} · ${esc($('city-tag').textContent??'')}</p></details>`
 
       case 'tutorial':
