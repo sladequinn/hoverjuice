@@ -1,3 +1,4 @@
+-- Legacy scaffold only. Phase 1 deployments must apply server/migrations via Wrangler.
 -- Sparse global state: no unclaimed OSM building catalog and no client coordinates at rest.
 CREATE TABLE IF NOT EXISTS ownership (
  building_id TEXT PRIMARY KEY, tile TEXT NOT NULL, owner_id TEXT NOT NULL,

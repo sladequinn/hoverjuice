@@ -238,6 +238,7 @@ if (game.hasSave) {
     void game.warp(c.name, c.lat, c.lon)
   })
 }
+$('btn-cloud').addEventListener('click', () => {title.classList.remove('show');game.openModal('cloud')})
 $('btn-new').addEventListener('click', () => {
   title.classList.remove('show')
   game.openModal('couch')
