@@ -351,3 +351,6 @@ requestAnimationFrame(frame)
 const invite=crewInvite(location.hash)
 const invitedCity=CITIES.find(c=>c.name.toLowerCase().replace(/ /g,'-')===invite.city.toLowerCase())
 if(invitedCity){title.classList.remove('show');void game.warp(invitedCity.name,invitedCity.lat,invitedCity.lon)}
+
+const friendCode=new URLSearchParams(location.search).get('join')??sessionStorage.getItem('hoverghini.join')
+if(friendCode)void game.openFriendInvite(friendCode)

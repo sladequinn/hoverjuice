@@ -1,3 +1,4 @@
+/** Historical PartyKit fixture only. Replaced by authenticated PlayerSession/GeoCell; not deployed. */
 import type * as Party from 'partykit/server'
 import { spatialDistance, tileKey, unproject, validTelemetry } from '../src/spatial'
 interface ClientState {view?:{x:number;z:number}; last?:number; seq?:number; peer?:string}

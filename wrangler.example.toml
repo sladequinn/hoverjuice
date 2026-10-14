@@ -16,6 +16,7 @@ enabled = true
 [vars]
 # Enable only on the HTTPS host serving BOTH the game and /api routes.
 BACKEND_ENABLED = "false"
+MULTIPLAYER_ENABLED = "false"
 APP_ORIGIN = "https://YOUR-HOVERJUICE-HOST"
 GITHUB_CLIENT_ID = "REPLACE-WITH-OAUTH-CLIENT-ID"
 # GITHUB_CLIENT_SECRET must be set with `wrangler secret put`, never here.
@@ -38,3 +39,20 @@ class_name = "Geocoder"
 [[migrations]]
 tag = "v1"
 new_sqlite_classes = ["Geocoder"]
+
+# Phase 2. These DO bindings are not publicly callable; only the authenticated Worker routes admission.
+[[durable_objects.bindings]]
+name = "PLAYERS"
+class_name = "PlayerSession"
+
+[[durable_objects.bindings]]
+name = "CELLS"
+class_name = "GeoCell"
+
+[[durable_objects.bindings]]
+name = "RACES"
+class_name = "CruiseRace"
+
+[[migrations]]
+tag = "v2-multiplayer"
+new_sqlite_classes = ["PlayerSession", "GeoCell", "CruiseRace"]
