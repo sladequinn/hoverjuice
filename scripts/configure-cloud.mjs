@@ -7,7 +7,7 @@ if(origin.protocol!=='https:'||origin.origin!==process.env.APP_ORIGIN)throw new 
 if(!/^[a-z0-9-]{1,63}$/.test(process.env.CF_WORKER_NAME))throw new Error('Invalid Worker name')
 if(!/^[a-f0-9-]{36}$/i.test(process.env.CF_DATABASE_ID))throw new Error('Invalid D1 database ID')
 let config=readFileSync('wrangler.example.toml','utf8')
-const values={name:process.env.CF_WORKER_NAME,database_id:process.env.CF_DATABASE_ID,database_name:process.env.CF_DATABASE_NAME,APP_ORIGIN:origin.origin,ALLOWED_ORIGIN:origin.origin,GITHUB_CLIENT_ID:process.env.GITHUB_CLIENT_ID,APP_CONTACT:process.env.APP_CONTACT,BACKEND_ENABLED:'true'}
+const values={name:process.env.CF_WORKER_NAME,database_id:process.env.CF_DATABASE_ID,database_name:process.env.CF_DATABASE_NAME,APP_ORIGIN:origin.origin,ALLOWED_ORIGIN:origin.origin,GITHUB_CLIENT_ID:process.env.GITHUB_CLIENT_ID,APP_CONTACT:process.env.APP_CONTACT,BACKEND_ENABLED:'true',MULTIPLAYER_ENABLED:process.env.MULTIPLAYER_ENABLED==='true'?'true':'false'}
 // "name" also appears inside the DO binding; replace only the first occurrence.
 for(const [key,value]of Object.entries(values))config=config.replace(new RegExp(`^${key} = .*`,'m'),()=>`${key} = ${JSON.stringify(value)}`)
 writeFileSync('wrangler.toml',config)

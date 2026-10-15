@@ -47,17 +47,21 @@ Merge this branch, then open **Settings → Pages → Build and deployment → S
 
 Publishing `main` directly from its root serves uncompiled TypeScript and will show an unstyled, nonfunctional page. The default Vite base `/` is correct for `https://slade.ninja/`. A repository-subpath deployment would instead need `/hoverjuice/` as its Vite base. Browser smoke tests use the production build, so run `npm run build` before `npm run test:browser`.
 
-Pages hosts the client only. Address search now defaults to Photon over HTTPS, so no Vercel migration is needed. Search runs only on explicit submission, caches results for the session, and limits repeat requests. Photon’s public endpoint permits reasonable project use but has no availability guarantee: https://github.com/komoot/photon#demo-server. Configure your own provider for larger audiences. Online multiplayer and global persistence still need their own hosting.
+Pages hosts the client only. Address search now defaults to Photon over HTTPS, so no Vercel migration is needed. Search runs only on explicit submission, caches results for the session, and limits repeat requests. Photon’s public endpoint permits reasonable project use but has no availability guarantee: https://github.com/komoot/photon#demo-server. Configure your own provider for larger audiences. Cloud accounts and multiplayer require the same-origin Cloudflare deployment described below.
 
 ## Phase 1 backend foundation
 
-Persistent GitHub-backed player identity, manual cloud backup/restore, and a separate server-authoritative global wallet are implemented. **Existing gameplay money remains local legacy progress; it never credits the global wallet.** Cloud accounts default off until configured. No Phase 2 feature is enabled.
+Persistent GitHub-backed player identity, manual cloud backup/restore, and a separate server-authoritative global wallet are implemented. **Existing gameplay money remains local legacy progress; it never credits the global wallet.** Cloud accounts default off until configured. Multiplayer has a separate default-off deployment flag.
 
 See [backend foundation, migration and deployment guide](docs/backend-foundation.md) for the audit, API contract, schemas, secrets, tests, failure recovery and remaining deployment gates. Account controls are available from the title screen and More menu. GitHub Pages/offline play remain supported; account APIs require the same HTTPS Cloudflare origin as the game.
 
+## Phase 2 real-time multiplayer
+
+Authenticated geographic cruising, customized vehicle ghosts, names, friend links and casual checkpoint races are implemented on the Phase 1 backend. See [multiplayer deployment and architecture](docs/multiplayer.md) and [implementation report](docs/phase2-report.md). Enable only after applying migrations and staging validation. No global property, crew, territory or trading system is added.
+
 ## Optional online services
 
-- `server/rooms.ts`: PartyKit telemetry rooms. `npm run dev:rooms` starts development rooms. Configure `VITE_PARTYKIT_HOST` to enable them; unset means offline. `#toronto?crew=ironlungs` starts the matching preset and uses a shared crew room.
+- `server/player-session.ts`, `server/geo-cell.ts`, `server/cruise-race.ts`: authenticated Cloudflare multiplayer. The old PartyKit client and deployment configuration are retired; `server/rooms.ts` remains only as a historical test fixture. `VITE_PARTYKIT_HOST` has no effect. Old city hash links still select a preset, but never establish a crew identity or a private room.
 - `server/schema.sql`: sparse Cloudflare D1 tables for ownership, dead drops, verified speed records and flashpoints.
 - `server/api.ts`: account API plus the existing read-only ownership/record gateway. Set `VITE_API_BASE` after deploying it. **Global claims, transactions and leaderboard submissions are not enabled.** Never trust localStorage cash or client-supplied race times for global writes.
 - Copy `wrangler.example.toml` to `wrangler.toml`, supply the real D1 ID, application origin and contact email, apply the versioned migrations, and follow the backend deployment guide. No account, database or hosting deployment is created by this branch.

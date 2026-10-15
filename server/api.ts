@@ -1,13 +1,20 @@
+import {multiplayerHttp,type MultiplayerEnv} from './multiplayer-http'
+export {PlayerSession} from './player-session'
+export {GeoCell} from './geo-cell'
+export {CruiseRace} from './cruise-race'
 import {foundation,foundationPath,cleanup,type FoundationEnv} from './foundation'
 import {HttpError} from './security'
 import {parseRadioConfig} from '../src/radio-config'
 export { Geocoder } from './geocoder'
-interface Env extends FoundationEnv {ASSETS?:Fetcher;RADIO_CONFIG_JSON?:string;DB:D1Database; ALLOWED_ORIGIN:string; GEOCODER:DurableObjectNamespace}
+interface Env extends FoundationEnv,MultiplayerEnv {ASSETS?:Fetcher;RADIO_CONFIG_JSON?:string;DB:D1Database; ALLOWED_ORIGIN:string; GEOCODER:DurableObjectNamespace}
 /** Public map reads and an isolated same-origin account API. */
 export default {
  async scheduled(_event:ScheduledController,env:Env){await cleanup(env.DB)},
  async fetch(request:Request,env:Env):Promise<Response>{
   const path=new URL(request.url).pathname
+  if(path.startsWith('/api/multiplayer/')){
+   try{const response=await multiplayerHttp(request,env);if(response.status===101)return response;const headers=new Headers(response.headers);headers.set('Cache-Control','no-store');headers.set('X-Content-Type-Options','nosniff');return new Response(response.body,{status:response.status,headers})}catch(error){return Response.json({error:error instanceof HttpError?error.message:'Multiplayer unavailable'},{status:error instanceof HttpError?error.status:503,headers:{'Cache-Control':'no-store'}})}
+  }
   if(foundationPath(path)){
    const requestId=crypto.randomUUID()
    let response:Response

@@ -1,5 +1,8 @@
 # HOVERGHINI Phase 1 backend foundation
 
+> Historical phase snapshot. Phase 2 supersedes the multiplayer scaffolding and deployment instructions; see [multiplayer.md](multiplayer.md).
+
+
 ## Scope and current behaviour
 
 The game still runs offline with its existing local economy. Phase 1 adds a persistent account, manual cloud backup/restore of legacy progress, and a **separate server-authoritative global wallet**. It does not make existing courier rewards, trading, purchases, test money or property income authoritative. None of that client state can credit the global wallet. The global wallet starts at zero and has no public mutation endpoint or gameplay reward producer yet.

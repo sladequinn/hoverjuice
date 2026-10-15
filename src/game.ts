@@ -1,3 +1,4 @@
+import {distance,validId,validGeo,wrapLon} from '../shared/multiplayer'
 import {CloudSave,CloudError,LOCAL_SAVE_KEY} from './cloud-save'
 import {routeGuide} from './route-guide'
 import {TrafficSound} from './traffic-sound'
@@ -10,7 +11,7 @@ import {GANGS,type Gang} from './filter'
 import {tutorialActive,tutorialText,type TutorialState} from './tutorial'
 import {NavigationMap,type MapView,type MapMarker} from './navigation-map'
 import {residential,houseOffer,localHome,distanceToHome,type Safehouse} from './housing'
-import { Campaign } from './campaign'
+import { Campaign, highwayLoop } from './campaign'
 import { ParticlePool } from './particles'
 import { HoverjuiceSpray } from './hoverjuice'
 import { Multiplayer } from './multiplayer'
@@ -18,7 +19,7 @@ import { OwnershipClient } from './persistence'
 import { RunState } from './dynamics'
 import * as THREE from 'three'
 import { CITIES, CONTRACT_TYPES, JUICE_PRICE, VEHICLES, vehicleById, type ContractType } from './data'
-import { fetchCity, geocode, proceduralCity, streamerFor, type CityData, pointInPoly } from './map'
+import { worldToLatLon, fetchCity, geocode, proceduralCity, streamerFor, type CityData, pointInPoly } from './map'
 import { Player, type Input } from './vehicle'
 import { MASKS, buildMask, validMask } from './character'
 import { World } from './world'
@@ -278,7 +279,7 @@ export class Game {
 
   // ---------- cities ----------
 
-  async warp(name: string, lat: number, lon: number, newGame = false) {
+  async warp(name: string, lat: number, lon: number, newGame = false, friendSpawn = false) {
     if (this.loading) return
     this.settleFuel(false)
     this.loading = true
@@ -370,15 +371,16 @@ export class Game {
     const main = city.nodes.map((n, i) => ({ n, i })).filter(({ n }) => n.main && n.adj.length > 0)
     const home=this.save.safehouse
     const hx=(home.lon-lon)*111320*Math.cos(lat*Math.PI/180),hz=-(home.lat-lat)*110540
-    const nearHome=Math.hypot(hx,hz)<city.radius
+    const nearHome=!friendSpawn&&Math.hypot(hx,hz)<city.radius
     main.sort((a,b)=>Math.hypot(a.n.x-(nearHome?hx:0),a.n.z-(nearHome?hz:0))-Math.hypot(b.n.x-(nearHome?hx:0),b.n.z-(nearHome?hz:0)))
     this.garageNode = main[0]?.i ?? 0
     this.player.placeAtNode(this.world, this.garageNode)
     this.player.unsnap()
+    if(friendSpawn){this.player.pos.set(0,this.world.groundHeightAt(0,0,this.player.pos.y)+1.2,0)}
     this.traffic.setActivitySites(this.dealers.dealers,this.actor)
     this.traffic.prime(this.actor)
     this.campaign=new Campaign(this.world);this.scene.add(this.campaign.boss)
-    if(!this.save.coldOpenDone){this.campaign.coldOpen(this.player);this.introMessage=2;this.save.coldOpenDone=true}
+    if(!friendSpawn&&!this.save.coldOpenDone){this.campaign.coldOpen(this.player);this.introMessage=2;this.save.coldOpenDone=true}
     this.juice = Math.max(this.juice, this.player.spec.tank * 0.6)
     this.active = null
     this.waypoint = null
@@ -1015,7 +1017,7 @@ export class Game {
   // ---------- modals ----------
 
   openModal(view: string) {
-    if (!this.world && view !== 'warp' && view !== 'couch' && view !== 'cloud') return
+    if (!this.world && view !== 'warp' && view !== 'couch' && view !== 'cloud' && view !== 'multiplayer') return
     const m = $('modal')
     m.dataset.view = view
     const body = $('modal-body')
@@ -1054,6 +1056,50 @@ export class Game {
     if (!this.loading) this.paused = false
   }
 
+  async openFriendInvite(code:string){try{await this.joinFriend(code)}catch(error){this.mpNotice=error instanceof Error?error.message:'Invite unavailable';if($('modal').dataset.view!=='cloud')this.openModal('multiplayer')}}
+  private mpNotice=''
+  private mpInvite=''
+  async joinFriend(code:string){
+    if(!validId(code))throw Error('Paste a valid invite link or code.')
+    const response=await fetch('/api/multiplayer/invite?code='+code,{credentials:'same-origin'})
+    if(response.status===401){sessionStorage.setItem('hoverghini.join',code);this.openModal('cloud');throw Error('Sign in first, then open the invite again.')}
+    if(!response.ok)throw Error('Invite unavailable or expired.')
+    const data=await response.json();if(!validGeo(data))throw Error('Invalid invite location')
+    if(validId(data.raceId))localStorage.setItem('hoverghini.race',data.raceId)
+    const url=new URL(location.href);url.searchParams.delete('join');history.replaceState(null,'',url)
+    sessionStorage.removeItem('hoverghini.join');localStorage.setItem('hoverghini.multiplayer','on')
+    $('title').classList.remove('show');await this.warp('Friend’s location',data.lat,data.lon,false,true)
+  }
+  private async multiplayerAction(act:string){
+    try{
+      const mp=this.multiplayer
+      if(act==='mp-join'){const value=($('mp-code') as HTMLInputElement).value.trim();let code=value;try{code=new URL(value).searchParams.get('join')??value}catch{}await this.joinFriend(code);return}
+      if(act==='mp-enable'||act==='mp-disable')mp?.setEnabled(act==='mp-enable')
+      if(act==='mp-name'){
+        const res=await fetch('/api/multiplayer/profile',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:($('mp-name') as HTMLInputElement).value})})
+        if(!res.ok)throw Error('Sign in and use 2–20 letters, numbers, spaces, dots, dashes or underscores.')
+        mp?.reconnect();this.mpNotice='Name saved.'
+      }
+      if(act==='mp-invite'){
+        const res=await fetch('/api/multiplayer/invite',{method:'POST'})
+        if(!res.ok)throw Error('Connect and drive into the city before creating an invite.')
+        const data=await res.json();this.mpInvite=data.url;this.mpNotice='Copy the invite below. It expires in three hours.'
+      }
+      if(act==='mp-create'&&mp&&this.world){
+        const world=this.world,here=worldToLatLon(world.city,this.player.pos.x,this.player.pos.z)
+        const loop=highwayLoop(world,this.player.edgeA)
+        const course=[here]
+        for(const i of loop){const n=world.city.nodes[i],p=worldToLatLon(world.city,n.x,n.z);if(distance(p,course.at(-1)!)>=60)course.push(p)}
+        if(distance(here,course.at(-1)!)>=60)course.push(here)
+        if(!mp.connection.send({type:'race-create',course}))throw Error('Connect before creating a race.')
+        this.mpNotice='Race requested. Refresh to see the lobby, then invite a friend.'
+      }
+      if(act==='mp-start')mp?.connection.send({type:'race-start'})
+      if(act==='mp-leave')mp?.connection.send({type:'race-leave'})
+    }catch(error){this.mpNotice=error instanceof Error?error.message:'Multiplayer unavailable'}
+    if($('modal').dataset.view!=='cloud')this.openModal('multiplayer')
+  }
+
   private async cloudAction(act:string) {
     if(this.cloud.busy)return
     this.cloud.busy=true
@@ -1082,6 +1128,7 @@ export class Game {
 
   private onAction(act: string, arg: string) {
     switch (act) {
+      case 'mp-invite': case 'mp-join': case 'mp-name': case 'mp-enable': case 'mp-disable': case 'mp-create': case 'mp-start': case 'mp-leave': case 'mp-refresh': void this.multiplayerAction(act);break
       case 'cloud-title': $('modal').classList.remove('show');$('title').classList.add('show');break
       case 'cloud-login': case 'cloud-local-restore': case 'cloud-refresh': case 'cloud-upload': case 'cloud-retry': case 'cloud-restore': case 'cloud-discard': case 'cloud-logout': case 'cloud-logout-all': void this.cloudAction(act);break
       case 'skip-tutorial': this.skipTutorial();this.closeModal();break
@@ -1191,6 +1238,17 @@ export class Game {
     const s = this.save
     const w = this.world
     switch (view) {
+      case 'multiplayer': {
+        const mp=this.multiplayer,race=mp?.race
+        return `<h2>Cruise with friends</h2><p role="status">${esc(mp?.status??'Choose a real-world city to cruise')} · ${mp?.count??0} nearby</p><p>${esc(this.mpNotice||mp?.notice||'Sign in to see other drivers in your area. Driving stays responsive if the connection drops.')}</p>
+        <div class="row"><button class="btn" data-act="view" data-arg="cloud">Account / sign in</button><button class="btn" data-act="mp-enable">Go online</button><button class="btn ghost" data-act="mp-disable">Play solo</button><button class="btn ghost" data-act="mp-refresh">Refresh status</button></div>
+        <div class="row"><input id="mp-name" maxlength="20" placeholder="Driver name" aria-label="Driver name"><button class="btn" data-act="mp-name">Save name</button></div>
+        <button class="btn" data-act="mp-invite">Create invite</button>${this.mpInvite?`<input aria-label="Invite link" readonly value="${esc(this.mpInvite)}" style="width:100%">`:''}
+        <div class="row"><input id="mp-code" placeholder="Friend invite link or code" aria-label="Friend invite"><button class="btn" data-act="mp-join">Join friend</button></div>
+        <h3>Casual road-loop race</h3><p class="muted">Create near a connected main-road loop. Invite friends before starting. Ghost racing: no vehicle collisions, rewards or ranked results.</p>
+        ${race?`<p>${esc(race.status)} · ${race.racers.length}/8 racers</p><p>${race.racers.map(p=>`${esc(p.name)}: ${p.finished===null?`${p.checkpoint}/${race.course.length} checkpoints`:(p.finished/1000).toFixed(1)+'s'}`).join('<br>')}</p><button class="btn" data-act="mp-start">Start (host)</button><button class="btn ghost" data-act="mp-leave">Leave race</button>`:'<button class="btn" data-act="mp-create">Create road-loop race</button>'}
+        ${!this.world?'<button class="btn ghost" data-act="cloud-title">Back to title</button>':''}`
+      }
       case 'cloud':
         return `<h2>Account & cloud saves</h2>${!this.world?'<button class="btn ghost" data-act="cloud-title">Back to title</button>':''}<p>Gameplay currently uses your legacy local save. Cloud backup carries that progress between devices. Local cash, property and test rewards never become global currency.</p><p role="status">${esc(this.cloud.status)}</p>
           ${this.cloud.playerId?`<p class="muted">Player ${esc(this.cloud.playerId)}<br>Global wallet: ${(this.cloud.balance/100).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})} HG · No gameplay rewards enabled yet.<br>Cloud backup: ${this.cloud.snapshot?.payload?esc(String(this.cloud.snapshot.payload.city&&typeof this.cloud.snapshot.payload.city==='object'?(this.cloud.snapshot.payload.city as {name:string}).name:'No city')):'None'} · revision ${this.cloud.snapshot?.revision??'unknown'}</p>`:''}
@@ -1201,7 +1259,7 @@ export class Game {
         return `<h2>Radio</h2><p class="muted">Gang frequencies, municipal dispatch, and late-night talk.</p><div class="radio-stations">${STATIONS.map(station=>`<button class="btn ${this.radio.station===station.id?'buy':''}" data-act="radio-station" data-arg="${station.id}" aria-pressed="${this.radio.station===station.id}"><strong>${station.name}</strong><small>${station.host}</small></button>`).join('')}</div><p id="radio-status" class="radio-status" aria-live="polite">${esc(this.radio.status)}</p><div class="row"><button class="btn" data-act="radio-play">Play / pause</button><button class="btn" data-act="radio-next">Next</button><button class="btn ghost" data-act="radio-station" data-arg="off">Off</button></div><button class="btn ghost" data-act="radio-refresh">Refresh stations</button><label class="radio-volume">Volume <input id="radio-volume" type="range" min="0" max="100" value="${Math.round(this.radio.volume*100)}" /></label><p class="muted small">Music and talk use the configured station playlists. Scanner chatter follows local Heat. Radio pauses when this tab is hidden.</p>`
       case 'menu':
         return `<h2>Off the clock</h2><p class="muted">${esc(s.city?.name??'City')} · ${money(s.money)} available</p>
-          <div class="menu-links">${[['cloud','Account & cloud saves'],['radio','Radio stations'],['market','Dealers & cargo'],['holdings','Safehouses & vaults'],['gangs','Gangs & territory'],['masks','Mask perks'],['tutorial','First-night guide'],['help','Controls & settings']].map(([id,label])=>`<button class="btn ghost" data-act="view" data-arg="${id}">${label}<span>→</span></button>`).join('')}</div>
+          <div class="menu-links">${[['multiplayer','Cruise with friends'],['cloud','Account & cloud saves'],['radio','Radio stations'],['market','Dealers & cargo'],['holdings','Safehouses & vaults'],['gangs','Gangs & territory'],['masks','Mask perks'],['tutorial','First-night guide'],['help','Controls & settings']].map(([id,label])=>`<button class="btn ghost" data-act="view" data-arg="${id}">${label}<span>→</span></button>`).join('')}</div>
           <details class="fold"><summary>City & account details</summary><p class="muted">Net worth ${money(this.netWorth)} · Notoriety ${this.run.notoriety}<br>Vault ${money(s.vaultCash)} · Income ${money(this.incomePerMin)}/min<br>${esc(this.multiplayer?.status??'Local save')} · ${esc($('city-tag').textContent??'')}</p></details>`
 
       case 'tutorial':
@@ -1480,6 +1538,8 @@ export class Game {
     for(const h of this.save.homes)out.push({id:h.id,...localHome(h,w.city),label:h.name,symbol:'H',color:'#94e4b2'})
     const garage=w.city.nodes[this.garageNode];if(garage)out.push({id:'garage',x:garage.x,z:garage.z,label:'Garage / stash',symbol:'H',color:'#94e4b2'})
     for(const p of w.pumps)out.push({id:`fuel:${p.x}:${p.z}`,x:p.x,z:p.z,label:'HJ-77',symbol:'F',color:'#00d8e8'})
+    const race=this.multiplayer?.race,entry=race?.racers.find(p=>p.id===this.multiplayer?.id),checkpoint=entry&&race?.course[entry.checkpoint]
+    if(checkpoint&&race?.status!=='finished')out.push({id:'multiplayer-checkpoint',x:wrapLon(checkpoint.lon-w.city.lon)*111320*Math.cos(w.city.lat*Math.PI/180),z:(w.city.lat-checkpoint.lat)*110540,label:'Race checkpoint',symbol:'R',color:'#73ffcb'})
     if(this.waypoint)out.push({id:'waypoint',...this.waypoint,symbol:'W',color:'#fff280'})
     return out
   }
@@ -1584,7 +1644,7 @@ export class Game {
         void this.streamMap()
       }
     }
-    this.multiplayer?.update(dt,this.player,this.spray,w,this.paused?0:dt)
+    this.multiplayer?.update(dt,this.player,this.spray,w,this.paused?0:dt,buildFor(this.save.builds,this.save.current).paint)
     w.update(this.paused?0:dt)
     const traffic=this.traffic?.update(this.paused?0:dt,this.actor,this.player.groundSpeed,this.run.heat,this.spray)
     if(!this.paused&&traffic){
@@ -1649,7 +1709,7 @@ export class Game {
     $('money').textContent = money(s.money)
     $('income').textContent = this.incomePerMin ? `+${money(this.incomePerMin)}/min passive` : 'NO VAULTS · KEEP MOVING'
     $('vehicle-name').textContent = `${p.spec.name} · ${this.gang}`
-    $('network-status').textContent=this.multiplayer?.status ?? 'LOCAL SAVE'
+    $('network-status').textContent=this.multiplayer?.raceStatus || this.multiplayer?.status || 'LOCAL SAVE'
     const tunnel=this.world!.isTunnel(p.pos.x,p.pos.z,p.pos.y)
     $('minimap').style.visibility=tunnel?'hidden':'visible'
     $('alt').textContent=tunnel?'GPS LOST':`${Math.round(p.pos.y)} m${p.testFlight?' · TEST FLIGHT':''}`
