@@ -1,3 +1,5 @@
+import {CityLife} from './city-life'
+import {districtFor} from '../shared/crews'
 import {Economy} from './economy'
 import {COMMODITIES} from '../shared/economy'
 import {Crews} from './crews'
@@ -183,6 +185,7 @@ export class Game {
   save = loadSave()
   world: World | null = null
   traffic: TrafficSystem | null = null
+  cityLife:CityLife|null=null
   dealers: DealerSystem | null = null
   player: Player
   juice = 0
@@ -351,6 +354,7 @@ export class Game {
     if(this.campaign){this.scene.remove(this.campaign.boss);this.campaign.dispose();this.campaign=null}
     if(this.multiplayer){this.scene.remove(this.multiplayer.group);this.multiplayer.dispose();this.multiplayer=null}
     if (this.world) {
+      if(this.cityLife){this.scene.remove(this.cityLife.group);this.cityLife.dispose();this.cityLife=null}
       if (this.traffic) {
         this.scene.remove(this.traffic.group)
         this.traffic.dispose()
@@ -371,6 +375,7 @@ export class Game {
     void this.syncOwnership()
     this.traffic = new TrafficSystem(this.world)
     this.scene.add(this.traffic.group)
+    this.cityLife=new CityLife(this.world,localStorage);this.traffic.setLife(this.cityLife);this.scene.add(this.cityLife.group)
     this.dealerAnchor={x:Infinity,z:Infinity}
     this.mapCenter=null
     this.dealers = new DealerSystem(this.world)
@@ -1729,6 +1734,7 @@ export class Game {
     if(crewTarget&&!w.city.procedural){const x=wrapLon(crewTarget.lon-w.city.lon)*111320*Math.cos(w.city.lat*Math.PI/180),z=(w.city.lat-crewTarget.lat)*110540;this.crewGate.position.set(x,w.groundHeightAt(x,z,this.player.pos.y)+2,z);this.crewGate.rotation.x=-Math.PI/2;this.crewGate.scale.setScalar(this.economy.driving ? .12 : 1);this.crewGate.visible=true;if(this.crewGate.parent!==this.scene)this.scene.add(this.crewGate)}else this.crewGate.visible=false
     this.multiplayer?.update(dt,this.player,this.spray,w,this.paused?0:dt,buildFor(this.save.builds,this.save.current).paint)
     w.update(this.paused?0:dt)
+    if(this.cityLife){this.cityLife.roadCandidates=this.traffic?.activityNodes??null;const life=this.cityLife,geo=worldToLatLon(w.city,this.actor.x,this.actor.z),district=this.crews.district,live=district?.id===districtFor(geo)&&district.expiresAt>Date.now(),gang=w.gangAt(this.actor.x,this.actor.z);life.context={gang,reputation:this.save.gangRep[gang]??0,friendlyControl:!!(live&&district.controller===this.crews.crew?.id),contested:!!(district?.id===districtFor(geo)&&district.contest&&!district.contest.finished),crewColor:live?district.color??undefined:undefined};life.update(this.paused?0:dt,this.actor,this.player.groundSpeed,this.run.heat);if(life.notice&&!this.paused){this.toast(life.notice,'info');life.notice=''}}
     const traffic=this.traffic?.update(this.paused?0:dt,this.actor,this.player.groundSpeed,this.run.heat,this.spray)
     if(!this.paused&&traffic&&!this.economy.driving){
       if(traffic.horn)this.trafficSound.honk(traffic.horn.distance,traffic.horn.side,traffic.horn.freight)
@@ -1798,7 +1804,8 @@ export class Game {
     $('minimap').style.visibility=tunnel?'hidden':'visible'
     $('alt').textContent=tunnel?'GPS LOST':`${Math.round(p.pos.y)} m${p.testFlight?' · TEST FLIGHT':''}`
     document.body.classList.toggle('test-flight',p.testFlight && p.mode==='free')
-    $('combat-status').textContent = `HULL ${Math.ceil(this.run.hull)}%${this.run.heat>0?' · HEAT '+this.run.heat.toFixed(1):''}${this.run.flow>1?' · FLOW '+this.run.flow.toFixed(1)+'×':''}${this.run.limp>=0?' · LIMP '+Math.ceil(this.run.limp)+'s':''}`
+    $('combat-status').title=this.cityLife?.label??''
+    $('combat-status').textContent = `HULL ${Math.ceil(this.run.hull)}%${this.run.heat>0?' · HEAT '+this.run.heat.toFixed(1):''}${this.run.flow>1?' · FLOW '+this.run.flow.toFixed(1)+'×':''}${this.run.limp>=0?' · LIMP '+Math.ceil(this.run.limp)+'s':''}${this.cityLife&&this.run.heat===0&&this.run.flow<=1&&this.run.limp<0?' · '+this.cityLife.label:''}`
     $('speed').textContent = String(Math.round(p.groundSpeed * 3.6))
     const mode = $('mode')
     setHtml(mode, p.mode === 'mag' ? 'MAG-LOCK' : 'FREE HOVER')
