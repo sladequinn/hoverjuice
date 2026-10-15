@@ -19,6 +19,7 @@ BACKEND_ENABLED = "false"
 MULTIPLAYER_ENABLED = "false"
 PROPERTIES_ENABLED = "false"
 CREWS_ENABLED = "false"
+ECONOMY_ENABLED = "false"
 # Dedicated Overpass-compatible OSM service; no public-service dependency is enabled by default.
 PROPERTY_SOURCE_URL = ""
 # Optional PROPERTY_SOURCE_TOKEN is a Worker secret.
@@ -77,3 +78,11 @@ class_name = "Territory"
 [[migrations]]
 tag = "v4-crews"
 new_sqlite_classes = ["Territory"]
+
+[[durable_objects.bindings]]
+name = "FREIGHT"
+class_name = "Freight"
+
+[[migrations]]
+tag = "v5-economy"
+new_sqlite_classes = ["Freight"]

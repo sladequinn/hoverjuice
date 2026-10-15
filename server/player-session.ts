@@ -1,15 +1,20 @@
+import {admitFreight} from './economy'
+import {freightPosition,type FreightView} from '../shared/economy'
 import {limit} from './security'
 import {cellFor,watchingCells,distance,saneMove,validMove,validCourse,validId,MAX_PEERS,WATCH_METRES,type Geo,type Presence} from '../shared/multiplayer'
 import type {CrewsEnv} from './crews-http'
 interface Attachment {id:string;name:string;epoch:number;session:string;anchor:Geo;last:Presence|null;checked:number;window:number;count:number;bad:number;cells:string[];watchAt:number;watchPos:Geo;raceId?:string;raceTick:number;budget:number;budgetAt:number;commandAt:number;ackAt:number;peerLimit:number;contestTick?:number;crewTag?:string}
 export class PlayerSession {
+ private freightId:string|undefined
+ private freightState:FreightView|undefined
+ private freightPending=false
  private epoch=0
  private contest:{district:string;id:string}|undefined
  private contestPending=false
  private queue:Promise<unknown>=Promise.resolve()
  private pending=0
  private visible=new Map<string,Presence>()
- constructor(private ctx:DurableObjectState,private env:CrewsEnv){ctx.blockConcurrencyWhile(async()=>{this.epoch=await ctx.storage.get<number>('epoch')??0;this.contest=await ctx.storage.get('contest')})}
+ constructor(private ctx:DurableObjectState,private env:CrewsEnv){ctx.blockConcurrencyWhile(async()=>{this.epoch=await ctx.storage.get<number>('epoch')??0;this.contest=await ctx.storage.get('contest');this.freightId=await ctx.storage.get('freightId')})}
  private active(){return this.ctx.getWebSockets().find(ws=>ws.readyState===1&&(ws.deserializeAttachment() as Attachment)?.epoch===this.epoch)}
  private send(ws:WebSocket,data:unknown){try{ws.send(JSON.stringify(data))}catch{}}
  private cell(key:string,path:string,body:unknown){return this.env.CELLS.get(this.env.CELLS.idFromName(key)).fetch(`https://cell${path}`,{method:'POST',body:JSON.stringify(body)})}
@@ -30,6 +35,19 @@ export class PlayerSession {
    return new Response(null,{status:101,webSocket:client})
   })
   const ws=this.active(),a=ws?.deserializeAttachment() as Attachment|undefined
+  if(url.pathname.startsWith('/freight-')){
+   const b=await request.json() as any,current=this.active(),attachment=current?.deserializeAttachment() as Attachment|undefined
+   const prior=url.pathname==='/freight-start'&&typeof b.body?.requestId==='string'?await this.env.DB.prepare('SELECT id FROM shipments WHERE player_id=? AND request_id=? AND quote_id=?').bind(b.player,b.body.requestId,b.body.quoteId??'').first():null
+   if(this.env.ECONOMY_ENABLED!=='true'||!attachment||b.player!==attachment.id||(!prior&&(!attachment.last||attachment.last.at+8000<Date.now())))return Response.json({error:prior?'Reconnect before recovering this shipment':'Connect and drive near the depot first'},{status:prior?503:409})
+   let id=b.id
+   if(url.pathname==='/freight-start'){try{id=(await admitFreight(this.env.DB,attachment.id,b.body,attachment.last??attachment.anchor)).id}catch(e){return Response.json({error:(e as Error).message},{status:(e as any).status??503})}}
+   const res=await this.env.FREIGHT.get(this.env.FREIGHT.idFromName(id)).fetch('https://freight/'+(url.pathname==='/freight-intercept'?'intercept':'view'),{method:'POST',body:JSON.stringify({id,player:attachment.id,position:attachment.last})})
+   if(!res.ok)return res
+   const view=await res.json() as FreightView
+   if(view.player_id!==attachment.id&&view.attacker?.id!==attachment.id)return Response.json({error:'Not your shipment'},{status:403})
+   const attached=await this.ctx.blockConcurrencyWhile(async()=>{if(attachment.epoch!==this.epoch)return false;await this.ctx.storage.put('freightId',id);this.freightId=id;this.freightState=view;const latest=current!.deserializeAttachment() as Attachment;latest.last=null;latest.anchor=freightPosition(view.course,view.player_id===attachment.id?view.driver:view.attacker!.car);current!.serializeAttachment(latest);return true})
+   return attached?Response.json(view):Response.json({error:'Connection replaced; resume freight again'},{status:409})
+  }
   if(url.pathname==='/contest'){
    return (async()=>{
    const b=await request.json() as any,current=this.active(),a=current?.deserializeAttachment() as Attachment|undefined
@@ -93,6 +111,17 @@ export class PlayerSession {
   }
   ws.serializeAttachment(a)
   let body:any;try{body=JSON.parse(message)}catch{body=null}
+  if(body?.type==='freight-input'){
+   if(this.env.ECONOMY_ENABLED!=='true'||!this.freightId||this.freightPending)return
+   this.freightPending=true;const id=this.freightId
+   this.ctx.waitUntil(this.env.FREIGHT.get(this.env.FREIGHT.idFromName(id)).fetch('https://freight/input',{method:'POST',body:JSON.stringify({id,player:a.id,input:body.input})}).then(async res=>{
+    if(res.ok){const view=await res.json() as FreightView;if(this.freightId===id){this.freightState=view;if(a.epoch===this.epoch)this.send(ws,{type:'freight',freight:{id:view.id,status:view.status,driver:view.driver,attacker:view.attacker,lock:view.lock}})}}
+   }).catch(()=>{}).finally(()=>{this.freightPending=false}));return
+  }
+  if(this.freightState?.status==='active'&&validMove(body)){
+   const v=this.freightState,vehicle=v.player_id===a.id?v.driver:v.attacker?.id===a.id?v.attacker.car:null
+   if(vehicle){const p=freightPosition(v.course,vehicle);body={...body,lat:p.lat,lon:p.lon,yaw:p.yaw,vx:Math.sin(p.yaw)*vehicle.speed,vz:Math.cos(p.yaw)*vehicle.speed,boost:false}}
+  }
   if(body?.type==='race-create'||body?.type==='race-join'||body?.type==='race-start'||body?.type==='race-leave'){
    if(now-a.commandAt<1000)return
    a.commandAt=now

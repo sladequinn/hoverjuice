@@ -3,7 +3,7 @@ import {HttpError,limit,readJson,sameOrigin} from './security'
 import {myCrew,crewCommand} from './crews'
 import {districtBounds} from '../shared/crews'
 import type {MultiplayerEnv} from './multiplayer-http'
-export interface CrewsEnv extends MultiplayerEnv {CREWS_ENABLED?:string;PROPERTIES_ENABLED?:string;TERRITORIES:DurableObjectNamespace;PROPERTY_SOURCE:DurableObjectNamespace}
+export interface CrewsEnv extends MultiplayerEnv {ECONOMY_ENABLED?:string;FREIGHT:DurableObjectNamespace;CREWS_ENABLED?:string;PROPERTIES_ENABLED?:string;TERRITORIES:DurableObjectNamespace;PROPERTY_SOURCE:DurableObjectNamespace}
 export async function crewsHttp(request:Request,env:CrewsEnv){
  const url=new URL(request.url),path=url.pathname,enabled=env.BACKEND_ENABLED==='true'&&env.MULTIPLAYER_ENABLED==='true'&&env.PROPERTIES_ENABLED==='true'&&env.CREWS_ENABLED==='true'
  if(path==='/api/crews/status'&&request.method==='GET')return Response.json({enabled})

@@ -1,3 +1,5 @@
+import {Economy} from './economy'
+import {COMMODITIES} from '../shared/economy'
 import {Crews} from './crews'
 import {CREW_COLORS,districtBounds} from '../shared/crews'
 import {GlobalProperties} from './global-properties'
@@ -163,6 +165,7 @@ export class Game {
   cloud = new CloudSave(localStorage)
   multiplayer: Multiplayer | null = null
   crewGate=new THREE.Mesh(new THREE.TorusGeometry(14,.5,6,32),new THREE.MeshBasicMaterial({color:0x73ffcb}))
+  economy=new Economy(localStorage,()=>{if($('modal').dataset.view==='economy'&&!(document.activeElement instanceof HTMLInputElement))this.openModal('economy')})
   crews=new Crews(localStorage,()=>{if($('modal').dataset.view==='crews'&&!(document.activeElement instanceof HTMLInputElement))this.openModal('crews')})
   properties=new GlobalProperties(localStorage,()=>{const view=$('modal').dataset.view;if(view==='property'||view==='properties')this.openModal(view)})
   ownership = new OwnershipClient()
@@ -364,7 +367,7 @@ export class Game {
     this.world = await World.create(city,status)
     this.spray.surfaceHeight=(x,z,reference)=>this.world!.surfaceHeightAt(x,z,reference)
     this.scene.add(this.world.group)
-    if(!city.procedural){this.multiplayer=new Multiplayer(city);this.scene.add(this.multiplayer.group);void this.properties.activate();void this.crews.activate()}else {this.properties.setLocation(null);this.crews.setLocation(null)}
+    if(!city.procedural){this.multiplayer=new Multiplayer(city);this.scene.add(this.multiplayer.group);void this.properties.activate();void this.crews.activate();void this.economy.activate()}else {this.properties.setLocation(null);this.crews.setLocation(null);this.economy.setLocation(null)}
     void this.syncOwnership()
     this.traffic = new TrafficSystem(this.world)
     this.scene.add(this.traffic.group)
@@ -1024,7 +1027,7 @@ export class Game {
   // ---------- modals ----------
 
   openModal(view: string) {
-    if (!this.world && view !== 'warp' && view !== 'couch' && view !== 'cloud' && view !== 'multiplayer' && view !== 'property' && view !== 'properties' && view !== 'crews') return
+    if (!this.world && view !== 'warp' && view !== 'couch' && view !== 'cloud' && view !== 'multiplayer' && view !== 'property' && view !== 'properties' && view !== 'crews' && view !== 'economy') return
     const m = $('modal')
     m.dataset.view = view
     const body = $('modal-body')
@@ -1135,6 +1138,15 @@ export class Game {
 
   private onAction(act: string, arg: string) {
     switch (act) {
+      case 'freight-refresh': void this.economy.refresh();break
+      case 'freight-quote': {const [destination,commodity]=arg.split('|');void this.economy.getQuote(destination,commodity,($('freight-competitive') as HTMLInputElement)?.checked??false);break}
+      case 'freight-start': void this.economy.start().then(()=>{if(this.economy.driving)this.closeModal()});break
+      case 'freight-retry': void this.economy.retry();break
+      case 'freight-resume': void this.economy.resume().then(()=>{if(this.economy.driving)this.closeModal()});break
+      case 'freight-cancel': if(confirm('Cancel this shipment? Departed cargo will be lost and no payout is earned.'))void this.economy.cancel();break
+      case 'freight-track': {const s=this.economy.shipments.find(s=>s.id===arg);if(s?.position&&this.world){this.waypoint={x:wrapLon(s.position.lon-this.world.city.lon)*111320*Math.cos(this.world.city.lat*Math.PI/180),z:(this.world.city.lat-s.position.lat)*110540,label:'Rival convoy · last reported position'};this.routeTimer=0;this.closeModal()}break}
+      case 'freight-intercept': if(confirm('Spend 25 HG to challenge this opted-in rival shipment? No loot or cash reward is paid.'))void this.economy.intercept(arg).then(()=>{if(this.economy.driving)this.closeModal()});break
+      case 'freight-waypoint': {const t=this.economy.target;if(t&&this.world){this.waypoint={x:wrapLon(t.lon-this.world.city.lon)*111320*Math.cos(this.world.city.lat*Math.PI/180),z:(this.world.city.lat-t.lat)*110540,label:'Freight depot / lane gate'};this.routeTimer=0;this.closeModal()}break}
       case 'crew-rally': {const t=this.crews.crew?.territories?.find(t=>t.id===arg);if(t)void this.warp('Crew rally '+t.id,t.lat,t.lon);break}
       case 'crew-refresh': void this.crews.refresh();break
       case 'crew-current': this.crews.current();break
@@ -1201,7 +1213,7 @@ export class Game {
       case 'radio-next': void this.radio.next();break
       case 'paint': this.customizeVehicle('paint',arg); break
       case 'upgrade': this.customizeVehicle('upgrade',arg); break
-      case 'view': this.openModal(arg);if(arg==='properties')void this.properties.loadPortfolio();if(arg==='crews')void this.crews.activate().then(()=>{if(this.crews.enabled)return this.crews.refresh()}); break
+      case 'view': this.openModal(arg);if(arg==='properties')void this.properties.loadPortfolio();if(arg==='economy')void this.economy.activate().then(()=>{if(this.economy.enabled)return this.economy.refresh()});if(arg==='crews')void this.crews.activate().then(()=>{if(this.crews.enabled)return this.crews.refresh()}); break
       case 'close': this.closeModal(); break
       case 'challenge': this.challenge(); break
       case 'stash': this.stash(); break
@@ -1265,6 +1277,16 @@ export class Game {
     const s = this.save
     const w = this.world
     switch (view) {
+      case 'economy': {
+        const e=this.economy,q=e.quote,v=e.active,disabled=e.busy||e.pending?'disabled':'',destinations=[...new Set(e.markets.map(m=>m.district))].filter(d=>d!==e.district)
+        return `<h2>Global freight markets</h2><p role="status">${esc(e.status)}</p><p>Global wallet <strong>${hg(e.balance)}</strong> · Freight reserve ${hg(e.fund)}</p><div class="row"><button class="btn" data-act="freight-refresh">Refresh board</button><button class="btn ghost" data-act="view" data-arg="cloud">Sign in</button></div>${e.pending?'<button class="btn" data-act="freight-retry">Recover pending cargo load</button>':''}
+        <p class="muted">Sealed consignments of fictional commodities. Prices reflect regional stock and shortages. Contracts pay from a finite reserve, up to six per day; local cash and local cargo stay separate.</p><label><input id="freight-competitive" type="checkbox"> Crew convoy: allow rival interception (optional)</label>
+        <div class="grid">${COMMODITIES.map(c=>{const local=e.markets.find(m=>m.district===e.district&&m.commodity===c.id);return `<div class="card"><h3>${esc(c.name)}</h3><p>Here: ${local?hg(local.price):'Enter a real city'} / unit · ${local?.stock??0} stock${local?.pressure?` · SHORTAGE ${local.pressure}`:''}</p>${destinations.map(d=>{const m=e.markets.find(m=>m.district===d&&m.commodity===c.id)!;return `<p>${esc(d)}<br>${hg(m.price)} · ${m.price>m.previous_price?'↑':m.price<m.previous_price?'↓':'→'} · stock ${m.stock} · incoming ${m.incoming??0}${m.pressure?' · shortage '+m.pressure:''}<br><button class="btn ghost" data-act="freight-quote" data-arg="${esc(d)}|${c.id}" ${disabled}>Plan delivery</button></p>`}).join('')}</div>`}).join('')}</div>
+        ${q?`<h3>Quoted freight</h3><p>${q.quantity} sealed units · payout ${hg(q.net)} after ${hg(q.fee)} service sink<br>${Math.round(q.route.total)} m · ${q.competitive?'Rival interception enabled':'Protected delivery'}<br>${Object.entries(q.benefits).filter(([,v])=>v).map(([k])=>esc(k)).join(' · ')||'Standard courier capacity'}</p><p class="muted">Go to the source waypoint within 60 seconds, or refresh the quote. Freight assist follows the server road route; use GO/BRAKE and steer into the indicated lane. Slow below 8 m/s to pass a lane gate safely. Three fast missed gates destroy cargo.</p><div class="row"><button class="btn" data-act="freight-waypoint">Guide to depot</button><button class="btn" data-act="freight-start" ${disabled}>Load cargo & drive</button></div>`:''}
+        ${v?`<h3>Shipment ${esc(v.status)}</h3><p>${esc(e.progress||v.commodity)} · ${hg(v.net)} potential payout</p><div class="row"><button class="btn" data-act="freight-resume" ${disabled}>Resume online driving</button><button class="btn ghost" data-act="freight-waypoint">Next lane gate</button>${v.player_id===e.player?`<button class="btn ghost" data-act="freight-cancel">Cancel shipment</button>`:`<span>Challenge ends when this convoy settles; entry fee is nonrefundable.</span>`}</div>`:''}
+        <h3>Rival convoys in this district</h3>${e.shipments.map(s=>`<div class="card"><p>${esc(s.commodity)} · crew ${esc(s.crew_id?.slice(0,8)??'')} · ${s.quantity} units</p><button class="btn ghost" data-act="freight-track" data-arg="${esc(s.id)}">Track convoy</button><button class="btn ghost" data-act="freight-intercept" data-arg="${esc(s.id)}" ${disabled}>Challenge nearby convoy · 25 HG</button></div>`).join('')||'<p class="muted">No opted-in rival convoys loaded.</p>'}<p class="muted">Interception requires rival crews, proximity within 200 m and a convoy between 25–85% of its route. Catch and match its lane for three seconds. Maximum two challenges per day; no theft payout.</p>
+        <h3>Recent consignments</h3>${e.history.map(s=>`<p>${esc(s.commodity)} · ${esc(s.status)} · ${s.status==='delivered'?hg(s.net):'no payout'}</p>`).join('')||'<p>No consignments yet.</p>'}<p class="muted">An owned warehouse of at least 150 m² in the source district raises capacity from four to six units. A destination property and live crew control reduce service fees. An eligible crew HQ adds two minutes of delivery time. Buildings never change owners.</p>`
+      }
       case 'crews': {
         const c=this.crews,v=c.crew,d=c.district,t=d?.contest,mine=t?.runs.find(r=>r.player===c.player),disabled=c.busy||c.pending?'disabled':''
         return `<h2>Crews & global districts</h2><p role="status">${esc(c.status)}</p><div class="row"><button class="btn" data-act="crew-refresh">Refresh</button><button class="btn ghost" data-act="view" data-arg="cloud">Account</button><button class="btn ghost" data-act="crew-current">View current district</button></div>${c.pending?'<button class="btn" data-act="crew-retry">Recover pending crew change</button>':''}
@@ -1300,7 +1322,7 @@ export class Game {
         return `<h2>Radio</h2><p class="muted">Gang frequencies, municipal dispatch, and late-night talk.</p><div class="radio-stations">${STATIONS.map(station=>`<button class="btn ${this.radio.station===station.id?'buy':''}" data-act="radio-station" data-arg="${station.id}" aria-pressed="${this.radio.station===station.id}"><strong>${station.name}</strong><small>${station.host}</small></button>`).join('')}</div><p id="radio-status" class="radio-status" aria-live="polite">${esc(this.radio.status)}</p><div class="row"><button class="btn" data-act="radio-play">Play / pause</button><button class="btn" data-act="radio-next">Next</button><button class="btn ghost" data-act="radio-station" data-arg="off">Off</button></div><button class="btn ghost" data-act="radio-refresh">Refresh stations</button><label class="radio-volume">Volume <input id="radio-volume" type="range" min="0" max="100" value="${Math.round(this.radio.volume*100)}" /></label><p class="muted small">Music and talk use the configured station playlists. Scanner chatter follows local Heat. Radio pauses when this tab is hidden.</p>`
       case 'menu':
         return `<h2>Off the clock</h2><p class="muted">${esc(s.city?.name??'City')} · ${money(s.money)} available</p>
-          <div class="menu-links">${[['crews','Crews & global districts'],['properties','Global property portfolio'],['multiplayer','Cruise with friends'],['cloud','Account & cloud saves'],['radio','Radio stations'],['market','Dealers & cargo'],['holdings','Safehouses & vaults'],['gangs','Gangs & territory'],['masks','Mask perks'],['tutorial','First-night guide'],['help','Controls & settings']].map(([id,label])=>`<button class="btn ghost" data-act="view" data-arg="${id}">${label}<span>→</span></button>`).join('')}</div>
+          <div class="menu-links">${[['economy','Global freight markets'],['crews','Crews & global districts'],['properties','Global property portfolio'],['multiplayer','Cruise with friends'],['cloud','Account & cloud saves'],['radio','Radio stations'],['market','Dealers & cargo'],['holdings','Safehouses & vaults'],['gangs','Gangs & territory'],['masks','Mask perks'],['tutorial','First-night guide'],['help','Controls & settings']].map(([id,label])=>`<button class="btn ghost" data-act="view" data-arg="${id}">${label}<span>→</span></button>`).join('')}</div>
           <details class="fold"><summary>City & account details</summary><p class="muted">Net worth ${money(this.netWorth)} · Notoriety ${this.run.notoriety}<br>Vault ${money(s.vaultCash)} · Income ${money(this.incomePerMin)}/min<br>${esc(this.multiplayer?.status??'Local save')} · ${esc($('city-tag').textContent??'')}</p></details>`
 
       case 'tutorial':
@@ -1575,6 +1597,8 @@ export class Game {
 
   private mapMarkers():MapMarker[]{
     const w=this.world!,out:MapMarker[]=[]
+    for(const s of this.economy.shipments)if(s.position)out.push({id:'convoy:'+s.id,x:wrapLon(s.position.lon-w.city.lon)*111320*Math.cos(w.city.lat*Math.PI/180),z:(w.city.lat-s.position.lat)*110540,label:'Rival freight convoy',symbol:'F',color:'#ff8fb4'})
+    const freightTarget=this.economy.target;if(freightTarget)out.push({id:'freight-gate',x:wrapLon(freightTarget.lon-w.city.lon)*111320*Math.cos(w.city.lat*Math.PI/180),z:(w.city.lat-freightTarget.lat)*110540,label:'Freight depot / lane gate',symbol:'D',color:'#73ffcb'})
     const district=this.crews.district,contest=district?.contest,target=this.crews.target
     const mark=(p:{lat:number;lon:number},id:string,label:string,symbol:string,color:string)=>out.push({id,x:wrapLon(p.lon-w.city.lon)*111320*Math.cos(w.city.lat*Math.PI/180),z:(w.city.lat-p.lat)*110540,label,symbol,color})
     for(const h of district?.headquarters??[])mark(h,'crew-hq:'+h.id,`[${h.tag}] HQ`,'H',h.color)
@@ -1641,7 +1665,7 @@ export class Game {
     if (!this.paused) {
       const spec = this.player.spec
       if(this.introMessage>0){this.introMessage-=dt;if(this.introMessage<=0){this.player.heading+=0.6;this.toast('BURNER: Get off the fucking rail before you get liquefied, kid.','info')}}
-      this.campaign?.update(dt,this.player)
+      if(!this.economy.driving)this.campaign?.update(dt,this.player)
       if(this.campaign?.intro || this.campaign?.racing){const boss=this.campaign.boss;this.particles.emit(boss.position.x,boss.position.y,boss.position.z)}
       if(this.campaign?.racing&&this.campaign.target){const t=this.campaign.target;this.waypoint={x:t.x,z:t.z,label:`PINK SLIP · LAP ${this.campaign.lap+1}/3`}}
       if(this.campaign?.result){
@@ -1655,9 +1679,9 @@ export class Game {
       }
       const p=this.player
       const tunnel=w.isTunnel(p.pos.x,p.pos.z,p.pos.y)
-      this.run.update(dt,this.cargoUsed+(this.save.tutorial.stage==='deal'?1:0)+(this.active?.type.id==='cyanade'&&this.active.stage==='dropoff'?1:0),tunnel,w.gangAt(p.pos.x,p.pos.z)!==this.gang,this.save.mask==='balaclava')
+      if(!this.economy.driving)this.run.update(dt,this.cargoUsed+(this.save.tutorial.stage==='deal'?1:0)+(this.active?.type.id==='cyanade'&&this.active.stage==='dropoff'?1:0),tunnel,w.gangAt(p.pos.x,p.pos.z)!==this.gang,this.save.mask==='balaclava')
       p.overclocking=this.run.overclock>0; p.limping=this.run.limp>=0
-      this.player.update(dt, input, w, this.juice > 0)
+      if(!this.economy.driving)this.player.update(dt, input, w, this.juice > 0)
       this.collisionCooldown=Math.max(0,this.collisionCooldown-dt)
       if(p.impact>3 && !this.collisionCooldown) { this.run.damage(Math.min(45,p.impact*0.65),this.save.mask==='oni'); this.collisionCooldown=0.6 }
       if(p.apex) this.run.chain()
@@ -1698,13 +1722,15 @@ export class Game {
         void this.streamMap()
       }
     }
-    if(!w.city.procedural){const geo=worldToLatLon(w.city,this.player.pos.x,this.player.pos.z);this.properties.setLocation(geo);this.crews.setLocation(geo)}
-    const crewTarget=this.crews.target
-    if(crewTarget&&!w.city.procedural){const x=wrapLon(crewTarget.lon-w.city.lon)*111320*Math.cos(w.city.lat*Math.PI/180),z=(w.city.lat-crewTarget.lat)*110540;this.crewGate.position.set(x,w.groundHeightAt(x,z,this.player.pos.y)+2,z);this.crewGate.rotation.x=-Math.PI/2;this.crewGate.visible=true;if(this.crewGate.parent!==this.scene)this.scene.add(this.crewGate)}else this.crewGate.visible=false
+    if(!w.city.procedural){const geo=worldToLatLon(w.city,this.player.pos.x,this.player.pos.z);this.properties.setLocation(geo);this.crews.setLocation(geo);this.economy.setLocation(geo)}
+    const freight=this.economy.step(this.paused?-1:input.throttle,this.paused?0:input.steer,this.multiplayer?(v)=>{this.multiplayer?.connection.send(v)}:null)
+    if(freight&&!w.city.procedural){const p=this.player;p.pos.x=wrapLon(freight.lon-w.city.lon)*111320*Math.cos(w.city.lat*Math.PI/180);p.pos.z=(w.city.lat-freight.lat)*110540;p.pos.y=w.groundHeightAt(p.pos.x,p.pos.z,p.pos.y)+1;p.heading=freight.yaw;p.speed=freight.speed;p.vel.set(Math.sin(p.heading)*p.speed,Math.cos(p.heading)*p.speed);p.mesh.position.copy(p.pos);p.mesh.rotation.set(0,p.heading,0)}
+    const crewTarget=this.economy.target??this.crews.target
+    if(crewTarget&&!w.city.procedural){const x=wrapLon(crewTarget.lon-w.city.lon)*111320*Math.cos(w.city.lat*Math.PI/180),z=(w.city.lat-crewTarget.lat)*110540;this.crewGate.position.set(x,w.groundHeightAt(x,z,this.player.pos.y)+2,z);this.crewGate.rotation.x=-Math.PI/2;this.crewGate.scale.setScalar(this.economy.driving ? .12 : 1);this.crewGate.visible=true;if(this.crewGate.parent!==this.scene)this.scene.add(this.crewGate)}else this.crewGate.visible=false
     this.multiplayer?.update(dt,this.player,this.spray,w,this.paused?0:dt,buildFor(this.save.builds,this.save.current).paint)
     w.update(this.paused?0:dt)
     const traffic=this.traffic?.update(this.paused?0:dt,this.actor,this.player.groundSpeed,this.run.heat,this.spray)
-    if(!this.paused&&traffic){
+    if(!this.paused&&traffic&&!this.economy.driving){
       if(traffic.horn)this.trafficSound.honk(traffic.horn.distance,traffic.horn.side,traffic.horn.freight)
       if(traffic.impact>0){this.run.damage(Math.min(30,traffic.impact*0.5),this.save.mask==='oni');if(this.player.mode==='mag' && traffic.impact>22)this.player.unsnap()}
       for(let i=0;i<traffic.nearMisses;i++)this.run.chain()
@@ -1767,7 +1793,7 @@ export class Game {
     $('income').textContent = this.incomePerMin ? `+${money(this.incomePerMin)}/min passive` : 'NO VAULTS · KEEP MOVING'
     $('vehicle-name').textContent = `${p.spec.name} · ${this.gang}`
     const delivery=this.crews.district?.contest,driver=delivery?.runs.find(r=>r.player===this.crews.player)
-    $('network-status').textContent=(delivery&&!delivery.finished&&driver?`CREW DELIVERY ${driver.next}/${delivery.course.length} · ${driver.best!==null?'COMPLETE':Date.now()<delivery.startsAt?'WARMUP':driver.invalid||'FOLLOW GREEN GATES'}`:'') || this.multiplayer?.raceStatus || this.multiplayer?.status || 'LOCAL SAVE'
+    $('network-status').textContent=this.economy.progress || (delivery&&!delivery.finished&&driver?`CREW DELIVERY ${driver.next}/${delivery.course.length} · ${driver.best!==null?'COMPLETE':Date.now()<delivery.startsAt?'WARMUP':driver.invalid||'FOLLOW GREEN GATES'}`:'') || this.multiplayer?.raceStatus || this.multiplayer?.status || 'LOCAL SAVE'
     const tunnel=this.world!.isTunnel(p.pos.x,p.pos.z,p.pos.y)
     $('minimap').style.visibility=tunnel?'hidden':'visible'
     $('alt').textContent=tunnel?'GPS LOST':`${Math.round(p.pos.y)} m${p.testFlight?' · TEST FLIGHT':''}`

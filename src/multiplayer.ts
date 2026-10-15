@@ -36,6 +36,7 @@ export class Multiplayer {
   if(localStorage.getItem('hoverghini.multiplayer')!=='off')void this.connection.start()
  }
  private receive(data:any){
+  if(data.type==='freight'){window.dispatchEvent(new CustomEvent('hoverghini:freight',{detail:data.freight}));return}
   if(data.type==='property-changed'){window.dispatchEvent(new Event('hoverghini:property-changed'));return}
   if(data.type==='welcome'&&validId(data.id)){
    this.id=data.id
