@@ -107,4 +107,8 @@ Use direct HTTPS audio files or browser-playable live streams, not Spotify/YouTu
 
 ## Phase 4: Crews and territory control
 
-Authenticated crews, member-owned headquarters, stable global districts and server-validated team delivery contests are documented in [crews-territories.md](docs/crews-territories.md). See [phase4-report.md](docs/phase4-report.md) for verification and deployment limitations. The feature is disabled by default; no Phase 5 economy is implemented.
+Authenticated crews, member-owned headquarters, stable global districts and server-validated team delivery contests are documented in [crews-territories.md](docs/crews-territories.md). See [phase4-report.md](docs/phase4-report.md) for verification and deployment limitations. The feature is disabled by default.
+
+## Phase 5: Global underground economy
+
+Persistent regional commodity markets, server-simulated sealed freight, optional rival interception and bounded global wallet rewards are documented in [global-economy.md](docs/global-economy.md). See [phase5-report.md](docs/phase5-report.md) for verification and remaining deployment blockers. Enable only after the earlier phases; the economy is disabled by default.

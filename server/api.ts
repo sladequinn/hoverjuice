@@ -1,3 +1,5 @@
+import {economyHttp,type EconomyHttpEnv} from './economy-http'
+export {Freight} from './freight'
 import {crewsHttp,type CrewsEnv} from './crews-http'
 export {Territory} from './territory'
 import {propertiesHttp,type PropertiesEnv} from './properties-http'
@@ -10,12 +12,13 @@ import {foundation,foundationPath,cleanup,type FoundationEnv} from './foundation
 import {HttpError} from './security'
 import {parseRadioConfig} from '../src/radio-config'
 export { Geocoder } from './geocoder'
-interface Env extends FoundationEnv,MultiplayerEnv,PropertiesEnv,CrewsEnv {ASSETS?:Fetcher;RADIO_CONFIG_JSON?:string;DB:D1Database; ALLOWED_ORIGIN:string; GEOCODER:DurableObjectNamespace}
+interface Env extends FoundationEnv,MultiplayerEnv,PropertiesEnv,CrewsEnv,EconomyHttpEnv {ASSETS?:Fetcher;RADIO_CONFIG_JSON?:string;DB:D1Database; ALLOWED_ORIGIN:string; GEOCODER:DurableObjectNamespace}
 /** Public map reads and an isolated same-origin account API. */
 export default {
- async scheduled(_event:ScheduledController,env:Env){await cleanup(env.DB)},
+ async scheduled(_event:ScheduledController,env:Env){await cleanup(env.DB);if(env.ECONOMY_ENABLED==='true'){await env.DB.prepare('DELETE FROM freight_quotes WHERE id IN (SELECT q.id FROM freight_quotes q WHERE q.expires_at<? AND NOT EXISTS(SELECT 1 FROM shipments s WHERE s.quote_id=q.id) LIMIT 500)').bind(Date.now()-86400000).run();const rows=await env.DB.prepare("SELECT id FROM shipments WHERE status='active' AND expires_at<? LIMIT 100").bind(Date.now()).all<{id:string}>();await Promise.allSettled(rows.results.map(r=>env.FREIGHT.get(env.FREIGHT.idFromName(r.id)).fetch('https://freight/view',{method:'POST',body:JSON.stringify({id:r.id})})))}},
  async fetch(request:Request,env:Env,ctx?:ExecutionContext):Promise<Response>{
   const path=new URL(request.url).pathname
+  if(path.startsWith('/api/economy/')){try{const r=await economyHttp(request,env);return new Response(r.body,{status:r.status,headers:{'Content-Type':'application/json','Cache-Control':'no-store'}})}catch(e){return Response.json({error:e instanceof HttpError?e.message:'Market service unavailable; retry safely'},{status:e instanceof HttpError?e.status:503,headers:{'Cache-Control':'no-store'}})}}
   if(path.startsWith('/api/crews/')){
    try{const r=await crewsHttp(request,env);return new Response(r.body,{status:r.status,headers:{'Content-Type':'application/json','Cache-Control':'no-store','X-Content-Type-Options':'nosniff'}})}catch(e){return Response.json({error:e instanceof HttpError?e.message:'Crew service unavailable; retry the same request'},{status:e instanceof HttpError?e.status:503,headers:{'Cache-Control':'no-store'}})}
   }
