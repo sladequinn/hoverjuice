@@ -3,7 +3,7 @@ import {limit} from './security'
 export interface PropertySourceEnv {DB:D1Database;PROPERTY_SOURCE_URL?:string;PROPERTY_SOURCE_TOKEN?:string;APP_CONTACT?:string}
 /** Demand-loaded OSM snapshots. Dedicated per-cell cache/coalescing; no worldwide preload. */
 export class PropertySource {
- constructor(private ctx:DurableObjectState,private env:PropertySourceEnv,private transport:typeof fetch=fetch){}
+ constructor(private ctx:DurableObjectState,private env:PropertySourceEnv,private transport:typeof fetch=fetch.bind(globalThis)){}
  async fetch(request:Request){return this.ctx.blockConcurrencyWhile(async()=>{
   const key=new URL(request.url).searchParams.get('cell')??''
   if(!/^\d{1,5}:\d{1,5}$/.test(key))return new Response('Invalid cell',{status:400})
