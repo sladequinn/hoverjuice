@@ -1,4 +1,6 @@
-import {registerBuilding,quoteProperty} from '../server/property-registry'
+import {crewCommand,myCrew} from '../server/crews'
+import {districtFor,districtBounds} from '../shared/crews'
+import {registerBuilding,quoteProperty,purchaseProperty} from '../server/property-registry'
 import {parseBuildings,valueBuilding} from '../server/property-geometry'
 import {transactWallet} from '../server/wallet'
 import {test,before,after} from 'node:test'
@@ -31,9 +33,9 @@ before(async()=>{
  const config=readFileSync('wrangler.example.toml','utf8').replace('main = "server/api.ts"',`main = ${JSON.stringify(resolve('server/api.ts'))}`).replace(/\[assets\][\s\S]*?(?=\[triggers\])/,'')
  writeFileSync('.test-artifacts/mp/wrangler.toml',config)
  execFileSync(process.execPath,['node_modules/wrangler/bin/wrangler.js','deploy','--dry-run','--config','.test-artifacts/mp/wrangler.toml','--outdir',resolve('.test-artifacts/mp/worker')],{stdio:'pipe',env:{...process.env,WRANGLER_SEND_METRICS:'false'}})
- mf=new Miniflare(convertV4MiniflareOptions({workers:[{name:'mp',modules:true,scriptPath:resolve('.test-artifacts/mp/worker/api.js'),compatibilityDate:'2026-10-01',d1Databases:['DB'],bindings:{APP_ORIGIN:origin,ALLOWED_ORIGIN:origin,BACKEND_ENABLED:'true',MULTIPLAYER_ENABLED:'true',PROPERTIES_ENABLED:'true'},durableObjects:{PLAYERS:{className:'PlayerSession',useSQLite:true},CELLS:{className:'GeoCell',useSQLite:true},RACES:{className:'CruiseRace',useSQLite:true},GEOCODER:{className:'Geocoder',useSQLite:true}}}]}))
+ mf=new Miniflare(convertV4MiniflareOptions({workers:[{name:'mp',modules:true,scriptPath:resolve('.test-artifacts/mp/worker/api.js'),compatibilityDate:'2026-10-01',d1Databases:['DB'],outboundService:async()=>{await delay(1000);const c=districtBounds(districtFor({...base,lat:44.45}));return Response.json({elements:[{type:'way',id:444,tags:{highway:'residential'},geometry:[{lat:c.lat,lon:c.lon-.003},{lat:c.lat,lon:c.lon},{lat:c.lat,lon:c.lon+.003}]}]})},bindings:{PROPERTY_SOURCE_URL:'https://source.test/overpass',APP_CONTACT:'test@example.test',APP_ORIGIN:origin,ALLOWED_ORIGIN:origin,BACKEND_ENABLED:'true',MULTIPLAYER_ENABLED:'true',PROPERTIES_ENABLED:'true',CREWS_ENABLED:'true'},durableObjects:{PROPERTY_SOURCE:{className:'PropertySource',useSQLite:true},TERRITORIES:{className:'Territory',useSQLite:true},PLAYERS:{className:'PlayerSession',useSQLite:true},CELLS:{className:'GeoCell',useSQLite:true},RACES:{className:'CruiseRace',useSQLite:true},GEOCODER:{className:'Geocoder',useSQLite:true}}}]}))
  db=await mf.getD1Database('DB') as unknown as D1Database
- for(const name of ['0000_existing_scaffolding','0001_foundation','0002_multiplayer','0003_global_properties'])for(const sql of readFileSync(`server/migrations/${name}.sql`,'utf8').replace(/^--.*$/gm,'').split(/;\s*(?=CREATE|INSERT INTO property_catalog_clock|$)/).map(s=>s.trim()).filter(Boolean))await db.prepare(sql).run()
+ for(const name of ['0000_existing_scaffolding','0001_foundation','0002_multiplayer','0003_global_properties','0004_crews_territories'])for(const sql of readFileSync(`server/migrations/${name}.sql`,'utf8').replace(/^--.*$/gm,'').split(/;\s*(?=CREATE|INSERT INTO property_catalog_clock|$)/).map(s=>s.trim()).filter(Boolean))await db.prepare(sql).run()
 })
 after(async()=>{for(const ws of sockets)try{ws.close()}catch{}await mf?.dispose()})
 const account=()=>issueSession(db,crypto.randomUUID())
@@ -129,4 +131,33 @@ test('simultaneous property buyers across authenticated sockets see the one comm
  const owners=await Promise.all([a,b].map(async account=>(await(await mf.dispatchFetch(origin+'/api/properties/item?id='+property.id,{headers:{Cookie:`${sessionCookie}=${account.secret}`}})).json() as any).property.ownerId))
  assert.equal(owners[0],owners[1]);const loser=owners[0]===a.playerId?b:a
  assert.equal((await db.prepare('SELECT balance FROM wallets WHERE player_id=?').bind(loser.playerId).first<any>()).balance,100000000);p.ws.close();q.ws.close()
+})
+
+test('crew affiliation is authenticated across sockets; territory reads agree across sessions and direct scoring is rejected',async()=>{
+ const a=await account(),b=await account();await crewCommand(db,a.playerId,{playerId:a.playerId,requestId:crypto.randomUUID(),action:'create',name:'Network crew',tag:'NET',color:'#73ffcb'})
+ const crew=(await myCrew(db,a.playerId))!,p=await connect(a),q=await connect(b);p.send(base);q.send(base)
+ await until(()=>q.messages.some(m=>m.type==='peer'&&m.peer.id===a.playerId&&m.peer.crewTag==='NET'))
+ const district=districtFor(base),id=crypto.randomUUID();await db.prepare('INSERT INTO territory_results VALUES(?,?,?,?,?)').bind(id,district,crew.id,'[]',Date.now()).run()
+ for(const account of [a,b]){const r=await mf.dispatchFetch(origin+'/api/crews/district?id='+encodeURIComponent(district),{headers:{Cookie:`${sessionCookie}=${account.secret}`}});assert.equal(r.status,200);assert.equal((await r.json() as any).controller,crew.id)}
+ const rejected=await mf.dispatchFetch(origin+'/api/crews/contest',{method:'POST',headers:{Cookie:`${sessionCookie}=${a.secret}`,Origin:origin,'Content-Type':'application/json'},body:JSON.stringify({action:'join',district,score:1,player:b.playerId})});assert.equal(rejected.status,400)
+ p.send({...base,seq:1,crewTag:'FAKE'});await until(()=>p.messages.some(m=>m.type==='rejected'))
+ p.ws.close();q.ws.close()
+ const re=await connect(b);const v=await mf.dispatchFetch(origin+'/api/crews/district?id='+encodeURIComponent(district),{headers:{Cookie:`${sessionCookie}=${b.secret}`}});assert.equal((await v.json() as any).controller,crew.id);re.ws.close()
+})
+
+test('real Worker admits two HQ-backed crews to one server-road contest and reconnect does not duplicate a driver',async()=>{
+ const center=districtBounds(districtFor({...base,lat:44.45})),district=districtFor(center),accounts=await Promise.all([account(),account()]);let index=0
+ for(const a of accounts){index++;await crewCommand(db,a.playerId,{playerId:a.playerId,requestId:crypto.randomUUID(),action:'create',name:'Contest crew '+index,tag:'CC'+index,color:'#73ffcb'})
+  const lat=center.lat+index*.001,lon=center.lon,building=parseBuildings({elements:[{type:'way',id:77600+index,version:1,tags:{building:'house'},geometry:[{lat,lon},{lat:lat+.0002,lon},{lat:lat+.0002,lon:lon+.0002},{lat,lon:lon+.0002},{lat,lon}]}]})[0]
+  await transactWallet(db,a.playerId,'crew-fixture',100000000,'test fixture');const property=await registerBuilding(db,building,valueBuilding(building,[building]),Date.now()),quote=await quoteProperty(db,a.playerId,property)
+  await purchaseProperty(db,a.playerId,{playerId:a.playerId,quoteId:quote!.id,requestId:crypto.randomUUID()});await crewCommand(db,a.playerId,{playerId:a.playerId,requestId:crypto.randomUUID(),action:'hq',value:property.id})
+ }
+ const position={...base,lat:center.lat,lon:center.lon-.003},p=await connect(accounts[0],position),q=await connect(accounts[1],position);p.send(position);q.send(position);await delay(200)
+ const call=(a:any,action:string)=>mf.dispatchFetch(origin+'/api/crews/contest',{method:'POST',headers:{Cookie:`${sessionCookie}=${a.secret}`,Origin:origin,'Content-Type':'application/json'},body:JSON.stringify({district,action})})
+ const opening=call(accounts[0],'open');for(let seq=1;seq<=12;seq++){p.send({...position,seq});await delay(80)}const opened=await opening;assert.equal(p.closed,0,'Slow road source must not block the driving queue');assert.equal(opened.status,200,await opened.clone().text());const initial=(await opened.json() as any).contest;assert.ok(initial.course.length>10)
+ for(const a of accounts)assert.equal((await call(a,'join')).status,200)
+ const read=async()=>await (await mf.dispatchFetch(origin+'/api/crews/district?id='+encodeURIComponent(district),{headers:{Cookie:`${sessionCookie}=${accounts[0].secret}`}})).json() as any
+ assert.equal((await read()).contest.runs.length,2);p.ws.close();const re=await connect(accounts[0],position);re.send(position);await delay(150);assert.equal((await call(accounts[0],'join')).status,200)
+ const view=await read();assert.equal(view.contest.runs.length,2);assert.equal(view.contest.id,initial.id);assert.equal(new Set(view.contest.runs.map((r:any)=>r.crew)).size,2)
+ re.ws.close();q.ws.close()
 })

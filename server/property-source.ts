@@ -12,7 +12,7 @@ export class PropertySource {
   if(cached&&Date.now()-cached.at<900000){const parts=await this.ctx.storage.get<string>(Array.from({length:cached.count},(_,i)=>'part:'+i));return Response.json({at:cached.at,data:JSON.parse(Array.from({length:cached.count},(_,i)=>parts.get('part:'+i)).join(''))})}
   if(!this.env.PROPERTY_SOURCE_URL?.startsWith('https://')||!this.env.APP_CONTACT)return new Response('Property map source is not configured',{status:503})
   await limit(this.env.DB,'property-source-global',60)
-  const query=`[out:json][timeout:10];way["building"][!"building:part"](around:1000,${center.lat},${center.lon})->.w;(.w;relation["building"]["type"="multipolygon"](around:1000,${center.lat},${center.lon});relation(bw.w)["building"]["type"="multipolygon"];);out meta geom;`
+  const query=`[out:json][timeout:10];way["building"][!"building:part"](around:1000,${center.lat},${center.lon})->.w;(.w;relation["building"]["type"="multipolygon"](around:1000,${center.lat},${center.lon});relation(bw.w)["building"]["type"="multipolygon"];way["highway"~"^(residential|unclassified|tertiary|secondary|living_street|service)$"](around:1000,${center.lat},${center.lon}););out meta geom;`
   const headers:Record<string,string>={'Content-Type':'application/x-www-form-urlencoded','User-Agent':`HOVERGHINI property registry (${this.env.APP_CONTACT})`}
   if(this.env.PROPERTY_SOURCE_TOKEN)headers.Authorization=`Bearer ${this.env.PROPERTY_SOURCE_TOKEN}`
   const response=await this.transport(this.env.PROPERTY_SOURCE_URL,{method:'POST',headers,body:new URLSearchParams({data:query}),redirect:'manual',signal:AbortSignal.timeout(12000)})
