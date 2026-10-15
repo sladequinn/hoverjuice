@@ -17,6 +17,10 @@ enabled = true
 # Enable only on the HTTPS host serving BOTH the game and /api routes.
 BACKEND_ENABLED = "false"
 MULTIPLAYER_ENABLED = "false"
+PROPERTIES_ENABLED = "false"
+# Dedicated Overpass-compatible OSM service; no public-service dependency is enabled by default.
+PROPERTY_SOURCE_URL = ""
+# Optional PROPERTY_SOURCE_TOKEN is a Worker secret.
 APP_ORIGIN = "https://YOUR-HOVERJUICE-HOST"
 GITHUB_CLIENT_ID = "REPLACE-WITH-OAUTH-CLIENT-ID"
 # GITHUB_CLIENT_SECRET must be set with `wrangler secret put`, never here.
@@ -56,3 +60,11 @@ class_name = "CruiseRace"
 [[migrations]]
 tag = "v2-multiplayer"
 new_sqlite_classes = ["PlayerSession", "GeoCell", "CruiseRace"]
+
+[[durable_objects.bindings]]
+name = "PROPERTY_SOURCE"
+class_name = "PropertySource"
+
+[[migrations]]
+tag = "v3-properties"
+new_sqlite_classes = ["PropertySource"]

@@ -10,6 +10,9 @@ export class GeoCell {
   const path=new URL(request.url).pathname,now=Date.now(),body=await request.json() as any
   for(const [id,w]of this.watchers)if(w.expires<now)this.watchers.delete(id)
   for(const [id,p]of this.publishers)if(p.at+8000<now)this.publishers.delete(id)
+  if(path==='/property'){
+   this.ctx.waitUntil(Promise.allSettled([...this.watchers.values()].filter(w=>distance(w,body)<WATCH_METRES).map(w=>this.env.PLAYERS.get(this.env.PLAYERS.idFromName(w.id)).fetch('https://player/property',{method:'POST',body:JSON.stringify({watchEpoch:w.epoch,id:body.id,revision:body.revision})}))).then(()=>{}));return new Response('ok')
+  }
   if(path==='/watch'){
    const old=this.watchers.get(body.id)
    if(!old&&this.watchers.size>=CELLS_WATCHERS)return new Response('Area full',{status:429})

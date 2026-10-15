@@ -1,3 +1,5 @@
+import {GlobalProperties} from './global-properties'
+import {hg} from '../shared/properties'
 import {distance,validId,validGeo,wrapLon} from '../shared/multiplayer'
 import {CloudSave,CloudError,LOCAL_SAVE_KEY} from './cloud-save'
 import {routeGuide} from './route-guide'
@@ -158,6 +160,7 @@ class Heap {
 export class Game {
   cloud = new CloudSave(localStorage)
   multiplayer: Multiplayer | null = null
+  properties=new GlobalProperties(localStorage,()=>{const view=$('modal').dataset.view;if(view==='property'||view==='properties')this.openModal(view)})
   ownership = new OwnershipClient()
   radio=new Radio(()=>({heat:this.run.heat,speed:this.player.groundSpeed*3.6,gang:this.world?.gangAt(this.actor.x,this.actor.z)??this.gang}))
   trafficSound=new TrafficSound()
@@ -357,7 +360,7 @@ export class Game {
     this.world = await World.create(city,status)
     this.spray.surfaceHeight=(x,z,reference)=>this.world!.surfaceHeightAt(x,z,reference)
     this.scene.add(this.world.group)
-    if(!city.procedural){this.multiplayer=new Multiplayer(city);this.scene.add(this.multiplayer.group)}
+    if(!city.procedural){this.multiplayer=new Multiplayer(city);this.scene.add(this.multiplayer.group);void this.properties.activate()}else this.properties.setLocation(null)
     void this.syncOwnership()
     this.traffic = new TrafficSystem(this.world)
     this.scene.add(this.traffic.group)
@@ -1017,7 +1020,7 @@ export class Game {
   // ---------- modals ----------
 
   openModal(view: string) {
-    if (!this.world && view !== 'warp' && view !== 'couch' && view !== 'cloud' && view !== 'multiplayer') return
+    if (!this.world && view !== 'warp' && view !== 'couch' && view !== 'cloud' && view !== 'multiplayer' && view !== 'property' && view !== 'properties') return
     const m = $('modal')
     m.dataset.view = view
     const body = $('modal-body')
@@ -1128,6 +1131,16 @@ export class Game {
 
   private onAction(act: string, arg: string) {
     switch (act) {
+      case 'global-inspect': {const [lat,lon]=arg.split('|').map(Number);this.toggleMap(false);this.openModal('property');void this.properties.inspect({lat,lon});break}
+      case 'global-item': this.toggleMap(false);this.openModal('property');void this.properties.select(arg);break
+      case 'global-quote': void this.properties.requote();break
+      case 'global-buy': if(confirm('Purchase this global title using your global wallet? This purchase is permanent; resale is not enabled.'))void this.properties.buy();break
+      case 'global-retry': void this.properties.retry();break
+      case 'global-refresh': void this.properties.activate().then(()=>this.properties.loadPortfolio());break
+      case 'global-more': void this.properties.loadPortfolio(true);break
+      case 'global-portfolio': this.openModal('properties');void this.properties.loadPortfolio();break
+      case 'global-visit': {const p=this.properties.selected;if(p)void this.warp(p.name,p.lat,p.lon);break}
+      case 'global-waypoint': {const p=this.properties.selected;if(p&&this.world){const point={x:wrapLon(p.lon-this.world.city.lon)*111320*Math.cos(this.world.city.lat*Math.PI/180),z:(this.world.city.lat-p.lat)*110540};this.waypoint={...point,label:p.name};this.routeTimer=0;this.closeModal()}break}
       case 'mp-invite': case 'mp-join': case 'mp-name': case 'mp-enable': case 'mp-disable': case 'mp-create': case 'mp-start': case 'mp-leave': case 'mp-refresh': void this.multiplayerAction(act);break
       case 'cloud-title': $('modal').classList.remove('show');$('title').classList.add('show');break
       case 'cloud-login': case 'cloud-local-restore': case 'cloud-refresh': case 'cloud-upload': case 'cloud-retry': case 'cloud-restore': case 'cloud-discard': case 'cloud-logout': case 'cloud-logout-all': void this.cloudAction(act);break
@@ -1174,7 +1187,7 @@ export class Game {
       case 'radio-next': void this.radio.next();break
       case 'paint': this.customizeVehicle('paint',arg); break
       case 'upgrade': this.customizeVehicle('upgrade',arg); break
-      case 'view': this.openModal(arg); break
+      case 'view': this.openModal(arg);if(arg==='properties')void this.properties.loadPortfolio(); break
       case 'close': this.closeModal(); break
       case 'challenge': this.challenge(); break
       case 'stash': this.stash(); break
@@ -1238,6 +1251,14 @@ export class Game {
     const s = this.save
     const w = this.world
     switch (view) {
+      case 'properties': {
+        const p=this.properties
+        return `<h2>Global property portfolio</h2><p role="status">${esc(p.status)}</p><p>Global wallet: <strong>${hg(p.balance)}</strong></p><p class="muted">These permanent titles belong to your account across every city and device. Local cash, safehouses and rent remain separate legacy progress. Global properties do not produce income or grant territory.</p><div class="row"><button class="btn" data-act="global-refresh" ${p.busy?'disabled':''}>Refresh account & portfolio</button><button class="btn ghost" data-act="view" data-arg="cloud">Account / sign in</button></div>${p.pending?'<button class="btn" data-act="global-retry">Recover pending purchase</button>':''}<div class="grid">${p.items.map(v=>`<div class="card"><h3>${esc(v.name)}</h3><p>${esc(v.id)} · ${esc(v.status)}<br>${v.lat.toFixed(5)}, ${v.lon.toFixed(5)}<br>Acquired for ${hg(v.priceMinor)}</p><button class="btn" data-act="global-item" data-arg="${esc(v.id)}">Inspect title</button></div>`).join('')||'<p>No global titles loaded. Open the map and select a building to inspect it.</p>'}</div>${p.next?'<button class="btn" data-act="global-more">Load more titles</button>':''}${!this.world?'<button class="btn ghost" data-act="cloud-title">Back to title</button>':''}`
+      }
+      case 'property': {
+        const p=this.properties,v=p.selected,q=p.quote,canBuy=v&&!v.ownerId&&v.status==='active'&&q&&q.expiresAt>Date.now()&&p.balance>=q.priceMinor&&!p.pending&&!p.busy
+        return `<h2>${v?esc(v.name):'Global building inspection'}</h2><p role="status">${esc(p.status)}</p>${v?`<p>${esc(v.id)} · OSM version ${v.sourceVersion}<br>${v.lat.toFixed(5)}, ${v.lon.toFixed(5)} · ${v.area.toLocaleString()} m² · ${v.levels} estimated floor(s)</p><p><strong>${v.ownerId?`Owner: ${v.ownerId===p.playerId?'You':esc(v.ownerName||'Driver')} · ${esc(v.ownerId.slice(0,8))}`:'No registered owner'}</strong><br>Status: ${esc(v.status)}<br>Registry valuation: ${hg(v.priceMinor)}<br>Your global wallet: ${hg(p.balance)}</p><p class="muted">${v.status==='review'?'OSM geometry or identity needs reconciliation. Purchases are paused; existing titles remain protected.':v.status==='retired'?'The source building is absent from the current map snapshot. Its title and history remain preserved.':'Permanent game-world ownership. No resale, rent or territorial control is enabled.'}</p><div class="row">${!v.ownerId&&v.status==='active'?`<button class="btn" data-act="global-quote" ${p.busy?'disabled':''}>Refresh purchase quote</button><button class="btn buy" data-act="global-buy" ${canBuy?'':'disabled'}>Buy title · ${hg(q?.priceMinor??v.priceMinor)}</button>`:''}<button class="btn ghost" data-act="global-waypoint">Set waypoint</button><button class="btn ghost" data-act="global-visit">Visit area</button></div>`:''}${p.pending?'<button class="btn" data-act="global-retry">Retry pending purchase safely</button>':''}<div class="row"><button class="btn ghost" data-act="global-portfolio">Global portfolio</button><button class="btn ghost" data-act="view" data-arg="cloud">Account / sign in</button></div><p class="muted small">Global purchases use server-issued wallet funds. Local cash and test funds cannot be imported. Map data © OpenStreetMap contributors, ODbL.</p>`
+      }
       case 'multiplayer': {
         const mp=this.multiplayer,race=mp?.race
         return `<h2>Cruise with friends</h2><p role="status">${esc(mp?.status??'Choose a real-world city to cruise')} · ${mp?.count??0} nearby</p><p>${esc(this.mpNotice||mp?.notice||'Sign in to see other drivers in your area. Driving stays responsive if the connection drops.')}</p>
@@ -1259,7 +1280,7 @@ export class Game {
         return `<h2>Radio</h2><p class="muted">Gang frequencies, municipal dispatch, and late-night talk.</p><div class="radio-stations">${STATIONS.map(station=>`<button class="btn ${this.radio.station===station.id?'buy':''}" data-act="radio-station" data-arg="${station.id}" aria-pressed="${this.radio.station===station.id}"><strong>${station.name}</strong><small>${station.host}</small></button>`).join('')}</div><p id="radio-status" class="radio-status" aria-live="polite">${esc(this.radio.status)}</p><div class="row"><button class="btn" data-act="radio-play">Play / pause</button><button class="btn" data-act="radio-next">Next</button><button class="btn ghost" data-act="radio-station" data-arg="off">Off</button></div><button class="btn ghost" data-act="radio-refresh">Refresh stations</button><label class="radio-volume">Volume <input id="radio-volume" type="range" min="0" max="100" value="${Math.round(this.radio.volume*100)}" /></label><p class="muted small">Music and talk use the configured station playlists. Scanner chatter follows local Heat. Radio pauses when this tab is hidden.</p>`
       case 'menu':
         return `<h2>Off the clock</h2><p class="muted">${esc(s.city?.name??'City')} · ${money(s.money)} available</p>
-          <div class="menu-links">${[['multiplayer','Cruise with friends'],['cloud','Account & cloud saves'],['radio','Radio stations'],['market','Dealers & cargo'],['holdings','Safehouses & vaults'],['gangs','Gangs & territory'],['masks','Mask perks'],['tutorial','First-night guide'],['help','Controls & settings']].map(([id,label])=>`<button class="btn ghost" data-act="view" data-arg="${id}">${label}<span>→</span></button>`).join('')}</div>
+          <div class="menu-links">${[['properties','Global property portfolio'],['multiplayer','Cruise with friends'],['cloud','Account & cloud saves'],['radio','Radio stations'],['market','Dealers & cargo'],['holdings','Safehouses & vaults'],['gangs','Gangs & territory'],['masks','Mask perks'],['tutorial','First-night guide'],['help','Controls & settings']].map(([id,label])=>`<button class="btn ghost" data-act="view" data-arg="${id}">${label}<span>→</span></button>`).join('')}</div>
           <details class="fold"><summary>City & account details</summary><p class="muted">Net worth ${money(this.netWorth)} · Notoriety ${this.run.notoriety}<br>Vault ${money(s.vaultCash)} · Income ${money(this.incomePerMin)}/min<br>${esc(this.multiplayer?.status??'Local save')} · ${esc($('city-tag').textContent??'')}</p></details>`
 
       case 'tutorial':
@@ -1409,7 +1430,7 @@ export class Game {
               .join('')
           : ''
         const elsewhere = s.holdings.filter((h) => h.cityKey !== w?.city.key)
-        return `<h2>Real Estate: ${esc(w?.city.name ?? '')}</h2>
+        return `<h2>Local safehouses: ${esc(w?.city.name ?? '')}</h2><button class="btn" data-act="global-portfolio">Global property portfolio</button><p class="muted">Legacy local holdings below do not grant global ownership.</p>
           ${s.homes.map(h=>`<div class="card"><h3>${esc(h.name)}</h3><p class="muted">Owned safehouse · No criminal turf or passive rent</p><button class="btn ghost" data-act="home-waypoint" data-arg="${esc(h.id)}">Set waypoint</button></div>`).join('')}
           <p class="muted">Open the map and tap a teal residential building to buy a safehouse.</p>
           ${s.safehouse?`<div class="card"><h3>Your couch · Starter safehouse</h3><p>${esc(s.safehouse.name)}</p><p class="muted">Free garage and stash. Park at the street entrance to clear Heat.</p><button class="btn" data-act="home">Return to couch</button><button class="btn ghost" data-act="stash">Stash</button><button class="btn ghost" data-act="withdraw">Withdraw</button></div>`:''}
@@ -1502,9 +1523,10 @@ export class Game {
     const panel=$('map-selection');panel.hidden=false;panel.innerHTML=html
     panel.querySelectorAll<HTMLElement>('[data-act]').forEach(el=>el.addEventListener('click',()=>this.onAction(el.dataset.act!,el.dataset.arg??'')))
   }
-  private showMapBuilding(index:number){
-    const w=this.world!,b=w.city.buildings[index],h=houseOffer(b,w.city),owned=this.save.homes.some(v=>v.id===h.id)
-    this.mapPanel(`<strong>${esc(h.name)}</strong><p>${owned?'Your safehouse · Park nearby to stash cargo and clear Heat.':`Residential safehouse · ${money(h.price)}`}</p>${owned?`<button class="btn" data-act="home-waypoint" data-arg="${esc(h.id)}">Set waypoint</button><button class="btn ghost" data-act="stash">Stash</button><button class="btn ghost" data-act="withdraw">Withdraw</button>`:`<button class="btn buy" data-act="buy-home" data-arg="${index}" ${this.save.money<h.price?'disabled':''}>Buy safehouse · ${money(h.price)}</button>`}`)
+  private showMapBuilding(index:number,point?:{x:number;z:number}){
+    const w=this.world!,b=w.city.buildings[index],h=houseOffer(b,w.city),owned=this.save.homes.some(v=>v.id===h.id),ll=worldToLatLon(w.city,point?.x??b.cx,point?.z??b.cz)
+    const legacy=residential(b,w.city)?`<p>${owned?'Local safehouse access · Park nearby to stash cargo and clear Heat.':`Local safehouse access · ${money(h.price)}`}</p>${owned?`<button class="btn" data-act="home-waypoint" data-arg="${esc(h.id)}">Set waypoint</button><button class="btn ghost" data-act="stash">Stash</button><button class="btn ghost" data-act="withdraw">Withdraw</button>`:`<button class="btn buy" data-act="buy-home" data-arg="${index}" ${this.save.money<h.price?'disabled':''}>Buy local access · ${money(h.price)}</button>`}`:''
+    this.mapPanel(`<strong>${esc(h.name)}</strong>${!w.city.procedural?`<p>Inspect the worldwide title and server price for this OSM footprint.</p><button class="btn" data-act="global-inspect" data-arg="${ll.lat}|${ll.lon}">Inspect global property</button>`:'<p>Simulated buildings have no global title.</p>'}${legacy}`)
   }
 
   mapPick(x:number,y:number){
@@ -1512,12 +1534,13 @@ export class Game {
     const cv=$<HTMLCanvasElement>('full-map'),dpr=cv.width/cv.clientWidth,v=this.fullView
     const m=this.mapMarkers().map(m=>{const p=this.navigation!.project(v,m.x,m.z);return {m,d:Math.hypot(p.x-x*dpr,p.y-y*dpr)}}).filter(v=>v.d<16*dpr).sort((a,b)=>a.d-b.d)[0]?.m
     if(m){
+      if(m.id.startsWith('global:')){this.onAction('global-item',m.id.slice(7));return}
       if(m.id.startsWith('dealer:')){this.mapPanel(`<strong>${esc(m.label)}</strong><p>Parked gang dealer</p><button class="btn" data-act="locate-dealer" data-arg="${esc(m.id.slice(7))}">Set waypoint</button>`);return}
       if(m.id.startsWith('offer:')){const id=Number(m.id.slice(6)),c=this.offers.find(c=>c.id===id)!;this.mapPanel(`<strong>${esc(c.client)}</strong><p>${esc(c.type.label)} · ${money(c.pay)}</p><button class="btn" data-act="accept" data-arg="${id}">Accept contract</button>`);return}
     }
     const p=this.navigation.unproject(v,x*dpr,y*dpr)
-    const i=this.world.city.buildings.findIndex(b=>residential(b,this.world!.city)&&pointInPoly(p.x,p.z,b.poly))
-    if(i>=0){this.showMapBuilding(i);return}
+    const i=this.world.city.buildings.findIndex(b=>pointInPoly(p.x,p.z,b.poly))
+    if(i>=0){this.showMapBuilding(i,p);return}
     this.waypoint={...p,label:m?.label??'Map waypoint'};this.dealerWaypoint=null;this.routeTimer=0;this.computeRoute();this.drawRoute()
     this.mapPanel(`<strong>${esc(this.waypoint.label)}</strong><p>Waypoint set. Close the map to drive.</p>`)
     this.drawFullMap()
@@ -1532,6 +1555,7 @@ export class Game {
 
   private mapMarkers():MapMarker[]{
     const w=this.world!,out:MapMarker[]=[]
+    for(const p of this.properties.nearby)out.push({id:'global:'+p.id,x:wrapLon(p.lon-w.city.lon)*111320*Math.cos(w.city.lat*Math.PI/180),z:(w.city.lat-p.lat)*110540,label:`${p.name} · ${p.ownerId===this.properties.playerId?'Your title':p.ownerName||'Owned'}`,symbol:'◆',color:p.ownerId===this.properties.playerId?'#ffe08a':'#c4b3f4'})
     for(const d of this.dealers?.dealers??[])out.push({id:`dealer:${d.id}`,x:d.x,z:d.z,label:d.name,symbol:'D',color:'#df8dcc'})
     for(const c of this.offers){const n=w.city.nodes[c.from];if(n)out.push({id:`offer:${c.id}`,x:n.x,z:n.z,label:`${c.type.label} · ${money(c.pay)}`,symbol:'C',color:'#78c6ff'})}
     if(this.active)for(const [node,label,symbol] of [[this.active.from,'Pickup','P'],[this.active.to,'Drop-off','X']] as const){const n=w.city.nodes[node];out.push({id:label,x:n.x,z:n.z,label,symbol,color:'#ffba4b'})}
@@ -1644,6 +1668,7 @@ export class Game {
         void this.streamMap()
       }
     }
+    if(!w.city.procedural)this.properties.setLocation(worldToLatLon(w.city,this.player.pos.x,this.player.pos.z))
     this.multiplayer?.update(dt,this.player,this.spray,w,this.paused?0:dt,buildFor(this.save.builds,this.save.current).paint)
     w.update(this.paused?0:dt)
     const traffic=this.traffic?.update(this.paused?0:dt,this.actor,this.player.groundSpeed,this.run.heat,this.spray)
