@@ -1,13 +1,15 @@
 import {limit} from './security'
 import {cellFor,watchingCells,distance,saneMove,validMove,validCourse,validId,MAX_PEERS,WATCH_METRES,type Geo,type Presence} from '../shared/multiplayer'
-import type {MultiplayerEnv} from './multiplayer-http'
-interface Attachment {id:string;name:string;epoch:number;session:string;anchor:Geo;last:Presence|null;checked:number;window:number;count:number;bad:number;cells:string[];watchAt:number;watchPos:Geo;raceId?:string;raceTick:number;budget:number;budgetAt:number;commandAt:number;ackAt:number;peerLimit:number}
+import type {CrewsEnv} from './crews-http'
+interface Attachment {id:string;name:string;epoch:number;session:string;anchor:Geo;last:Presence|null;checked:number;window:number;count:number;bad:number;cells:string[];watchAt:number;watchPos:Geo;raceId?:string;raceTick:number;budget:number;budgetAt:number;commandAt:number;ackAt:number;peerLimit:number;contestTick?:number;crewTag?:string}
 export class PlayerSession {
  private epoch=0
+ private contest:{district:string;id:string}|undefined
+ private contestPending=false
  private queue:Promise<unknown>=Promise.resolve()
  private pending=0
  private visible=new Map<string,Presence>()
- constructor(private ctx:DurableObjectState,private env:MultiplayerEnv){ctx.blockConcurrencyWhile(async()=>{this.epoch=await ctx.storage.get<number>('epoch')??0})}
+ constructor(private ctx:DurableObjectState,private env:CrewsEnv){ctx.blockConcurrencyWhile(async()=>{this.epoch=await ctx.storage.get<number>('epoch')??0;this.contest=await ctx.storage.get('contest')})}
  private active(){return this.ctx.getWebSockets().find(ws=>ws.readyState===1&&(ws.deserializeAttachment() as Attachment)?.epoch===this.epoch)}
  private send(ws:WebSocket,data:unknown){try{ws.send(JSON.stringify(data))}catch{}}
  private cell(key:string,path:string,body:unknown){return this.env.CELLS.get(this.env.CELLS.idFromName(key)).fetch(`https://cell${path}`,{method:'POST',body:JSON.stringify(body)})}
@@ -28,6 +30,18 @@ export class PlayerSession {
    return new Response(null,{status:101,webSocket:client})
   })
   const ws=this.active(),a=ws?.deserializeAttachment() as Attachment|undefined
+  if(url.pathname==='/contest'){
+   return (async()=>{
+   const b=await request.json() as any,current=this.active(),a=current?.deserializeAttachment() as Attachment|undefined
+   if(this.env.CREWS_ENABLED!=='true'||!a?.last||a.id!==b.player||a.last.at+8000<Date.now())return Response.json({error:'Connect and drive in this district first'},{status:409})
+   const res=await this.env.TERRITORIES.get(this.env.TERRITORIES.idFromName(b.district)).fetch('https://territory/'+b.action,{method:'POST',body:JSON.stringify({district:b.district,player:a.id,name:a.name,position:a.last})})
+   if(!res.ok)return res
+   if(a.epoch!==this.epoch||current?.readyState!==1)return Response.json({error:'Connection changed; join again'},{status:409})
+   const view=await res.json() as any
+   if(b.action==='join'&&view.contest){const contest={district:b.district,id:view.contest.id};const attached=await this.ctx.blockConcurrencyWhile(async()=>{if(a.epoch!==this.epoch)return false;await this.ctx.storage.put('contest',contest);this.contest=contest;return true});if(!attached)return Response.json({error:'Connection changed; join again'},{status:409})}
+   return Response.json(view)
+   })()
+  }
   if(url.pathname==='/location')return a?.last&&a.last.at+8000>Date.now()?Response.json({...a.last,raceId:a.raceId}):new Response('Offline',{status:409})
   if(url.pathname==='/property'){
    const body=await request.json() as any;if(ws&&a?.epoch===body.watchEpoch)this.send(ws,{type:'property-changed',id:body.id,revision:body.revision});return new Response('ok')
@@ -72,6 +86,9 @@ export class PlayerSession {
    const session=await this.env.DB.prepare('SELECT player_id FROM sessions WHERE token_hash=? AND expires_at>?').bind(a.session,now).first<{player_id:string}>()
    if(!session||session.player_id!==a.id){ws.close(4001,'Sign in again');return}
    if(a.epoch!==this.epoch||ws.readyState!==1)return
+   if(this.env.CREWS_ENABLED==='true'){
+    const crew=await this.env.DB.prepare('SELECT c.tag FROM crew_members m JOIN crews c ON c.id=m.crew_id WHERE m.player_id=? AND c.active=1').bind(a.id).first<{tag:string}>();a.crewTag=crew?.tag
+   }
    a.checked=now
   }
   ws.serializeAttachment(a)
@@ -88,7 +105,7 @@ export class PlayerSession {
   }
   a.budget=a.last?budget-distance(body,a.last):80;a.budgetAt=now
   const oldCell=a.last?cellFor(a.last):null
-  a.last={...body,id:a.id,name:a.name,epoch:a.epoch,at:now};ws.serializeAttachment(a)
+  a.last={...body,...(a.crewTag?{crewTag:a.crewTag}:{}),id:a.id,name:a.name,epoch:a.epoch,at:now};ws.serializeAttachment(a)
   if(now-a.watchAt>5000||distance(a.watchPos,body)>100){
    const cells=watchingCells(body)
    const responses=await Promise.all(cells.map(key=>this.cell(key,'/watch',{id:a.id,epoch:a.epoch,lat:body.lat,lon:body.lon})))
@@ -103,6 +120,13 @@ export class PlayerSession {
   const published=await this.cell(current,'/publish',a.last)
   if(!published.ok){ws.close(1013,'Area full');return}
   if(oldCell&&oldCell!==current)await this.cell(oldCell,'/remove',a)
+  if(this.env.CREWS_ENABLED==='true'&&this.contest&&!this.contestPending&&now-(a.contestTick??0)>=250){
+   a.contestTick=now;this.contestPending=true;const contest=this.contest,position=a.last
+   // Bound to one in-flight update; territory latency must never hold the driving message queue.
+   this.ctx.waitUntil(this.env.TERRITORIES.get(this.env.TERRITORIES.idFromName(contest.district)).fetch('https://territory/move',{method:'POST',body:JSON.stringify({district:contest.district,contest:contest.id,position})}).then(async res=>{
+    if(res.ok&&(await res.json() as any).done)await this.ctx.blockConcurrencyWhile(async()=>{if(this.contest?.id===contest.id){await this.ctx.storage.delete('contest');this.contest=undefined}})
+   }).catch(()=>{}).finally(()=>{this.contestPending=false}))
+  }
   if(a.raceId&&now-a.raceTick>=180){a.raceTick=now;await this.env.RACES.get(this.env.RACES.idFromName(a.raceId)).fetch('https://race/move',{method:'POST',body:JSON.stringify(a.last)})}
   if(a.epoch===this.epoch){if(now-(a.ackAt??0)>=2000){a.ackAt=now;this.send(ws,{type:'ack',seq:body.seq,at:now})}ws.serializeAttachment(a)}
  }

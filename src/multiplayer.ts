@@ -53,8 +53,8 @@ export class Multiplayer {
   if(data.type==='remove'){const p=this.peers.get(data.id);if(p?.epoch===data.epoch)this.remove(data.id);return}
   const state=data.peer as Presence
   if(data.type!=='peer'||!state||!validId(state.id)||state.id===this.id||!validName(state.name)||!Number.isSafeInteger(state.epoch)||!Number.isFinite(state.at))return
-  const {id:_,name:__,epoch:___,at:____,...move}=state
-  if(!validMove(move))return
+  const {id:_,name:__,epoch:___,at:____,crewTag:_____,...move}=state
+  if(!validMove(move)||(state.crewTag!==undefined&&!/^[A-Z0-9]{2,5}$/.test(state.crewTag)))return
   let peer=this.peers.get(state.id)
   if(peer&&(state.epoch<peer.epoch||(state.epoch===peer.epoch&&state.seq<=peer.seq)))return
   if(!peer){
@@ -64,7 +64,7 @@ export class Multiplayer {
   if(peer.epoch!==state.epoch){peer.history=[];peer.initialized=false}
   peer.epoch=state.epoch;peer.seq=state.seq;peer.name=state.name
   peer.history.push({state,received:performance.now()});if(peer.history.length>8)peer.history.shift()
-  const appearance=`${state.chassis}:${state.mask}:${state.paint}:${state.name}`
+  const appearance=`${state.chassis}:${state.mask}:${state.paint}:${state.name}:${state.crewTag??''}`
   if(peer.appearance!==appearance&&!peer.pending){peer.pending=true;const target=peer;this.queue.set(state.id,()=>{if(this.disposed||this.peers.get(state.id)!==target)return;target.pending=false;this.build(target,state,appearance)})}
  }
  private build(peer:Peer,state:Presence,appearance:string){
@@ -72,7 +72,7 @@ export class Multiplayer {
   this.disposeMesh(peer.group)
   peer.group.clear();peer.group.add(buildVehicleMesh(spec,state.mask));peer.appearance=appearance;peer.built=true
   const canvas=document.createElement('canvas');canvas.width=384;canvas.height=64
-  const ctx=canvas.getContext('2d')!;ctx.fillStyle='rgba(5,12,20,.8)';ctx.fillRect(0,0,384,64);ctx.fillStyle='#c5fff0';ctx.font='bold 28px sans-serif';ctx.textAlign='center';ctx.fillText(`${state.name} · ${state.id.slice(0,4)}`,192,42,370)
+  const ctx=canvas.getContext('2d')!;ctx.fillStyle='rgba(5,12,20,.8)';ctx.fillRect(0,0,384,64);ctx.fillStyle='#c5fff0';ctx.font='bold 28px sans-serif';ctx.textAlign='center';ctx.fillText(`${state.crewTag?'['+state.crewTag+'] ':''}${state.name} · ${state.id.slice(0,4)}`,192,42,370)
   const label=new THREE.Sprite(new THREE.SpriteMaterial({map:new THREE.CanvasTexture(canvas),depthWrite:false}))
   label.position.y=3;label.scale.set(9,1.5,1);peer.group.add(label);peer.label=label
  }

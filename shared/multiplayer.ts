@@ -31,7 +31,7 @@ export const chassisIds=['board','neonic','z150','hovercedes','goblin','hoverarr
 export const maskIds=['balaclava','glitcher','respirator','oni','liar','jester']
 export const paintIds=['factory','steel','bone','rust','olive','amber','violet','petrol','graphite']
 export interface Move extends Geo {type:'move';v:1;seq:number;y:number;clearance:number;yaw:number;vx:number;vz:number;chassis:string;mask:string;paint:string;boost:boolean}
-export interface Presence extends Move {id:string;name:string;epoch:number;at:number}
+export interface Presence extends Move {id:string;name:string;epoch:number;at:number;crewTag?:string}
 export function validMove(p:any):p is Move {
  return p&&Object.keys(p).sort().join(',')==='boost,chassis,clearance,lat,lon,mask,paint,seq,type,v,vx,vz,y,yaw'&&p.type==='move'&&p.v===1&&validGeo(p)&&
   ['y','clearance','yaw','vx','vz'].every(k=>Number.isFinite(p[k]))&&p.y>=-1500&&p.y<=10000&&p.clearance>=0&&p.clearance<=400&&Math.abs(p.yaw)<=Math.PI*2&&Math.hypot(p.vx,p.vz)<=220&&

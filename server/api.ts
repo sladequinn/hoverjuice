@@ -1,3 +1,5 @@
+import {crewsHttp,type CrewsEnv} from './crews-http'
+export {Territory} from './territory'
 import {propertiesHttp,type PropertiesEnv} from './properties-http'
 export {PropertySource} from './property-source'
 import {multiplayerHttp,type MultiplayerEnv} from './multiplayer-http'
@@ -8,12 +10,15 @@ import {foundation,foundationPath,cleanup,type FoundationEnv} from './foundation
 import {HttpError} from './security'
 import {parseRadioConfig} from '../src/radio-config'
 export { Geocoder } from './geocoder'
-interface Env extends FoundationEnv,MultiplayerEnv,PropertiesEnv {ASSETS?:Fetcher;RADIO_CONFIG_JSON?:string;DB:D1Database; ALLOWED_ORIGIN:string; GEOCODER:DurableObjectNamespace}
+interface Env extends FoundationEnv,MultiplayerEnv,PropertiesEnv,CrewsEnv {ASSETS?:Fetcher;RADIO_CONFIG_JSON?:string;DB:D1Database; ALLOWED_ORIGIN:string; GEOCODER:DurableObjectNamespace}
 /** Public map reads and an isolated same-origin account API. */
 export default {
  async scheduled(_event:ScheduledController,env:Env){await cleanup(env.DB)},
  async fetch(request:Request,env:Env,ctx?:ExecutionContext):Promise<Response>{
   const path=new URL(request.url).pathname
+  if(path.startsWith('/api/crews/')){
+   try{const r=await crewsHttp(request,env);return new Response(r.body,{status:r.status,headers:{'Content-Type':'application/json','Cache-Control':'no-store','X-Content-Type-Options':'nosniff'}})}catch(e){return Response.json({error:e instanceof HttpError?e.message:'Crew service unavailable; retry the same request'},{status:e instanceof HttpError?e.status:503,headers:{'Cache-Control':'no-store'}})}
+  }
   if(path.startsWith('/api/properties/')){
    let response:Response
    try{response=await propertiesHttp(request,env,ctx)}catch(error){response=Response.json({error:error instanceof HttpError?error.message:'Property service unavailable; retry the same purchase request safely'},{status:error instanceof HttpError?error.status:503})}

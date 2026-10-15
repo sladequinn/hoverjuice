@@ -104,3 +104,7 @@ Open **More → Radio stations**. There are four gang frequencies, a procedural 
 **GitHub Pages without an API:** edit `public/radio.json` with the same structure and deploy the site. Leave `VITE_API_BASE` unset. There is no requirement to move the game to Vercel.
 
 Use direct HTTPS audio files or browser-playable live streams, not Spotify/YouTube webpage links. Entries play in order and loop; live streams continue until stopped or skipped. Audio URLs are public, so do not embed private credentials. No music is bundled: empty stations report “No broadcast configured.” The Police Scanner needs no URL or backend.
+
+## Phase 4: Crews and territory control
+
+Authenticated crews, member-owned headquarters, stable global districts and server-validated team delivery contests are documented in [crews-territories.md](docs/crews-territories.md). See [phase4-report.md](docs/phase4-report.md) for verification and deployment limitations. The feature is disabled by default; no Phase 5 economy is implemented.

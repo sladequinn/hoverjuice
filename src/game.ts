@@ -1,3 +1,5 @@
+import {Crews} from './crews'
+import {CREW_COLORS,districtBounds} from '../shared/crews'
 import {GlobalProperties} from './global-properties'
 import {hg} from '../shared/properties'
 import {distance,validId,validGeo,wrapLon} from '../shared/multiplayer'
@@ -160,6 +162,8 @@ class Heap {
 export class Game {
   cloud = new CloudSave(localStorage)
   multiplayer: Multiplayer | null = null
+  crewGate=new THREE.Mesh(new THREE.TorusGeometry(14,.5,6,32),new THREE.MeshBasicMaterial({color:0x73ffcb}))
+  crews=new Crews(localStorage,()=>{if($('modal').dataset.view==='crews'&&!(document.activeElement instanceof HTMLInputElement))this.openModal('crews')})
   properties=new GlobalProperties(localStorage,()=>{const view=$('modal').dataset.view;if(view==='property'||view==='properties')this.openModal(view)})
   ownership = new OwnershipClient()
   radio=new Radio(()=>({heat:this.run.heat,speed:this.player.groundSpeed*3.6,gang:this.world?.gangAt(this.actor.x,this.actor.z)??this.gang}))
@@ -360,7 +364,7 @@ export class Game {
     this.world = await World.create(city,status)
     this.spray.surfaceHeight=(x,z,reference)=>this.world!.surfaceHeightAt(x,z,reference)
     this.scene.add(this.world.group)
-    if(!city.procedural){this.multiplayer=new Multiplayer(city);this.scene.add(this.multiplayer.group);void this.properties.activate()}else this.properties.setLocation(null)
+    if(!city.procedural){this.multiplayer=new Multiplayer(city);this.scene.add(this.multiplayer.group);void this.properties.activate();void this.crews.activate()}else {this.properties.setLocation(null);this.crews.setLocation(null)}
     void this.syncOwnership()
     this.traffic = new TrafficSystem(this.world)
     this.scene.add(this.traffic.group)
@@ -1020,7 +1024,7 @@ export class Game {
   // ---------- modals ----------
 
   openModal(view: string) {
-    if (!this.world && view !== 'warp' && view !== 'couch' && view !== 'cloud' && view !== 'multiplayer' && view !== 'property' && view !== 'properties') return
+    if (!this.world && view !== 'warp' && view !== 'couch' && view !== 'cloud' && view !== 'multiplayer' && view !== 'property' && view !== 'properties' && view !== 'crews') return
     const m = $('modal')
     m.dataset.view = view
     const body = $('modal-body')
@@ -1131,6 +1135,16 @@ export class Game {
 
   private onAction(act: string, arg: string) {
     switch (act) {
+      case 'crew-rally': {const t=this.crews.crew?.territories?.find(t=>t.id===arg);if(t)void this.warp('Crew rally '+t.id,t.lat,t.lon);break}
+      case 'crew-refresh': void this.crews.refresh();break
+      case 'crew-current': this.crews.current();break
+      case 'crew-retry': void this.crews.retry();break
+      case 'crew-create': void this.crews.command({action:'create',name:($('crew-name') as HTMLInputElement).value,tag:($('crew-tag') as HTMLInputElement).value.toUpperCase(),color:($('crew-color') as HTMLSelectElement).value});break
+      case 'crew-join': void this.crews.command({action:'join',code:($('crew-code') as HTMLInputElement).value.trim()});break
+      case 'crew-command': {const [action,target,value]=arg.split('|');if(['leave','kick','transfer'].includes(action)&&!confirm('Confirm crew membership change? Leaving or removal starts a one-hour rejoin cooldown.'))break;void this.crews.command({action,...(target?{target}:{}),...(value?{value}:{})});break}
+      case 'crew-hq': {const p=this.properties.selected;if(p&&confirm('Establish your crew headquarters in this building? Your personal title remains yours.'))void this.crews.command({action:'hq',value:p.id});break}
+      case 'crew-contest': void this.crews.contest(arg as 'open'|'join');break
+      case 'crew-waypoint': {const t=this.crews.target??this.crews.crew?.headquarters;if(t&&this.world){this.waypoint={x:wrapLon(t.lon-this.world.city.lon)*111320*Math.cos(this.world.city.lat*Math.PI/180),z:(this.world.city.lat-t.lat)*110540,label:this.crews.target?'Crew delivery gate':'Crew headquarters'};this.routeTimer=0;this.closeModal()}break}
       case 'global-inspect': {const [lat,lon]=arg.split('|').map(Number);this.toggleMap(false);this.openModal('property');void this.properties.inspect({lat,lon});break}
       case 'global-item': this.toggleMap(false);this.openModal('property');void this.properties.select(arg);break
       case 'global-quote': void this.properties.requote();break
@@ -1187,7 +1201,7 @@ export class Game {
       case 'radio-next': void this.radio.next();break
       case 'paint': this.customizeVehicle('paint',arg); break
       case 'upgrade': this.customizeVehicle('upgrade',arg); break
-      case 'view': this.openModal(arg);if(arg==='properties')void this.properties.loadPortfolio(); break
+      case 'view': this.openModal(arg);if(arg==='properties')void this.properties.loadPortfolio();if(arg==='crews')void this.crews.activate().then(()=>{if(this.crews.enabled)return this.crews.refresh()}); break
       case 'close': this.closeModal(); break
       case 'challenge': this.challenge(); break
       case 'stash': this.stash(); break
@@ -1251,13 +1265,19 @@ export class Game {
     const s = this.save
     const w = this.world
     switch (view) {
+      case 'crews': {
+        const c=this.crews,v=c.crew,d=c.district,t=d?.contest,mine=t?.runs.find(r=>r.player===c.player),disabled=c.busy||c.pending?'disabled':''
+        return `<h2>Crews & global districts</h2><p role="status">${esc(c.status)}</p><div class="row"><button class="btn" data-act="crew-refresh">Refresh</button><button class="btn ghost" data-act="view" data-arg="cloud">Account</button><button class="btn ghost" data-act="crew-current">View current district</button></div>${c.pending?'<button class="btn" data-act="crew-retry">Recover pending crew change</button>':''}
+        ${v?`<h3 style="color:${esc(v.color)}">[${esc(v.tag)}] ${esc(v.name)}</h3><p>${esc(v.role)} · ${v.members.length}/16 members · ${v.reputation} reputation</p>${v.territories?.length?`<p>Controlled districts · shared rally travel</p><div class="row">${v.territories.map(t=>`<button class="btn" data-act="crew-rally" data-arg="${esc(t.id)}">Rally: ${esc(t.id)}</button>`).join('')}</div>`:''}<p>HQ: ${esc(v.headquarters?.name??'Not established')} · Select a title you own in your portfolio to establish HQ as leader or officer.</p><button class="btn" data-act="crew-waypoint">Rally at HQ / next delivery gate</button>${v.invite?`<p>Share this private crew invite with friends:</p><input aria-label="Crew invitation code" readonly value="${esc(v.invite)}" style="width:100%"><button class="btn ghost" data-act="crew-command" data-arg="invite" ${disabled}>Rotate invite (leader)</button>`:''}<div class="grid">${v.members.map(m=>`<div class="card">${esc(m.name)} · ${esc(m.role)}${v.role==='leader'&&m.id!==c.player?`<div class="row"><button class="btn ghost" data-act="crew-command" data-arg="role|${esc(m.id)}|${m.role==='officer'?'member':'officer'}" ${disabled}>${m.role==='officer'?'Demote':'Promote'}</button><button class="btn ghost" data-act="crew-command" data-arg="transfer|${esc(m.id)}" ${disabled}>Transfer leadership</button><button class="btn ghost" data-act="crew-command" data-arg="kick|${esc(m.id)}" ${disabled}>Remove</button></div>`:''}</div>`).join('')}</div><button class="btn ghost" data-act="crew-command" data-arg="leave" ${disabled}>Leave crew</button>`:`<p>Create a crew or join using a private invite. One crew per account; one-hour cooldown after leaving.</p><div class="row"><input id="crew-name" aria-label="Crew name" maxlength="24" placeholder="Crew name"><input id="crew-tag" aria-label="Crew tag" maxlength="5" placeholder="TAG"><select id="crew-color" aria-label="Crew color">${CREW_COLORS.map((color,i)=>`<option value="${color}">Color ${i+1}</option>`).join('')}</select><button class="btn" data-act="crew-create" ${disabled}>Create crew</button></div><div class="row"><input id="crew-code" aria-label="Crew invite code" placeholder="Private invite code"><button class="btn" data-act="crew-join" ${disabled}>Join crew</button></div>`}
+        ${d?`<h3>${esc(d.id)}</h3><p>Control: <strong>${esc(d.name??'Unclaimed')}</strong>${d.controller?` · expires ${esc(new Date(d.expiresAt).toLocaleDateString())}`:''}</p><p class="muted">Two-driver delivery squads. Best valid time wins; a second finisher gives a 5% team bonus. Three attempts per driver, 30-second warmup, two-minute admission, ten-minute round. Follow the public road out and back below 8 m and 90 m/s. No collisions, currency stakes or property transfers.</p><div class="row"><button class="btn" data-act="crew-contest" data-arg="open" ${disabled}>Open / view contest</button><button class="btn" data-act="crew-contest" data-arg="join" ${disabled}>Join squad</button><button class="btn" data-act="crew-waypoint">Guide to next gate</button></div>${t?`<p>${t.finished?'Final result':Date.now()<t.startsAt?'Warmup':'Delivery contest active'} · ${t.runs.length}/16 drivers · ${t.finished?`Controller: ${esc(d.name??'Unclaimed')}`:`${Math.max(0,Math.ceil((t.endsAt-Date.now())/1000))} seconds remaining`}</p>${mine?`<p>Your delivery: ${mine.next}/${t.course.length} gates · ${mine.attempts}/3 attempts · ${esc(mine.invalid)}</p>`:''}<div class="grid">${t.runs.map(r=>`<div class="card">${esc(r.name)} · crew ${esc(r.crew.slice(0,8))}<br>${r.best===null?`${r.next}/${t.course.length} gates`:(r.best/1000).toFixed(2)+' seconds'}</div>`).join('')}</div>`:''}`:'<p>Enter a real-world city to discover its global district.</p>'}<p class="muted">Control lasts seven days without a successful defence. Three active districts per crew; 30-minute rest between rounds. Reputation and a shared HQ rally point are the benefits—no income or driving-stat advantage. Legacy NPC gangs remain separate.</p>`
+      }
       case 'properties': {
         const p=this.properties
         return `<h2>Global property portfolio</h2><p role="status">${esc(p.status)}</p><p>Global wallet: <strong>${hg(p.balance)}</strong></p><p class="muted">These permanent titles belong to your account across every city and device. Local cash, safehouses and rent remain separate legacy progress. Global properties do not produce income or grant territory.</p><div class="row"><button class="btn" data-act="global-refresh" ${p.busy?'disabled':''}>Refresh account & portfolio</button><button class="btn ghost" data-act="view" data-arg="cloud">Account / sign in</button></div>${p.pending?'<button class="btn" data-act="global-retry">Recover pending purchase</button>':''}<div class="grid">${p.items.map(v=>`<div class="card"><h3>${esc(v.name)}</h3><p>${esc(v.id)} · ${esc(v.status)}<br>${v.lat.toFixed(5)}, ${v.lon.toFixed(5)}<br>Acquired for ${hg(v.priceMinor)}</p><button class="btn" data-act="global-item" data-arg="${esc(v.id)}">Inspect title</button></div>`).join('')||'<p>No global titles loaded. Open the map and select a building to inspect it.</p>'}</div>${p.next?'<button class="btn" data-act="global-more">Load more titles</button>':''}${!this.world?'<button class="btn ghost" data-act="cloud-title">Back to title</button>':''}`
       }
       case 'property': {
         const p=this.properties,v=p.selected,q=p.quote,canBuy=v&&!v.ownerId&&v.status==='active'&&q&&q.expiresAt>Date.now()&&p.balance>=q.priceMinor&&!p.pending&&!p.busy
-        return `<h2>${v?esc(v.name):'Global building inspection'}</h2><p role="status">${esc(p.status)}</p>${v?`<p>${esc(v.id)} · OSM version ${v.sourceVersion}<br>${v.lat.toFixed(5)}, ${v.lon.toFixed(5)} · ${v.area.toLocaleString()} m² · ${v.levels} estimated floor(s)</p><p><strong>${v.ownerId?`Owner: ${v.ownerId===p.playerId?'You':esc(v.ownerName||'Driver')} · ${esc(v.ownerId.slice(0,8))}`:'No registered owner'}</strong><br>Status: ${esc(v.status)}<br>Registry valuation: ${hg(v.priceMinor)}<br>Your global wallet: ${hg(p.balance)}</p><p class="muted">${v.status==='review'?'OSM geometry or identity needs reconciliation. Purchases are paused; existing titles remain protected.':v.status==='retired'?'The source building is absent from the current map snapshot. Its title and history remain preserved.':'Permanent game-world ownership. No resale, rent or territorial control is enabled.'}</p><div class="row">${!v.ownerId&&v.status==='active'?`<button class="btn" data-act="global-quote" ${p.busy?'disabled':''}>Refresh purchase quote</button><button class="btn buy" data-act="global-buy" ${canBuy?'':'disabled'}>Buy title · ${hg(q?.priceMinor??v.priceMinor)}</button>`:''}<button class="btn ghost" data-act="global-waypoint">Set waypoint</button><button class="btn ghost" data-act="global-visit">Visit area</button></div>`:''}${p.pending?'<button class="btn" data-act="global-retry">Retry pending purchase safely</button>':''}<div class="row"><button class="btn ghost" data-act="global-portfolio">Global portfolio</button><button class="btn ghost" data-act="view" data-arg="cloud">Account / sign in</button></div><p class="muted small">Global purchases use server-issued wallet funds. Local cash and test funds cannot be imported. Map data © OpenStreetMap contributors, ODbL.</p>`
+        return `<h2>${v?esc(v.name):'Global building inspection'}</h2><p role="status">${esc(p.status)}</p>${v?`<p>${esc(v.id)} · OSM version ${v.sourceVersion}<br>${v.lat.toFixed(5)}, ${v.lon.toFixed(5)} · ${v.area.toLocaleString()} m² · ${v.levels} estimated floor(s)</p><p><strong>${v.ownerId?`Owner: ${v.ownerId===p.playerId?'You':esc(v.ownerName||'Driver')} · ${esc(v.ownerId.slice(0,8))}`:'No registered owner'}</strong><br>Status: ${esc(v.status)}<br>Registry valuation: ${hg(v.priceMinor)}<br>Your global wallet: ${hg(p.balance)}</p><p class="muted">${v.status==='review'?'OSM geometry or identity needs reconciliation. Purchases are paused; existing titles remain protected.':v.status==='retired'?'The source building is absent from the current map snapshot. Its title and history remain preserved.':'Permanent personal title. Crew district changes never transfer this building.'}</p><div class="row">${!v.ownerId&&v.status==='active'?`<button class="btn" data-act="global-quote" ${p.busy?'disabled':''}>Refresh purchase quote</button><button class="btn buy" data-act="global-buy" ${canBuy?'':'disabled'}>Buy title · ${hg(q?.priceMinor??v.priceMinor)}</button>`:''}<button class="btn ghost" data-act="global-waypoint">Set waypoint</button>${v.ownerId===p.playerId?'<button class="btn" data-act="crew-hq">Establish crew HQ</button>':''}<button class="btn ghost" data-act="global-visit">Visit area</button></div>`:''}${p.pending?'<button class="btn" data-act="global-retry">Retry pending purchase safely</button>':''}<div class="row"><button class="btn ghost" data-act="global-portfolio">Global portfolio</button><button class="btn ghost" data-act="view" data-arg="cloud">Account / sign in</button></div><p class="muted small">Global purchases use server-issued wallet funds. Local cash and test funds cannot be imported. Map data © OpenStreetMap contributors, ODbL.</p>`
       }
       case 'multiplayer': {
         const mp=this.multiplayer,race=mp?.race
@@ -1280,7 +1300,7 @@ export class Game {
         return `<h2>Radio</h2><p class="muted">Gang frequencies, municipal dispatch, and late-night talk.</p><div class="radio-stations">${STATIONS.map(station=>`<button class="btn ${this.radio.station===station.id?'buy':''}" data-act="radio-station" data-arg="${station.id}" aria-pressed="${this.radio.station===station.id}"><strong>${station.name}</strong><small>${station.host}</small></button>`).join('')}</div><p id="radio-status" class="radio-status" aria-live="polite">${esc(this.radio.status)}</p><div class="row"><button class="btn" data-act="radio-play">Play / pause</button><button class="btn" data-act="radio-next">Next</button><button class="btn ghost" data-act="radio-station" data-arg="off">Off</button></div><button class="btn ghost" data-act="radio-refresh">Refresh stations</button><label class="radio-volume">Volume <input id="radio-volume" type="range" min="0" max="100" value="${Math.round(this.radio.volume*100)}" /></label><p class="muted small">Music and talk use the configured station playlists. Scanner chatter follows local Heat. Radio pauses when this tab is hidden.</p>`
       case 'menu':
         return `<h2>Off the clock</h2><p class="muted">${esc(s.city?.name??'City')} · ${money(s.money)} available</p>
-          <div class="menu-links">${[['properties','Global property portfolio'],['multiplayer','Cruise with friends'],['cloud','Account & cloud saves'],['radio','Radio stations'],['market','Dealers & cargo'],['holdings','Safehouses & vaults'],['gangs','Gangs & territory'],['masks','Mask perks'],['tutorial','First-night guide'],['help','Controls & settings']].map(([id,label])=>`<button class="btn ghost" data-act="view" data-arg="${id}">${label}<span>→</span></button>`).join('')}</div>
+          <div class="menu-links">${[['crews','Crews & global districts'],['properties','Global property portfolio'],['multiplayer','Cruise with friends'],['cloud','Account & cloud saves'],['radio','Radio stations'],['market','Dealers & cargo'],['holdings','Safehouses & vaults'],['gangs','Gangs & territory'],['masks','Mask perks'],['tutorial','First-night guide'],['help','Controls & settings']].map(([id,label])=>`<button class="btn ghost" data-act="view" data-arg="${id}">${label}<span>→</span></button>`).join('')}</div>
           <details class="fold"><summary>City & account details</summary><p class="muted">Net worth ${money(this.netWorth)} · Notoriety ${this.run.notoriety}<br>Vault ${money(s.vaultCash)} · Income ${money(this.incomePerMin)}/min<br>${esc(this.multiplayer?.status??'Local save')} · ${esc($('city-tag').textContent??'')}</p></details>`
 
       case 'tutorial':
@@ -1555,6 +1575,11 @@ export class Game {
 
   private mapMarkers():MapMarker[]{
     const w=this.world!,out:MapMarker[]=[]
+    const district=this.crews.district,contest=district?.contest,target=this.crews.target
+    const mark=(p:{lat:number;lon:number},id:string,label:string,symbol:string,color:string)=>out.push({id,x:wrapLon(p.lon-w.city.lon)*111320*Math.cos(w.city.lat*Math.PI/180),z:(w.city.lat-p.lat)*110540,label,symbol,color})
+    for(const h of district?.headquarters??[])mark(h,'crew-hq:'+h.id,`[${h.tag}] HQ`,'H',h.color)
+    if(target)mark(target,'crew-gate','Next crew delivery gate','D','#73ffcb')
+    else if(contest&&!contest.finished)mark(contest.course[0],'crew-gate','Crew delivery start','D','#73ffcb')
     for(const p of this.properties.nearby)out.push({id:'global:'+p.id,x:wrapLon(p.lon-w.city.lon)*111320*Math.cos(w.city.lat*Math.PI/180),z:(w.city.lat-p.lat)*110540,label:`${p.name} · ${p.ownerId===this.properties.playerId?'Your title':p.ownerName||'Owned'}`,symbol:'◆',color:p.ownerId===this.properties.playerId?'#ffe08a':'#c4b3f4'})
     for(const d of this.dealers?.dealers??[])out.push({id:`dealer:${d.id}`,x:d.x,z:d.z,label:d.name,symbol:'D',color:'#df8dcc'})
     for(const c of this.offers){const n=w.city.nodes[c.from];if(n)out.push({id:`offer:${c.id}`,x:n.x,z:n.z,label:`${c.type.label} · ${money(c.pay)}`,symbol:'C',color:'#78c6ff'})}
@@ -1583,6 +1608,11 @@ export class Game {
     const v:MapView={x:center.x,z:center.z,width,height,scale:full?Math.min(width,height)/3200*this.mapZoom:width/650}
     if(full)this.fullView=v
     this.navigation.draw(g,v,full?'full':'mini',dpr)
+    if(this.crews.district&&!this.world.city.procedural){const district=this.crews.district,b=districtBounds(district.id),city=this.world.city
+      g.save();g.strokeStyle=district.color??'#73ffcb';g.lineWidth=2*dpr;g.setLineDash([8*dpr,5*dpr]);g.beginPath()
+      for(const [i,[lat,lon]]of [[b.south,b.west],[b.south,b.east],[b.north,b.east],[b.north,b.west]].entries()){const p=this.navigation.project(v,wrapLon(lon-city.lon)*111320*Math.cos(city.lat*Math.PI/180),(city.lat-lat)*110540);if(i)g.lineTo(p.x,p.y);else g.moveTo(p.x,p.y)}g.closePath();g.stroke();g.restore()
+      if(full){g.fillStyle=district.color??'#73ffcb';g.font=`bold ${12*dpr}px sans-serif`;g.fillText(`${district.tag?'['+district.tag+']':'Unclaimed'} · ${district.id}${district.contest&&!district.contest.finished?' · CONTEST':''}`,12*dpr,48*dpr)}
+    }
     if(this.route.length>1){g.strokeStyle='#ffc36a';g.lineWidth=2*dpr;g.beginPath();this.route.forEach((i,j)=>{const n=this.world!.city.nodes[i],p=this.navigation!.project(v,n.x,n.z);if(j)g.lineTo(p.x,p.y);else g.moveTo(p.x,p.y)});g.stroke()}
     for(const m of this.mapMarkers()){
       if(!full&&m.symbol==='H'&&Math.hypot(m.x-v.x,m.z-v.z)>2600)continue
@@ -1668,7 +1698,9 @@ export class Game {
         void this.streamMap()
       }
     }
-    if(!w.city.procedural)this.properties.setLocation(worldToLatLon(w.city,this.player.pos.x,this.player.pos.z))
+    if(!w.city.procedural){const geo=worldToLatLon(w.city,this.player.pos.x,this.player.pos.z);this.properties.setLocation(geo);this.crews.setLocation(geo)}
+    const crewTarget=this.crews.target
+    if(crewTarget&&!w.city.procedural){const x=wrapLon(crewTarget.lon-w.city.lon)*111320*Math.cos(w.city.lat*Math.PI/180),z=(w.city.lat-crewTarget.lat)*110540;this.crewGate.position.set(x,w.groundHeightAt(x,z,this.player.pos.y)+2,z);this.crewGate.rotation.x=-Math.PI/2;this.crewGate.visible=true;if(this.crewGate.parent!==this.scene)this.scene.add(this.crewGate)}else this.crewGate.visible=false
     this.multiplayer?.update(dt,this.player,this.spray,w,this.paused?0:dt,buildFor(this.save.builds,this.save.current).paint)
     w.update(this.paused?0:dt)
     const traffic=this.traffic?.update(this.paused?0:dt,this.actor,this.player.groundSpeed,this.run.heat,this.spray)
@@ -1734,7 +1766,8 @@ export class Game {
     $('money').textContent = money(s.money)
     $('income').textContent = this.incomePerMin ? `+${money(this.incomePerMin)}/min passive` : 'NO VAULTS · KEEP MOVING'
     $('vehicle-name').textContent = `${p.spec.name} · ${this.gang}`
-    $('network-status').textContent=this.multiplayer?.raceStatus || this.multiplayer?.status || 'LOCAL SAVE'
+    const delivery=this.crews.district?.contest,driver=delivery?.runs.find(r=>r.player===this.crews.player)
+    $('network-status').textContent=(delivery&&!delivery.finished&&driver?`CREW DELIVERY ${driver.next}/${delivery.course.length} · ${driver.best!==null?'COMPLETE':Date.now()<delivery.startsAt?'WARMUP':driver.invalid||'FOLLOW GREEN GATES'}`:'') || this.multiplayer?.raceStatus || this.multiplayer?.status || 'LOCAL SAVE'
     const tunnel=this.world!.isTunnel(p.pos.x,p.pos.z,p.pos.y)
     $('minimap').style.visibility=tunnel?'hidden':'visible'
     $('alt').textContent=tunnel?'GPS LOST':`${Math.round(p.pos.y)} m${p.testFlight?' · TEST FLIGHT':''}`

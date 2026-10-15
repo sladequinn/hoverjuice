@@ -8,7 +8,7 @@
     "build": "tsc && vite build",
     "preview": "vite preview --host 0.0.0.0 --port 47291",
     "test": "node --import tsx --test tests/*.test.ts",
-    "test:browser": "node tests/smoke.cjs && node tests/couch.cjs && node tests/map.cjs && node tests/tutorial.cjs && node tests/splashes.cjs && node tests/ui.cjs && node tests/radio.cjs && node tests/city-life.cjs && node tests/terrain.cjs && node tests/startup.cjs && node tests/menu.cjs && node tests/cloud.cjs && node tests/multiplayer.cjs && node tests/properties.cjs",
+    "test:browser": "node tests/smoke.cjs && node tests/couch.cjs && node tests/map.cjs && node tests/tutorial.cjs && node tests/splashes.cjs && node tests/ui.cjs && node tests/radio.cjs && node tests/city-life.cjs && node tests/terrain.cjs && node tests/startup.cjs && node tests/menu.cjs && node tests/cloud.cjs && node tests/multiplayer.cjs && node tests/properties.cjs && node tests/crews.cjs",
     "check:server": "tsc -p server/tsconfig.json",
     "test:backend": "node --import tsx --test tests/backend.test.ts tests/cloud-save.test.ts",
     "dev:cloud": "wrangler dev --config wrangler.toml --local-protocol https",
@@ -17,7 +17,8 @@
     "migrate:local": "wrangler d1 migrations apply DB --local --config wrangler.toml",
     "migrate:remote": "wrangler d1 migrations apply DB --remote --config wrangler.toml",
     "test:multiplayer": "node --import tsx --test tests/multiplayer.test.ts tests/multiplayer-transport.test.ts",
-    "test:properties": "node --import tsx --test tests/properties.test.ts tests/global-properties.test.ts"
+    "test:properties": "node --import tsx --test tests/properties.test.ts tests/global-properties.test.ts",
+    "test:crews": "node --import tsx --test tests/crews.test.ts tests/crews-client.test.ts"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^5.20261006.1",
