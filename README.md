@@ -57,13 +57,17 @@ See [backend foundation, migration and deployment guide](docs/backend-foundation
 
 ## Phase 2 real-time multiplayer
 
-Authenticated geographic cruising, customized vehicle ghosts, names, friend links and casual checkpoint races are implemented on the Phase 1 backend. See [multiplayer deployment and architecture](docs/multiplayer.md) and [implementation report](docs/phase2-report.md). Enable only after applying migrations and staging validation. No global property, crew, territory or trading system is added.
+Authenticated geographic cruising, customized vehicle ghosts, names, friend links and casual checkpoint races are implemented on the Phase 1 backend. See [multiplayer deployment and architecture](docs/multiplayer.md) and [implementation report](docs/phase2-report.md). Enable only after applying migrations and staging validation. Crews, territory control and trading remain deferred.
+
+## Phase 3 global property ownership
+
+Canonical OSM building titles, atomic wallet-backed purchases, durable portfolios and geographic ownership updates are implemented. See [global property configuration and operations](docs/global-properties.md) and [Phase 3 report](docs/phase3-report.md). This requires the same Cloudflare account stack, a server-side OSM source, and trusted global wallet funding; local balances and holdings never become global titles. Purchases default off. Crews, warfare and commodity markets are not included.
 
 ## Optional online services
 
 - `server/player-session.ts`, `server/geo-cell.ts`, `server/cruise-race.ts`: authenticated Cloudflare multiplayer. The old PartyKit client and deployment configuration are retired; `server/rooms.ts` remains only as a historical test fixture. `VITE_PARTYKIT_HOST` has no effect. Old city hash links still select a preset, but never establish a crew identity or a private room.
 - `server/schema.sql`: sparse Cloudflare D1 tables for ownership, dead drops, verified speed records and flashpoints.
-- `server/api.ts`: account API plus the existing read-only ownership/record gateway. Set `VITE_API_BASE` after deploying it. **Global claims, transactions and leaderboard submissions are not enabled.** Never trust localStorage cash or client-supplied race times for global writes.
+- `server/api.ts`: account API plus the existing read-only ownership/record gateway. Set `VITE_API_BASE` after deploying it. The old ownership gateway remains read-only; Phase 3 purchases use the separate authenticated property API. Leaderboard submissions remain disabled. Never trust localStorage cash or client-supplied race times for global writes.
 - Copy `wrangler.example.toml` to `wrangler.toml`, supply the real D1 ID, application origin and contact email, apply the versioned migrations, and follow the backend deployment guide. No account, database or hosting deployment is created by this branch.
 - `server/geocoder.ts`: singleton Durable Object, query caching and an application-wide 1.1-second interval between Nominatim requests. To use this backend instead of Photon, set `public/config.json`'s `geocoder` URL to the deployed `/api/geocode` and `geocoderFormat` to `nominatim`; this runtime file allows provider changes without rebuilding the client.
 

@@ -1,3 +1,6 @@
+import {registerBuilding,quoteProperty} from '../server/property-registry'
+import {parseBuildings,valueBuilding} from '../server/property-geometry'
+import {transactWallet} from '../server/wallet'
 import {test,before,after} from 'node:test'
 import assert from 'node:assert/strict'
 import {readFileSync,writeFileSync,mkdirSync} from 'node:fs'
@@ -28,9 +31,9 @@ before(async()=>{
  const config=readFileSync('wrangler.example.toml','utf8').replace('main = "server/api.ts"',`main = ${JSON.stringify(resolve('server/api.ts'))}`).replace(/\[assets\][\s\S]*?(?=\[triggers\])/,'')
  writeFileSync('.test-artifacts/mp/wrangler.toml',config)
  execFileSync(process.execPath,['node_modules/wrangler/bin/wrangler.js','deploy','--dry-run','--config','.test-artifacts/mp/wrangler.toml','--outdir',resolve('.test-artifacts/mp/worker')],{stdio:'pipe',env:{...process.env,WRANGLER_SEND_METRICS:'false'}})
- mf=new Miniflare(convertV4MiniflareOptions({workers:[{name:'mp',modules:true,scriptPath:resolve('.test-artifacts/mp/worker/api.js'),compatibilityDate:'2026-10-01',d1Databases:['DB'],bindings:{APP_ORIGIN:origin,ALLOWED_ORIGIN:origin,BACKEND_ENABLED:'true',MULTIPLAYER_ENABLED:'true'},durableObjects:{PLAYERS:{className:'PlayerSession',useSQLite:true},CELLS:{className:'GeoCell',useSQLite:true},RACES:{className:'CruiseRace',useSQLite:true},GEOCODER:{className:'Geocoder',useSQLite:true}}}]}))
+ mf=new Miniflare(convertV4MiniflareOptions({workers:[{name:'mp',modules:true,scriptPath:resolve('.test-artifacts/mp/worker/api.js'),compatibilityDate:'2026-10-01',d1Databases:['DB'],bindings:{APP_ORIGIN:origin,ALLOWED_ORIGIN:origin,BACKEND_ENABLED:'true',MULTIPLAYER_ENABLED:'true',PROPERTIES_ENABLED:'true'},durableObjects:{PLAYERS:{className:'PlayerSession',useSQLite:true},CELLS:{className:'GeoCell',useSQLite:true},RACES:{className:'CruiseRace',useSQLite:true},GEOCODER:{className:'Geocoder',useSQLite:true}}}]}))
  db=await mf.getD1Database('DB') as unknown as D1Database
- for(const name of ['0000_existing_scaffolding','0001_foundation','0002_multiplayer'])for(const sql of readFileSync(`server/migrations/${name}.sql`,'utf8').replace(/^--.*$/gm,'').split(/;\s*(?=CREATE|$)/).map(s=>s.trim()).filter(Boolean))await db.prepare(sql).run()
+ for(const name of ['0000_existing_scaffolding','0001_foundation','0002_multiplayer','0003_global_properties'])for(const sql of readFileSync(`server/migrations/${name}.sql`,'utf8').replace(/^--.*$/gm,'').split(/;\s*(?=CREATE|INSERT INTO property_catalog_clock|$)/).map(s=>s.trim()).filter(Boolean))await db.prepare(sql).run()
 })
 after(async()=>{for(const ws of sockets)try{ws.close()}catch{}await mf?.dispose()})
 const account=()=>issueSession(db,crypto.randomUUID())
@@ -112,4 +115,18 @@ test('strict movement schema and bounded interpolation prevent malicious fields 
  const state={...base,id:crypto.randomUUID(),name:'Driver',epoch:1,at:0},history=[{state,received:1000},{state:{...state,lon:base.lon+.0001,yaw:1,seq:1,vx:10},received:1100}]
  const mid=samplePeer(history,1200)!;assert.ok(mid.lon>base.lon&&mid.lon<base.lon+.0001)
  assert.deepEqual(samplePeer(history,3000),samplePeer(history,9000))
+})
+
+test('simultaneous property buyers across authenticated sockets see the one committed owner',async()=>{
+ const a=await account(),b=await account(),p=await connect(a),q=await connect(b)
+ p.send(base);q.send(base);await delay(150)
+ await transactWallet(db,a.playerId,'property-fixture',100000000,'test fixture');await transactWallet(db,b.playerId,'property-fixture',100000000,'test fixture')
+ const lat=base.lat,lon=base.lon,bld=parseBuildings({elements:[{type:'way',id:880001,version:1,tags:{building:'house'},geometry:[{lat,lon},{lat,lon:lon+.0001},{lat:lat+.0001,lon:lon+.0001},{lat:lat+.0001,lon},{lat,lon}]}]})[0]
+ const property=await registerBuilding(db,bld,valueBuilding(bld,[bld]),Date.now()),qa=await quoteProperty(db,a.playerId,property),qb=await quoteProperty(db,b.playerId,property)
+ const buy=(account:any,quote:any)=>mf.dispatchFetch(origin+'/api/properties/purchase',{method:'POST',headers:{Origin:origin,Cookie:`${sessionCookie}=${account.secret}`,'Content-Type':'application/json'},body:JSON.stringify({playerId:account.playerId,requestId:crypto.randomUUID(),quoteId:quote.id})})
+ const responses=await Promise.all([buy(a,qa),buy(b,qb)]);assert.deepEqual(responses.map(r=>r.status).sort(),[200,409])
+ await until(()=>p.messages.some(m=>m.type==='property-changed'&&m.id===property.id)&&q.messages.some(m=>m.type==='property-changed'&&m.id===property.id))
+ const owners=await Promise.all([a,b].map(async account=>(await(await mf.dispatchFetch(origin+'/api/properties/item?id='+property.id,{headers:{Cookie:`${sessionCookie}=${account.secret}`}})).json() as any).property.ownerId))
+ assert.equal(owners[0],owners[1]);const loser=owners[0]===a.playerId?b:a
+ assert.equal((await db.prepare('SELECT balance FROM wallets WHERE player_id=?').bind(loser.playerId).first<any>()).balance,100000000);p.ws.close();q.ws.close()
 })

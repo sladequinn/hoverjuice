@@ -36,5 +36,5 @@ export async function foundation(request:Request,env:FoundationEnv){
 export async function cleanup(db:D1Database){
  const now=Date.now()
  // Bounded deletes avoid long-running scheduled transactions. Receipts/ledger retained.
- await db.batch(['sessions','oauth_attempts','request_limits','multiplayer_invites'].map(table=>db.prepare(`DELETE FROM ${table} WHERE rowid IN (SELECT rowid FROM ${table} WHERE expires_at<=? LIMIT 5000)`).bind(now)))
+ await db.batch(['sessions','oauth_attempts','request_limits','multiplayer_invites','property_quotes'].map(table=>db.prepare(`DELETE FROM ${table} WHERE rowid IN (SELECT rowid FROM ${table} WHERE expires_at<=? LIMIT 5000)`).bind(now)))
 }

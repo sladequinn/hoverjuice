@@ -29,6 +29,9 @@ export class PlayerSession {
   })
   const ws=this.active(),a=ws?.deserializeAttachment() as Attachment|undefined
   if(url.pathname==='/location')return a?.last&&a.last.at+8000>Date.now()?Response.json({...a.last,raceId:a.raceId}):new Response('Offline',{status:409})
+  if(url.pathname==='/property'){
+   const body=await request.json() as any;if(ws&&a?.epoch===body.watchEpoch)this.send(ws,{type:'property-changed',id:body.id,revision:body.revision});return new Response('ok')
+  }
   if(url.pathname==='/peer'){
    const body=await request.json() as {watchEpoch:number;peer:Presence}
    if(ws&&a?.epoch===body.watchEpoch)this.deliver(ws,a,body.peer)
