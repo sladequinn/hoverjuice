@@ -15,7 +15,7 @@ export class PropertySource {
   const query=`[out:json][timeout:10];way["building"][!"building:part"](around:1000,${center.lat},${center.lon})->.w;(.w;relation["building"]["type"="multipolygon"](around:1000,${center.lat},${center.lon});relation(bw.w)["building"]["type"="multipolygon"];);out meta geom;`
   const headers:Record<string,string>={'Content-Type':'application/x-www-form-urlencoded','User-Agent':`HOVERGHINI property registry (${this.env.APP_CONTACT})`}
   if(this.env.PROPERTY_SOURCE_TOKEN)headers.Authorization=`Bearer ${this.env.PROPERTY_SOURCE_TOKEN}`
-  const response=await this.transport(this.env.PROPERTY_SOURCE_URL,{method:'POST',headers,body:new URLSearchParams({data:query}),redirect:'error',signal:AbortSignal.timeout(12000)})
+  const response=await this.transport(this.env.PROPERTY_SOURCE_URL,{method:'POST',headers,body:new URLSearchParams({data:query}),redirect:'manual',signal:AbortSignal.timeout(12000)})
   if(!response.ok)return new Response('Property source unavailable',{status:503})
   const reader=response.body!.getReader(),chunks:Uint8Array[]=[];let length=0
   for(;;){const {done,value}=await reader.read();if(done)break;length+=value.length;if(length>2097152){await reader.cancel();return new Response('Area too complex for safe import',{status:503})}chunks.push(value)}

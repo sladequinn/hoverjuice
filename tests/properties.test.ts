@@ -128,12 +128,12 @@ test('source adapter uses a fixed server endpoint, bounded chunk cache and fails
  const memory=new Map<string,any>(),ctx={blockConcurrencyWhile:(fn:any)=>fn(),storage:{get:async(key:any)=>Array.isArray(key)?new Map(key.map(k=>[k,memory.get(k)])):memory.get(key),put:async(entries:any)=>{for(const [k,v]of Object.entries(entries)){assert.ok(new TextEncoder().encode(JSON.stringify(v)).length<128000);memory.set(k,v)}},setAlarm:async()=>{}}}
  let fetches=0
  const source=new PropertySource(ctx as any,{DB:db,PROPERTY_SOURCE_URL:'https://osm.test/interpreter',PROPERTY_SOURCE_TOKEN:'server-only-token',APP_CONTACT:'mailto:test@example.test'},(async(url:any,options:any)=>{
-  fetches++;assert.equal(url,'https://osm.test/interpreter');assert.equal(options.headers.Authorization,'Bearer server-only-token');assert.ok(options.body.toString().includes('out+meta+geom'))
+  fetches++;assert.equal(options.redirect,'manual');assert.equal(url,'https://osm.test/interpreter');assert.equal(options.headers.Authorization,'Bearer server-only-token');assert.ok(options.body.toString().includes('out+meta+geom'))
   return Response.json({elements:[{...element(3333,43),note:'🛸'.repeat(40000)}]})
  }) as typeof fetch)
  const request=new Request('https://source/?cell=26600:20000'),a=await source.fetch(request),b=await source.fetch(request)
  assert.equal(a.status,200);assert.equal(b.status,200);assert.equal(fetches,1);assert.ok(memory.size>2);assert.ok(!(await a.text()).includes('server-only-token'))
- for(const response of [Response.json({remark:'timeout',elements:[]}),new Response('x'.repeat(2097153))]){
+ for(const response of [Response.json({remark:'timeout',elements:[]}),new Response('x'.repeat(2097153)),new Response(null,{status:302,headers:{Location:'https://other.test'}})]){
   memory.clear();const failing=new PropertySource(ctx as any,{DB:db,PROPERTY_SOURCE_URL:'https://osm.test/interpreter',APP_CONTACT:'mailto:test@example.test'},async()=>response)
   assert.equal((await failing.fetch(request)).status,503);assert.equal(memory.size,0)
  }
