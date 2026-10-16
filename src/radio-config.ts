@@ -25,18 +25,5 @@ export function parseRadioConfig(raw:unknown):RadioConfig{
  }
  return result
 }
-export function scannerLine(heat:number,speed:number,gang:string,sequence:number){
- const lines=heat>=2?[
-  `All units, active pursuit in ${gang} territory. Suspect moving at ${Math.round(speed)} kilometres per hour.`,
-  'Interceptors, close the next junction. Keep the civilian lanes clear.',
-  'Dispatch to pursuit units. Maintain visual contact. Watch for turquoise propellant.',
- ]:heat>0?[
-  `Patrol advisory. Suspicious hover vehicle reported in ${gang} territory.`,
-  'Unit seven, check the service roads. Possible unregistered cargo transfer.',
- ]:[
-  `Dispatch, routine patrol through ${gang} territory. No active pursuit.`,
-  'Unit twelve, abandoned freight rig reported. Recovery team requested.',
-  'All units, road surface is wet. Give couriers room at intersections.',
- ]
- return lines[sequence%lines.length]
-}
+/** Telemetry fallback cannot infer a pursuit or invent a dispatched incident. */
+export function scannerLine(heat:number,speed:number,gang:string,_sequence:number){return `Dispatch telemetry, ${gang} territory. Heat ${heat.toFixed(1)}, speed ${Math.round(speed)} kilometres per hour. No confirmed pursuit report.`}

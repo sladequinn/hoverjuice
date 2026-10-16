@@ -1,3 +1,4 @@
+import {clipBuildings,footprintBlocked} from './physical'
 import {laneOffset,MAX_LANE_OFFSET} from './streets'
 import { OVERCLOCK_SPEED } from './dynamics'
 import * as THREE from 'three'
@@ -344,6 +345,7 @@ export class Player {
   }
 
   update(dt: number, input: Input, world: World, hasJuice: boolean) {
+    const wallStart=this.pos.clone(),wallHeading=this.heading
     const s = this.spec
     this.impact = 0; this.apex = false
     const power = this.limping ? 0.2 : hasJuice ? 1 : 0.4
@@ -506,6 +508,9 @@ export class Player {
       this.nextNode = -1
     }
 
+    if(footprintBlocked(world,wallStart,this.heading,this.mesh.userData.halfW??.6,this.mesh.userData.halfL??1.3)&&!footprintBlocked(world,wallStart,wallHeading,this.mesh.userData.halfW??.6,this.mesh.userData.halfL??1.3))this.heading=wallHeading
+    const clipped=clipBuildings(world,wallStart,this.pos,this.heading,this.mesh.userData.halfW??.6,this.mesh.userData.halfL??1.3)
+    if(clipped){const hitSpeed=this.vel.length();if(this.mode==='mag')this.unsnap();this.pos.set(clipped.x,clipped.y,clipped.z);this.vel.multiplyScalar(-.15);this.speed=this.vel.length();this.impact=Math.max(this.impact,hitSpeed);this.bump=Math.min(1,hitSpeed/25)}
     this.bump = Math.max(0, this.bump - dt * 2)
     this.lastBurn = burn
     this.mesh.position.copy(this.pos)

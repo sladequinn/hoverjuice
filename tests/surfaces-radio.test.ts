@@ -31,8 +31,8 @@ test('radio configuration rejects unsafe URLs and scanner follows Heat',async()=
  assert.equal(STATIONS.length,6)
  const config=parseRadioConfig({shinobi:[{title:'Song',url:'https://audio.example/a.mp3'},{url:'javascript:alert(1)'},{url:'https://user:password@audio.example/a.mp3'}],police:[{url:'https://a.example'}]})
  assert.equal(config.shinobi.length,1);assert.equal(config.police,undefined)
- assert.match(scannerLine(3,120,'LIARS',0),/active pursuit.*LIARS.*120/)
- assert.match(scannerLine(0,0,'SHINOBI',0),/No active pursuit/)
+ assert.match(scannerLine(3,120,'LIARS',0),/LIARS.*120.*No confirmed pursuit/)
+ assert.match(scannerLine(0,0,'SHINOBI',0),/No confirmed pursuit/)
  const env={ALLOWED_ORIGIN:'https://slade.ninja',RADIO_CONFIG_JSON:JSON.stringify(config)} as any
  const res=await api.fetch(new Request('https://api.example/api/radio'),env)
  assert.equal(res.status,200);assert.deepEqual(await res.json(),config)
