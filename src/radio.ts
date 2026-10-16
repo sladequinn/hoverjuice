@@ -11,8 +11,8 @@ export class Radio {
  private sequence=0
  private generation=0
  private retry=0
- private getContext:()=>{heat:number;speed:number;gang:string}
- constructor(context:()=>{heat:number;speed:number;gang:string}){
+ private getContext:()=>{heat:number;speed:number;gang:string;police?:string}
+ constructor(context:()=>{heat:number;speed:number;gang:string;police?:string}){
   this.getContext=context;this.audio.preload='none'
   try{const v=Number(localStorage.getItem('hoverjuice.radio.volume')??.45);if(Number.isFinite(v))this.volume=Math.max(0,Math.min(1,v))}catch{/* private browser */}
   this.audio.volume=this.volume
@@ -58,8 +58,9 @@ export class Radio {
   this.retry=Date.now();this.track++;await this.play()
  }
  setVolume(value:number){if(!Number.isFinite(value))return;this.volume=Math.max(0,Math.min(1,value));this.audio.volume=this.volume;try{localStorage.setItem('hoverjuice.radio.volume',String(this.volume))}catch{/* private browser */}}
+ policeChanged(){if(this.station==='police'&&this.playing)this.dispatch()}
  private dispatch(){
-  const c=this.getContext();this.status=scannerLine(c.heat,c.speed,c.gang,this.sequence++)
+  const c=this.getContext();this.status=c.police??scannerLine(c.heat,c.speed,c.gang,this.sequence++)
   if('speechSynthesis' in window){window.speechSynthesis.cancel();const line=new SpeechSynthesisUtterance(this.status);line.rate=1.08;line.pitch=.75;line.volume=this.volume;window.speechSynthesis.speak(line)}
  }
 }

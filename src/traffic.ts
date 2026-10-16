@@ -1,3 +1,4 @@
+import type {Body} from './physical'
 import type {CityLife,StreetIncident} from './city-life'
 import type {RoadNode} from './map'
 import {VEHICLE_SCALE} from './data'
@@ -9,7 +10,7 @@ import {mergeGeometries} from 'three/examples/jsm/utils/BufferGeometryUtils.js'
 import type { World } from './world'
 import type { HoverjuiceSpray } from './hoverjuice'
 interface Site {id:string;node:number;next:number;x:number;y:number;z:number;heading:number;gang?:Gang;occupant:number|null}
-interface Agent {path?:number[];a:number;b:number;distance:number;speed:number;seed:number;kind:number;pos:THREE.Vector3;near:boolean;cooldown:number;horn:number;heading:number;leader:Agent|null;site:Site|null;phase:'drive'|'enter'|'park'|'exit';progress:number;wait:number;visits:number;turns:number;from:THREE.Vector3}
+interface Agent {appliedX?:number;appliedZ?:number;kickX?:number;kickZ?:number;offsetX?:number;offsetZ?:number;stun?:number;path?:number[];a:number;b:number;distance:number;speed:number;seed:number;kind:number;pos:THREE.Vector3;near:boolean;cooldown:number;horn:number;heading:number;leader:Agent|null;site:Site|null;phase:'drive'|'enter'|'park'|'exit';progress:number;wait:number;visits:number;turns:number;from:THREE.Vector3}
 export interface TrafficEvents {nearMisses:number;impact:number;boxed:boolean;horn?:{distance:number;side:number;freight:boolean}}
 export interface ActivityDealer {id:string;node:number;x:number;z:number;gang:Gang}
 function fleetGeometry(kind:number){
@@ -44,15 +45,18 @@ export class TrafficSystem {
  private tint=new THREE.Color()
  private nearby:number[]=[]
  readonly activityNodes:number[]=[]
+ get policeRoads(){return this.nearby}
  private sites:Site[]=[]
  private recycleClock=0
  private time=0
+ sirens=false
  private life:CityLife|null=null
  private sceneCar:Agent|null=null
  private sceneId=''
  setLife(life:CityLife){this.life=life}
  private sceneTarget(car:Agent){return this.sceneCar===car&&this.life?.incident?this.life.incident:null}
  private reactScene(incident:StreetIncident){
+  if(incident.kind==='patrol'){if(this.life)this.life.incident=null;return}
   if(incident.id===this.sceneId)return
   const candidates=this.agents.filter(c=>c.phase==='drive'&&!c.site&&(incident.kind!=='patrol'||c.kind===2)).sort((a,b)=>Math.hypot(a.pos.x-incident.x,a.pos.z-incident.z)-Math.hypot(b.pos.x-incident.x,b.pos.z-incident.z))
   const car=candidates[0];if(!car||Math.hypot(car.pos.x-incident.x,car.pos.z-incident.z)>200)return
@@ -156,8 +160,9 @@ export class TrafficSystem {
   for(const car of this.agents){car.leader=null;if(car.phase!=='drive')continue;const key=`${car.a}:${car.b}`,queue=this.queues.get(key)??[];queue.push(car);this.queues.set(key,queue)}
   for(const queue of this.queues.values()){queue.sort((a,b)=>b.distance-a.distance);for(let i=1;i<queue.length;i++)queue[i].leader=queue[i-1]}
   for(const car of this.agents){
+   car.pos.x-=car.appliedX??0;car.pos.z-=car.appliedZ??0;car.appliedX=car.appliedZ=0;car.stun=Math.max(0,(car.stun??0)-dt)
    car.cooldown=Math.max(0,car.cooldown-dt);car.horn=Math.max(0,car.horn-dt)
-   const d=player.distanceTo(car.pos),scene=this.sceneTarget(car),hostile=car.kind===2&&heat>(this.life?.context.friendlyControl||this.life&&this.life.context.reputation>=10?2:1.25)
+   const d=player.distanceTo(car.pos),scene=this.sceneTarget(car),hostile=false
    if(this.life&&d>500)continue
    if(hostile&&car.phase==='drive'&&car.site)this.release(car)
    if(car.phase!=='drive'&&car.site){
@@ -183,6 +188,8 @@ export class TrafficSystem {
     let a=nodes[car.a],b=nodes[car.b],len=Math.hypot(b.x-a.x,b.z-a.z)||1
     let wanted=car.kind===1?8:car.kind===0?(car.seed%2?23:14):hostile?30:12
     wanted*=this.life?.schedule.speed??1
+    if((car.stun??0)>0)wanted=0
+    if(this.sirens&&d<100)wanted=Math.min(wanted,7)
     if(scene&&scene.kind==='breakdown'&&Math.hypot(car.pos.x-scene.x,car.pos.z-scene.z)<20)wanted=0
     if(this.life&&d<35&&heat>1&&car.kind!==2)wanted=Math.min(wanted,8)
     const leader=car.leader,gap=leader?leader.distance-car.distance:Infinity,safe=((car.kind===1?4.14:car.kind===0?1.955:2.3)+(leader?.kind===1?4.14:leader?.kind===0?1.955:2.3))*VEHICLE_SCALE+.8
@@ -245,6 +252,9 @@ export class TrafficSystem {
     if(nowDistance<6&&!hit&&car.phase==='drive')car.near=true
     if(nowDistance>9&&car.near){if(playerSpeed>25&&car.cooldown===0)events.nearMisses++;car.near=false}
    }
+   car.offsetX=(car.offsetX??0)+(car.kickX??0)*dt;car.offsetZ=(car.offsetZ??0)+(car.kickZ??0)*dt;car.kickX=(car.kickX??0)*Math.exp(-4*dt);car.kickZ=(car.kickZ??0)*Math.exp(-4*dt)
+   if((car.stun??0)<=0){car.offsetX*=Math.exp(-dt);car.offsetZ*=Math.exp(-dt)}
+   if(Math.abs(car.offsetX)+Math.abs(car.offsetZ)<.0001||this.world.hitBuilding(car.pos.x+car.offsetX,car.pos.z+car.offsetZ,car.pos.y-.5)<0){car.pos.x+=car.offsetX;car.pos.z+=car.offsetZ;car.appliedX=car.offsetX;car.appliedZ=car.offsetZ}else {car.offsetX=car.offsetZ=car.kickX=car.kickZ=0}
    this.rotation.setFromAxisAngle(this.up,car.heading)
    const scale=car.kind===1?this.scale.set(1.25,1.5,1.8):car.kind===0?this.scale.set(.8,.8,.85):this.scale.set(1,1,1)
    this.matrix.compose(car.pos,this.rotation,scale.multiplyScalar(VEHICLE_SCALE))
@@ -257,5 +267,6 @@ export class TrafficSystem {
   events.boxed=closeHostiles>=3&&playerSpeed<2
   return events
  }
+ bodies():Body[]{return this.agents.map(c=>({id:'traffic:'+c.seed,x:c.pos.x,y:c.pos.y,z:c.pos.z,heading:c.heading,halfW:(c.kind===1?1.32:c.kind===0?.84:1.05)*VEHICLE_SCALE,halfL:(c.kind===1?4.14:c.kind===0?1.955:2.3)*VEHICLE_SCALE,vx:Math.sin(c.heading)*c.speed+(c.kickX??0),vz:Math.cos(c.heading)*c.speed+(c.kickZ??0),mass:c.kind===1?3500:1100,push:(vx,vz,dx,dz)=>{const forward=c.phase==='drive'?vx*Math.sin(c.heading)+vz*Math.cos(c.heading):0;c.kickX=(c.kickX??0)+vx-forward*Math.sin(c.heading);c.kickZ=(c.kickZ??0)+vz-forward*Math.cos(c.heading);c.offsetX=(c.offsetX??0)+dx;c.offsetZ=(c.offsetZ??0)+dz;c.speed=Math.max(0,c.speed+(vx*Math.sin(c.heading)+vz*Math.cos(c.heading)));c.stun=Math.min(3,Math.hypot(vx,vz)/4);c.cooldown=1}}))}
  dispose(){for(const mesh of this.fleets){mesh.geometry.dispose();(mesh.material as THREE.Material).dispose()}this.agents=[];this.sites=[];this.queues.clear();this.junctions.clear();this.waiting.clear()}
 }

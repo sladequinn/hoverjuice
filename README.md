@@ -116,3 +116,7 @@ Persistent regional commodity markets, server-simulated sealed freight, optional
 ## Phase 6: Living cities
 
 Neighbourhood and time-based routines, connected business trips, pooled sidewalk pedestrians and reactive roadside incidents extend the existing city simulation. See [living-cities.md](docs/living-cities.md) for behaviour, persistence and performance boundaries, and [phase6-report.md](docs/phase6-report.md) for verification. No new backend configuration is needed.
+
+## Phase 6A: Police and physical world
+
+Swept vehicle/building contacts, physical roadside objects, visible police detection and pursuit, escape/impound, event-driven scanner audio and improved chase-camera feedback extend local driving. See [police-physical-world.md](docs/police-physical-world.md) and [phase6a-report.md](docs/phase6a-report.md) for verification and limits. Online players remain ghosted; authoritative freight retains its existing local collision exemption.

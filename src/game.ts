@@ -1,3 +1,6 @@
+import {PhysicalWorld,clipBuildings} from './physical'
+import {PoliceSystem} from './police'
+import {StreetObjects} from './street-objects'
 import {CityLife} from './city-life'
 import {districtFor} from '../shared/crews'
 import {Economy} from './economy'
@@ -171,7 +174,7 @@ export class Game {
   crews=new Crews(localStorage,()=>{if($('modal').dataset.view==='crews'&&!(document.activeElement instanceof HTMLInputElement))this.openModal('crews')})
   properties=new GlobalProperties(localStorage,()=>{const view=$('modal').dataset.view;if(view==='property'||view==='properties')this.openModal(view)})
   ownership = new OwnershipClient()
-  radio=new Radio(()=>({heat:this.run.heat,speed:this.player.groundSpeed*3.6,gang:this.world?.gangAt(this.actor.x,this.actor.z)??this.gang}))
+  radio=new Radio(()=>({heat:this.run.heat,speed:this.player.groundSpeed*3.6,gang:this.world?.gangAt(this.actor.x,this.actor.z)??this.gang,police:this.police?.message??'Dispatch: no active pursuit.'}))
   trafficSound=new TrafficSound()
   particles=new ParticlePool()
   spray=new HoverjuiceSpray()
@@ -186,6 +189,11 @@ export class Game {
   world: World | null = null
   traffic: TrafficSystem | null = null
   cityLife:CityLife|null=null
+  police:PoliceSystem|null=null
+  streetObjects:StreetObjects|null=null
+  physical=new PhysicalWorld()
+  crashPulse=0
+  private physicalCooldown=0
   dealers: DealerSystem | null = null
   player: Player
   juice = 0
@@ -354,6 +362,8 @@ export class Game {
     if(this.campaign){this.scene.remove(this.campaign.boss);this.campaign.dispose();this.campaign=null}
     if(this.multiplayer){this.scene.remove(this.multiplayer.group);this.multiplayer.dispose();this.multiplayer=null}
     if (this.world) {
+      if(this.police){this.scene.remove(this.police.group);this.police.dispose();this.police=null}
+      if(this.streetObjects){this.scene.remove(this.streetObjects.group);this.streetObjects.dispose();this.streetObjects=null}
       if(this.cityLife){this.scene.remove(this.cityLife.group);this.cityLife.dispose();this.cityLife=null}
       if (this.traffic) {
         this.scene.remove(this.traffic.group)
@@ -375,6 +385,7 @@ export class Game {
     void this.syncOwnership()
     this.traffic = new TrafficSystem(this.world)
     this.scene.add(this.traffic.group)
+    this.police=new PoliceSystem(this.world);this.streetObjects=new StreetObjects(this.world);this.scene.add(this.police.group,this.streetObjects.group)
     this.cityLife=new CityLife(this.world,localStorage);this.traffic.setLife(this.cityLife);this.scene.add(this.cityLife.group)
     this.dealerAnchor={x:Infinity,z:Infinity}
     this.mapCenter=null
@@ -784,7 +795,7 @@ export class Game {
     this.player.placeAtNode(this.world,this.garageNode)
     this.player.unsnap()
     this.juice=Math.max(this.juice,this.player.spec.tank*0.25)
-    this.run.repair();this.persist();this.resumeTutorial()
+    this.run.repair();this.police?.reset();this.persist();this.resumeTutorial()
     this.toast('IMPOUNDED · cargo confiscated · $250 fee · stash untouched','bad')
   }
 
@@ -1663,6 +1674,7 @@ export class Game {
   update(dt: number, input: Input) {
     const w = this.world
     if (!w) return
+    const physicalStart=this.player.pos.clone();this.crashPulse=Math.max(0,this.crashPulse-dt*2);this.physicalCooldown=Math.max(0,this.physicalCooldown-dt)
     if (this.toastTimer > 0) {
       this.toastTimer -= dt
       if (this.toastTimer <= 0) $('toast').classList.remove('show')
@@ -1692,7 +1704,7 @@ export class Game {
       if(p.apex) this.run.chain()
       if(this.run.limp===0) this.bust()
       const garage=w.city.nodes[this.garageNode]
-      if(p.groundSpeed<3 && (Math.hypot(p.pos.x-garage.x,p.pos.z-garage.z)<12 || this.atOwnedHome())) { this.run.heat=0; if(this.run.limp>=0)this.run.repair() }
+      if(!this.police?.active&&p.groundSpeed<3 && (Math.hypot(p.pos.x-garage.x,p.pos.z-garage.z)<12 || this.atOwnedHome())) { this.run.heat=0; if(this.run.limp>=0)this.run.repair() }
       if(tunnel) this.route=[]
 
       const leak = this.save.mask==='respirator' ? 0 : this.active?.stage === 'dropoff' ? this.active.type.leak : 0
@@ -1732,16 +1744,29 @@ export class Game {
     if(freight&&!w.city.procedural){const p=this.player;p.pos.x=wrapLon(freight.lon-w.city.lon)*111320*Math.cos(w.city.lat*Math.PI/180);p.pos.z=(w.city.lat-freight.lat)*110540;p.pos.y=w.groundHeightAt(p.pos.x,p.pos.z,p.pos.y)+1;p.heading=freight.yaw;p.speed=freight.speed;p.vel.set(Math.sin(p.heading)*p.speed,Math.cos(p.heading)*p.speed);p.mesh.position.copy(p.pos);p.mesh.rotation.set(0,p.heading,0)}
     const crewTarget=this.economy.target??this.crews.target
     if(crewTarget&&!w.city.procedural){const x=wrapLon(crewTarget.lon-w.city.lon)*111320*Math.cos(w.city.lat*Math.PI/180),z=(w.city.lat-crewTarget.lat)*110540;this.crewGate.position.set(x,w.groundHeightAt(x,z,this.player.pos.y)+2,z);this.crewGate.rotation.x=-Math.PI/2;this.crewGate.scale.setScalar(this.economy.driving ? .12 : 1);this.crewGate.visible=true;if(this.crewGate.parent!==this.scene)this.scene.add(this.crewGate)}else this.crewGate.visible=false
-    this.multiplayer?.update(dt,this.player,this.spray,w,this.paused?0:dt,buildFor(this.save.builds,this.save.current).paint)
     w.update(this.paused?0:dt)
     if(this.cityLife){this.cityLife.roadCandidates=this.traffic?.activityNodes??null;const life=this.cityLife,geo=worldToLatLon(w.city,this.actor.x,this.actor.z),district=this.crews.district,live=district?.id===districtFor(geo)&&district.expiresAt>Date.now(),gang=w.gangAt(this.actor.x,this.actor.z);life.context={gang,reputation:this.save.gangRep[gang]??0,friendlyControl:!!(live&&district.controller===this.crews.crew?.id),contested:!!(district?.id===districtFor(geo)&&district.contest&&!district.contest.finished),crewColor:live?district.color??undefined:undefined};life.update(this.paused?0:dt,this.actor,this.player.groundSpeed,this.run.heat);if(life.notice&&!this.paused){this.toast(life.notice,'info');life.notice=''}}
     const traffic=this.traffic?.update(this.paused?0:dt,this.actor,this.player.groundSpeed,this.run.heat,this.spray)
     if(!this.paused&&traffic&&!this.economy.driving){
       if(traffic.horn)this.trafficSound.honk(traffic.horn.distance,traffic.horn.side,traffic.horn.freight)
-      if(traffic.impact>0){this.run.damage(Math.min(30,traffic.impact*0.5),this.save.mask==='oni');if(this.player.mode==='mag' && traffic.impact>22)this.player.unsnap()}
+
       for(let i=0;i<traffic.nearMisses;i++)this.run.chain()
-      if(traffic.boxed&&this.run.limp<0){this.run.limp=15;this.toast('BOXED IN · 15 seconds reserve power','bad')}
+
     }
+    if(!this.paused&&!this.economy.driving){
+      const p=this.player,policeMessage=this.police?.message;if(this.police)this.police.roadCandidates=this.traffic?.policeRoads??null;this.police?.update(dt,p.pos,p.groundSpeed,this.run.heat,p.heading,[...(this.traffic?.bodies()??[]),...(this.streetObjects?.bodies()??[])]);if(this.traffic)this.traffic.sirens=!!this.police?.active
+      this.streetObjects?.update(dt,p.pos,this.traffic?.activityNodes??[])
+      if(this.police){if(policeMessage!==this.police.message){this.radio.policeChanged();if(this.police.state==='stop'||this.police.state==='escaped')this.toast(this.police.message,'info')}if(this.police.state==='pursuit'||this.police.state==='stop')this.trafficSound.siren(Math.min(...this.police.units.map(u=>u.pos.distanceTo(p.pos))));this.run.heat=Math.max(0,Math.min(5,this.run.heat+this.police.heatDelta));if(this.police.busted){this.bust();this.police.busted=false}}
+      if(p.pos.distanceTo(physicalStart)<50){
+        const body={x:p.pos.x,y:p.pos.y,z:p.pos.z,heading:p.heading,halfW:p.mesh.userData.halfW??.6,halfL:p.mesh.userData.halfL??1.3,vx:p.vel.x,vz:p.vel.y,mass:p.spec.kind==='truck'?3000:1000}
+        this.physical.setBodies([...(this.traffic?.bodies()??[]),...(this.police?.bodies()??[]),...(this.streetObjects?.bodies()??[])])
+        const contact=this.physical.solve(body,physicalStart,dt)
+        if(contact.hits){if(p.mode==='mag')p.unsnap();const wall=clipBuildings(w,physicalStart,body,p.heading,body.halfW,body.halfL);p.pos.set(wall?.x??body.x,body.y,wall?.z??body.z);p.vel.set(wall?0:body.vx,wall?0:body.vz);p.speed=p.vel.length();p.mesh.position.copy(p.pos)}
+        const severity=Math.max(contact.impact,p.impact)
+        if(severity>3&&!this.physicalCooldown){if(contact.impact>3)this.run.damage(Math.min(40,contact.impact*.6),this.save.mask==='oni');this.crashPulse=Math.min(1,severity/35);this.trafficSound.crash(severity);this.police?.reportCrash(severity);this.physicalCooldown=.35;for(let i=0;i<5;i++)this.particles.emit(p.pos.x+(Math.random()-.5),p.pos.y,p.pos.z+(Math.random()-.5))}
+      }
+    }
+    this.multiplayer?.update(dt,this.player,this.spray,w,this.paused?0:dt,buildFor(this.save.builds,this.save.current).paint)
     if(!this.paused){
       this.spray.emit(this.player,dt,this.actor,this.player.heading,this.player.groundSpeed,
         this.player.mesh.userData.halfW,this.player.mesh.userData.halfL,

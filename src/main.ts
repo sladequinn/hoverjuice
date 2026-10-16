@@ -284,8 +284,8 @@ function updateCamera(dt: number) {
     const va = Math.atan2(p.vel.x, p.vel.y)
     targetYaw = p.heading + Math.max(-0.35, Math.min(0.35, wrap(va - p.heading))) * 0.6
   }
-  const yawRate = top ? 1.2 : 4.5
-  camYaw += wrap(targetYaw - camYaw) * Math.min(1, dt * yawRate)
+  const yawRate = top ? 1.2 : 5.5
+  camYaw += wrap(targetYaw - camYaw) * (1-Math.exp(-dt*yawRate))
   if (game.paused) orbit += dt * 0.15
   else orbit *= Math.pow(0.02, dt)
   const yaw = camYaw + orbit
@@ -304,13 +304,14 @@ function updateCamera(dt: number) {
   camPos.set(camTarget.x - Math.sin(yaw) * dist, camTarget.y + height, camTarget.z - Math.cos(yaw) * dist)
   if (!top) unblock(camTarget, camPos)
   if(game.world&&!game.world.isTunnel(subject.x,subject.z,subject.y))camPos.y=Math.max(camPos.y,game.world.terrainHeightAt(camPos.x,camPos.z)+2)
-  camera.position.lerp(camPos, Math.min(1, dt * 9))
-  const lead = top ? 3 : 6
+  camera.position.lerp(camPos, 1-Math.exp(-dt*10))
+  if(!top&&!game.paused&&!window.matchMedia('(prefers-reduced-motion: reduce)').matches){const kick=game.crashPulse*.13;camera.position.x+=Math.sin(performance.now()*.07)*kick;camera.position.y+=Math.sin(performance.now()*.09)*kick*.5;unblock(camTarget,camera.position)}
+  const lead = top ? 3 : Math.min(10,4+speed*.08)
   const heading = p.heading
   lookAt.lerp(cameraLead.set(camTarget.x + Math.sin(heading) * lead, camTarget.y, camTarget.z + Math.cos(heading) * lead), Math.min(1, dt * 8))
   camera.lookAt(lookAt)
   const baseFov = camera.aspect < 1 ? 62 + (1 - camera.aspect) * 30 : 62
-  const fov = (top ? baseFov - 8 : baseFov) + (p.boosting ? 12 : 0) + speed * 0.08
+  const fov = Math.min(100,(top ? baseFov - 8 : baseFov) + (p.boosting ? 10 : 0) + speed * 0.08)
   camera.fov += (fov - camera.fov) * Math.min(1, dt * 4)
   camera.updateProjectionMatrix()
 }
