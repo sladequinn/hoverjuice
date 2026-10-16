@@ -112,3 +112,7 @@ Authenticated crews, member-owned headquarters, stable global districts and serv
 ## Phase 5: Global underground economy
 
 Persistent regional commodity markets, server-simulated sealed freight, optional rival interception and bounded global wallet rewards are documented in [global-economy.md](docs/global-economy.md). See [phase5-report.md](docs/phase5-report.md) for verification and remaining deployment blockers. Enable only after the earlier phases; the economy is disabled by default.
+
+## Phase 6: Living cities
+
+Neighbourhood and time-based routines, connected business trips, pooled sidewalk pedestrians and reactive roadside incidents extend the existing city simulation. See [living-cities.md](docs/living-cities.md) for behaviour, persistence and performance boundaries, and [phase6-report.md](docs/phase6-report.md) for verification. No new backend configuration is needed.

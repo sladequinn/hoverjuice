@@ -1,3 +1,5 @@
+import type {CityLife,StreetIncident} from './city-life'
+import type {RoadNode} from './map'
 import {VEHICLE_SCALE} from './data'
 import {PAINTS} from './customization'
 import {GANG_INFO} from './gangs'
@@ -7,7 +9,7 @@ import {mergeGeometries} from 'three/examples/jsm/utils/BufferGeometryUtils.js'
 import type { World } from './world'
 import type { HoverjuiceSpray } from './hoverjuice'
 interface Site {id:string;node:number;next:number;x:number;y:number;z:number;heading:number;gang?:Gang;occupant:number|null}
-interface Agent {a:number;b:number;distance:number;speed:number;seed:number;kind:number;pos:THREE.Vector3;near:boolean;cooldown:number;horn:number;heading:number;leader:Agent|null;site:Site|null;phase:'drive'|'enter'|'park'|'exit';progress:number;wait:number;visits:number;turns:number;from:THREE.Vector3}
+interface Agent {path?:number[];a:number;b:number;distance:number;speed:number;seed:number;kind:number;pos:THREE.Vector3;near:boolean;cooldown:number;horn:number;heading:number;leader:Agent|null;site:Site|null;phase:'drive'|'enter'|'park'|'exit';progress:number;wait:number;visits:number;turns:number;from:THREE.Vector3}
 export interface TrafficEvents {nearMisses:number;impact:number;boxed:boolean;horn?:{distance:number;side:number;freight:boolean}}
 export interface ActivityDealer {id:string;node:number;x:number;z:number;gang:Gang}
 function fleetGeometry(kind:number){
@@ -23,6 +25,13 @@ function fleetGeometry(kind:number){
  for(const side of [-1,1]){box(.5,.12,.08,side*.68,.12,2.32,0xfff2cb);box(.55,.1,.08,side*.65,.1,-2.32,0xff5a31);box(.18,.18,2.8,side*1.06,-.15,-.1,0x354c58)}
  const merged=mergeGeometries(parts)!;parts.forEach(p=>p.dispose());return merged
 }
+/** Bounded graph search avoids greedy loops around blocks; unsupported trips are declined. */
+export function localTrip(nodes:readonly RoadNode[],start:number,end:number,budget=256):number[]|null {
+ const queue=[start],parent=new Map<number,number>([[start,-1]])
+ for(let i=0;i<queue.length&&i<budget;i++){const id=queue[i];if(id===end){const path:number[]=[];for(let n=id;n!==-1;n=parent.get(n)!)path.push(n);return path.reverse()}
+  for(const next of nodes[id]?.adj??[])if(!parent.has(next)&&parent.size<budget){parent.set(next,id);queue.push(next)}
+ }return null
+}
 /** Bounded vehicle pool with road queues, local trips and reservable venue parking. */
 export class TrafficSystem {
  group=new THREE.Group()
@@ -34,9 +43,23 @@ export class TrafficSystem {
  private scale=new THREE.Vector3()
  private tint=new THREE.Color()
  private nearby:number[]=[]
+ readonly activityNodes:number[]=[]
  private sites:Site[]=[]
  private recycleClock=0
  private time=0
+ private life:CityLife|null=null
+ private sceneCar:Agent|null=null
+ private sceneId=''
+ setLife(life:CityLife){this.life=life}
+ private sceneTarget(car:Agent){return this.sceneCar===car&&this.life?.incident?this.life.incident:null}
+ private reactScene(incident:StreetIncident){
+  if(incident.id===this.sceneId)return
+  const candidates=this.agents.filter(c=>c.phase==='drive'&&!c.site&&(incident.kind!=='patrol'||c.kind===2)).sort((a,b)=>Math.hypot(a.pos.x-incident.x,a.pos.z-incident.z)-Math.hypot(b.pos.x-incident.x,b.pos.z-incident.z))
+  const car=candidates[0];if(!car||Math.hypot(car.pos.x-incident.x,car.pos.z-incident.z)>200)return
+  this.sceneCar=car;this.sceneId=incident.id;incident.engaged=true;if(this.life)this.life.notice=incident.announcement??''
+  if(incident.kind==='breakdown'){incident.x=car.pos.x;incident.z=car.pos.z}
+  if(incident.kind==='meet'||incident.kind==='delivery'){const site=this.sites.filter(s=>s.occupant===null).sort((a,b)=>Math.hypot(a.x-incident.x,a.z-incident.z)-Math.hypot(b.x-incident.x,b.z-incident.z))[0];const path=site?localTrip(this.world.city.nodes,car.b,site.node):null;if(site&&path&&path[1]!==car.a&&Math.hypot(site.x-incident.x,site.z-incident.z)<250){car.site=site;car.path=path;site.occupant=car.seed;incident.x=site.x;incident.z=site.z}else {this.sceneCar=null;if(this.life){this.life.incident=null;this.life.notice=''}}}
+ }
  private queues=new Map<string,Agent[]>()
  private junctions=new Map<number,{seed:number;until:number}>()
  private waiting=new Map<number,Map<number,number>>()
@@ -63,7 +86,10 @@ export class TrafficSystem {
  setActivitySites(dealers:readonly ActivityDealer[],center:THREE.Vector3){
   const nodes=this.world.city.nodes,previous=new Map(this.sites.map(s=>[s.id,s])),next:Site[]=[]
   for(const car of this.agents)if(car.site)previous.set(car.site.id,car.site)
-  const venues=[...(this.world.pumps??[]).map(p=>({...p,id:`fuel:${p.node}`,gang:undefined as Gang|undefined})),...dealers]
+  const businesses=(this.world.city.venues??[]).filter(v=>/shop|retail|restaurant|cafe|warehouse|industrial/.test(Object.values(v.tags).join(' '))&&Math.hypot(v.x-center.x,v.z-center.z)<700).sort((a,b)=>Math.hypot(a.x-center.x,a.z-center.z)-Math.hypot(b.x-center.x,b.z-center.z)).slice(0,4).flatMap(v=>{
+   let node=-1,dist=55;for(let i=0;i<nodes.length;i++){const n=nodes[i],d=Math.hypot(n.x-v.x,n.z-v.z);if(n.main&&n.adj.length&&d<dist){dist=d;node=i}}return node<0?[]:[{id:`business:${v.x}:${v.z}`,node,x:nodes[node].x,z:nodes[node].z,gang:undefined as Gang|undefined}]
+  })
+  const venues=[...businesses,...(this.world.pumps??[]).map(p=>({...p,id:`fuel:${p.node}`,gang:undefined as Gang|undefined})),...dealers]
    .filter(p=>Math.hypot(p.x-center.x,p.z-center.z)<900).sort((a,b)=>Math.hypot(a.x-center.x,a.z-center.z)-Math.hypot(b.x-center.x,b.z-center.z)).slice(0,8)
   for(const venue of venues){
    const node=nodes[venue.node];if(!node?.adj.length||Math.hypot(node.x-venue.x,node.z-venue.z)>60||node.tunnel||Math.abs((node.y??0)-(this.world.city.terrain?.heightAt(node.x,node.z)??0))>.5)continue
@@ -102,12 +128,12 @@ export class TrafficSystem {
   }
   this.update(0,player)
  }
- private release(car:Agent){if(car.site?.occupant===car.seed)car.site.occupant=null;car.site=null;car.phase='drive';car.progress=0;car.wait=0;car.turns=0}
+ private release(car:Agent){if(car.site?.occupant===car.seed)car.site.occupant=null;car.site=null;car.path=undefined;car.phase='drive';car.progress=0;car.wait=0;car.turns=0}
  private assignTrip(car:Agent){
   if(car.site||car.wait>0)return
   const choices=this.sites.filter(s=>s.occupant===null&&Math.hypot(s.x-car.pos.x,s.z-car.pos.z)<650&&(car.kind===2?!!s.gang:true))
-  if(!choices.length)return
-  const site=choices[(car.seed+car.visits)%choices.length];site.occupant=car.seed;car.site=site;car.turns=0
+  if(!choices.length){car.wait=5;return}
+  const site=choices[(car.seed+car.visits)%choices.length],path=localTrip(this.world.city.nodes,car.b,site.node);if(!path||path[1]===car.a){car.wait=10;return}site.occupant=car.seed;car.site=site;car.path=path;car.turns=0
  }
  update(dt:number,player:THREE.Vector3,playerSpeed=0,heat=0,spray?:HoverjuiceSpray):TrafficEvents {
   dt=Math.min(.1,Math.max(0,dt));this.time+=dt
@@ -115,14 +141,14 @@ export class TrafficSystem {
   let closeHostiles=0
   this.recycleClock-=dt
   if(dt>0&&this.recycleClock<=0){
-   this.recycleClock=.5;const nearby=this.nearby;nearby.length=0
-   for(let i=0;i<nodes.length;i++){const n=nodes[i];if(!n.main||!n.adj.length)continue;const d=(n.x-player.x)**2+(n.z-player.z)**2;if(d>110**2&&d<400**2)nearby.push(i)}
-   let budget=3
+   this.recycleClock=.5;if(this.life?.incident)this.reactScene(this.life.incident);else {this.sceneCar=null;this.sceneId=''}const nearby=this.nearby;nearby.length=0;this.activityNodes.length=0
+   for(let i=0;i<nodes.length;i++){const n=nodes[i];if(!n.main||!n.adj.length)continue;const d=(n.x-player.x)**2+(n.z-player.z)**2;if(d<180**2)this.activityNodes.push(i);if(d>110**2&&d<400**2)nearby.push(i)}
+   let budget=3,trips=2
    for(const car of this.agents){
     if(nearby.length&&budget>0&&car.pos.distanceToSquared(player)>650**2){
      this.release(car);const pick=nearby[(car.seed*7919)%nearby.length];car.a=pick;car.b=nodes[pick].adj[(car.seed+car.visits)%nodes[pick].adj.length];car.distance=0;car.near=false;car.cooldown=1;car.speed=10;budget--
     }
-    if(car.phase==='drive'&&car.seed%3!==1)this.assignTrip(car)
+    if(car.phase==='drive'&&car.seed%3!==1&&car!==this.sceneCar&&trips>0&&!car.site&&car.wait<=0){this.assignTrip(car);trips--}
    }
    for(const [id,reservation] of this.junctions)if(reservation.until<this.time)this.junctions.delete(id)
   }
@@ -131,7 +157,8 @@ export class TrafficSystem {
   for(const queue of this.queues.values()){queue.sort((a,b)=>b.distance-a.distance);for(let i=1;i<queue.length;i++)queue[i].leader=queue[i-1]}
   for(const car of this.agents){
    car.cooldown=Math.max(0,car.cooldown-dt);car.horn=Math.max(0,car.horn-dt)
-   const d=player.distanceTo(car.pos),hostile=car.kind===2&&heat>.75
+   const d=player.distanceTo(car.pos),scene=this.sceneTarget(car),hostile=car.kind===2&&heat>(this.life?.context.friendlyControl||this.life&&this.life.context.reputation>=10?2:1.25)
+   if(this.life&&d>500)continue
    if(hostile&&car.phase==='drive'&&car.site)this.release(car)
    if(car.phase!=='drive'&&car.site){
     const site=car.site
@@ -147,7 +174,7 @@ export class TrafficSystem {
      const targetY=car.phase==='enter'?site.y:(node.y??0)+((next.y??0)-(node.y??0))*mergeAt/len+1.3
      car.pos.set(car.from.x+(targetX-car.from.x)*t,car.from.y+(targetY-car.from.y)*t,car.from.z+(targetZ-car.from.z)*t);car.heading=site.heading;car.speed=blocked?0:3
      if(car.progress>=1){
-      if(car.phase==='enter'){car.phase='park';car.wait=8+(car.seed+car.visits)%15;car.visits++}
+      if(car.phase==='enter'){car.phase='park';car.wait=(this.life?.schedule.dwell??8)+(car.seed+car.visits)%15;car.visits++}
       else{car.a=site.node;car.b=site.next;car.distance=mergeAt;this.release(car);car.wait=25;car.speed=4}
      }
     }
@@ -155,6 +182,9 @@ export class TrafficSystem {
     car.wait=Math.max(0,car.wait-dt)
     let a=nodes[car.a],b=nodes[car.b],len=Math.hypot(b.x-a.x,b.z-a.z)||1
     let wanted=car.kind===1?8:car.kind===0?(car.seed%2?23:14):hostile?30:12
+    wanted*=this.life?.schedule.speed??1
+    if(scene&&scene.kind==='breakdown'&&Math.hypot(car.pos.x-scene.x,car.pos.z-scene.z)<20)wanted=0
+    if(this.life&&d<35&&heat>1&&car.kind!==2)wanted=Math.min(wanted,8)
     const leader=car.leader,gap=leader?leader.distance-car.distance:Infinity,safe=((car.kind===1?4.14:car.kind===0?1.955:2.3)+(leader?.kind===1?4.14:leader?.kind===0?1.955:2.3))*VEHICLE_SCALE+.8
     if(leader)wanted=Math.min(wanted,Math.max(0,(gap-safe)*1.5),leader.speed+Math.max(0,gap-12))
     const remaining=len-car.distance
@@ -165,8 +195,8 @@ export class TrafficSystem {
      if(!waiters.has(car.seed)&&dt>0)waiters.set(car.seed,this.time)
      // Remove departed/recycled cars before choosing the oldest eligible approach.
      for(const seed of waiters.keys())if(!this.agents.some(c=>c.seed===seed&&c.phase==='drive'&&c.b===car.b))waiters.delete(seed)
-     const opts=b.adj.filter(n=>n!==car.a),target=hostile?player:car.site?nodes[car.site.node]:null
-     if(target)opts.sort((i,j)=>Math.hypot(nodes[i].x-target.x,nodes[i].z-target.z)-Math.hypot(nodes[j].x-target.x,nodes[j].z-target.z))
+     const opts=b.adj.filter(n=>n!==car.a),target=hostile?player:car.site?nodes[car.site.node]:this.sceneTarget(car)
+     if(target){const hop=car.path?.[(car.path.indexOf(car.b))+1];opts.sort((i,j)=>i===hop?-1:j===hop?1:Math.hypot(nodes[i].x-target.x,nodes[i].z-target.z)-Math.hypot(nodes[j].x-target.x,nodes[j].z-target.z))}
      const exit=opts.length?opts[target?0:(car.seed+car.turns+1)%opts.length]:car.a
      const exitQueue=this.queues.get(`${car.b}:${exit}`)??[]
      const clear=exitQueue.every(c=>c.distance>7)&&(!leader||gap>safe+2)
@@ -195,14 +225,15 @@ export class TrafficSystem {
      car.distance-=len
      const opts=b.adj.filter(n=>n!==car.a),prev=car.a;car.a=car.b;car.turns++
      if(car.site&&car.turns>30){this.release(car);car.wait=20}
-     const target=hostile?player:car.site?nodes[car.site.node]:null
-     if(target)opts.sort((i,j)=>Math.hypot(nodes[i].x-target.x,nodes[i].z-target.z)-Math.hypot(nodes[j].x-target.x,nodes[j].z-target.z))
+     const target=hostile?player:car.site?nodes[car.site.node]:this.sceneTarget(car)
+     if(target){const hop=car.path?.[(car.path.indexOf(car.a))+1];opts.sort((i,j)=>i===hop?-1:j===hop?1:Math.hypot(nodes[i].x-target.x,nodes[i].z-target.z)-Math.hypot(nodes[j].x-target.x,nodes[j].z-target.z))}
      car.b=opts.length?opts[target?0:(car.seed+car.turns)%opts.length]:prev
      a=nodes[car.a];b=nodes[car.b];len=Math.hypot(b.x-a.x,b.z-a.z)||1
     }
     const t=Math.min(1,car.distance/len),heading=Math.atan2(b.x-a.x,b.z-a.z)
     const clearance=Math.max(0,Math.min(a.width??5,b.width??5)/2-(car.kind===1?1.32:car.kind===0?.74:1.05)*VEHICLE_SCALE-.2)
     let lane=Math.min(1.2,clearance)
+    if(scene?.kind==='breakdown')lane=clearance
     if(d<16&&playerSpeed>25&&!hostile){lane=Math.min(clearance,lane+.35);if(car.horn===0&&dt>0){events.horn??={distance:d,side:Math.sign(car.pos.x-player.x),freight:car.kind===1};car.horn=4}}
     if(hostile&&d<15){lane=0;closeHostiles++}
     car.pos.set(a.x+(b.x-a.x)*t+Math.cos(heading)*lane,(a.y??0)*(1-t)+(b.y??0)*t+1.3,a.z+(b.z-a.z)*t-Math.sin(heading)*lane)
@@ -219,7 +250,7 @@ export class TrafficSystem {
    this.matrix.compose(car.pos,this.rotation,scale.multiplyScalar(VEHICLE_SCALE))
    const slot=counts[car.kind]++;this.fleets[car.kind].setMatrixAt(slot,this.matrix)
    const gang=car.site?.gang
-   this.tint.set(gang?GANG_INFO[gang].color:PAINTS[car.seed%PAINTS.length].color);this.fleets[car.kind].setColorAt(slot,this.tint)
+   this.tint.set(scene?.kind==='patrol'?(Math.floor(this.time*5)%2?'#437aff':'#ff493d'):scene?.kind==='breakdown'?(Math.floor(this.time*3)%2?'#ffb644':'#69522f'):this.life?.context.crewColor&&car.seed%7===0?this.life.context.crewColor:gang?GANG_INFO[gang].color:PAINTS[car.seed%PAINTS.length].color);this.fleets[car.kind].setColorAt(slot,this.tint)
    if(d<65)spray?.emit(car,dt,car.pos,car.heading,car.speed,1.05*scale.x,2.3*scale.z,car.pos.y-1.3,false,car.phase==='park'?.12:.35)
   }
   for(let i=0;i<3;i++){this.fleets[i].count=counts[i];this.fleets[i].instanceMatrix.needsUpdate=true;if(this.fleets[i].instanceColor)this.fleets[i].instanceColor!.needsUpdate=true}
