@@ -236,6 +236,7 @@ let booted=false,booting=false
 let googleAvailable=false
 function accountUI(){
   const ready=game.online.ready
+  if(ready&&!booted){game.applyAccountSave();booted=true}
   enter.textContent=ready?(game.hasSave?'Choose another city':'Enter the city ↗'):'Continue with Google'
   enter.disabled=booting||(!ready&&!googleAvailable)
   cont.style.display=ready&&game.hasSave?'':'none'
@@ -287,7 +288,7 @@ $('online-sign-in').addEventListener('click',()=>location.assign('/api/auth/goog
 $('online-retry').addEventListener('click',async()=>{await game.online.heartbeat();game.multiplayer?.reconnect();accountUI()})
 function loadLatest(){
   if(!confirm('Load the latest account save? Unsynced changes on this device will be archived for recovery.'))return
-  if(game.cloud.playerId){const key=`hoverghini.cloud.pending.${game.cloud.playerId}`,pending=localStorage.getItem(key);if(pending)localStorage.setItem(key+'.conflict.'+Date.now(),pending);localStorage.removeItem(key)}
+  if(game.cloud.playerId){const key=`hoverghini.cloud.pending.${game.cloud.playerId}`,pending=localStorage.getItem(key);localStorage.setItem(key+'.conflict.'+Date.now(),JSON.stringify({pending:pending?JSON.parse(pending):null,campaign:game.save}));localStorage.removeItem(key)}
   location.reload()
 }
 $('online-reload').addEventListener('click',loadLatest)
@@ -296,7 +297,7 @@ window.addEventListener('offline',()=>{game.online.offline();accountUI()})
 window.addEventListener('online',()=>{void game.online.heartbeat().then(accountUI)})
 window.addEventListener('beforeunload',e=>{if(game.online.dirty){e.preventDefault();e.returnValue=''}})
 document.addEventListener('visibilitychange',()=>{if(document.hidden&&game.online.ready){game.persist();void game.online.flush()}else if(!document.hidden)void game.online.heartbeat()})
-setInterval(()=>{if(!document.hidden)void game.online.heartbeat().then(accountUI)},10000)
+setInterval(()=>{if(!document.hidden){if(!booted)void bootAccount();else void game.online.heartbeat().then(accountUI)}},10000)
 setInterval(accountUI,1000)
 void bootAccount().then(()=>{
   const friendCode=new URLSearchParams(location.search).get('join')??sessionStorage.getItem('hoverghini.join')

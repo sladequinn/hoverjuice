@@ -43,6 +43,7 @@ export class OnlineSession {
   if(this.running||this.signedOut||this.conflict||!this.account)return
   try{
    await this.identity()
+   if(!this.cloud.snapshot&&!this.cloud.pending){await this.start();return}
    if(this.cloud.pending){await this.flush();if(!this.ready)return}
    if(this.conflict||this.signedOut)return
    this.ready=true;this.status=this.queued?'Saving…':'Saved to your account'

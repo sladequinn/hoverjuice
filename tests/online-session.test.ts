@@ -5,7 +5,7 @@ import {CloudSave,LOCAL_SAVE_KEY} from '../src/cloud-save'
 const sample={money:150,owned:['board'],current:'board',holdings:[],city:null,masks:['balaclava'],mask:'balaclava'}
 class StorageMock {data=new Map<string,string>();getItem(k:string){return this.data.get(k)??null}setItem(k:string,v:string){this.data.set(k,v)}removeItem(k:string){this.data.delete(k)}}
 function setup(){
- const storage=new StorageMock(),state={player:'p1',offline:false,signedOut:false,revision:0,payload:null as any,lost:false,requests:[] as any[]},receipts=new Set<string>()
+ const storage=new StorageMock(),state={player:'p1',failSaveRead:false,offline:false,signedOut:false,revision:0,payload:null as any,lost:false,requests:[] as any[]},receipts=new Set<string>()
  const fetcher=(async(path:any,options:any={})=>{
   if(state.offline)throw new TypeError('Offline')
   if(state.signedOut)return Response.json({error:'Sign in required'},{status:401})
@@ -19,6 +19,7 @@ function setup(){
    if(state.lost){state.lost=false;throw Error('Lost response')}
    return Response.json({revision:state.revision})
   }
+  if(path==='/api/save'&&state.failSaveRead)throw Error('Snapshot unavailable')
   if(path==='/api/save')return Response.json({playerId:state.player,mode:'legacy-local',schemaVersion:1,revision:state.revision,payload:state.payload,updatedAt:1})
   return Response.json({ok:true})
  }) as typeof fetch
@@ -51,4 +52,12 @@ test('conflicting device progress is never overwritten, including reload retry',
  assert.equal(a.session.conflict,true);assert.equal(a.session.ready,false);assert.equal(a.state.payload.money,500)
  const reloaded=new OnlineSession(new CloudSave(a.storage as any,a.fetcher),a.fetcher);await reloaded.start()
  assert.equal(reloaded.ready,false);assert.equal(reloaded.conflict,true);assert.equal(a.state.payload.money,500)
+})
+
+test('failed initial snapshot cannot admit play until the account snapshot is loaded',async()=>{
+ const a=setup();a.state.payload={...sample,money:400};a.state.failSaveRead=true
+ await a.session.start();assert.equal(a.session.ready,false)
+ await a.session.heartbeat();assert.equal(a.session.ready,false)
+ a.state.failSaveRead=false;await a.session.heartbeat();assert.equal(a.session.ready,true)
+ assert.equal(a.cloud.snapshot?.payload?.money,400)
 })

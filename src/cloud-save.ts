@@ -53,6 +53,7 @@ export class CloudSave {
   if(me.playerId!==pending.playerId||me.playerId!==this.playerId)throw new CloudError('Account changed. Check account before retrying.')
   const receipt=await this.call('/api/save',{method:'PUT',body:JSON.stringify(pending)})
   await this.refresh()
+  if(this.playerId!==pending.playerId)throw new CloudError('Account changed during saving. Reload to continue.',409)
   if(this.snapshot?.revision!==receipt.revision)throw new CloudError('Progress changed on another device. Reload the latest account save.',409)
   this.storage.removeItem(key)
   this.status='Progress saved.'
