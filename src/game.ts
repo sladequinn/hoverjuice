@@ -5,7 +5,8 @@ import {CREW_COLORS,districtBounds} from '../shared/crews'
 import {GlobalProperties} from './global-properties'
 import {hg} from '../shared/properties'
 import {distance,validId,validGeo,wrapLon} from '../shared/multiplayer'
-import {CloudSave,CloudError,LOCAL_SAVE_KEY} from './cloud-save'
+import {CloudSave} from './cloud-save'
+import {OnlineSession} from './online-session'
 import {routeGuide} from './route-guide'
 import {TrafficSound} from './traffic-sound'
 import {Radio} from './radio'
@@ -25,14 +26,13 @@ import { OwnershipClient } from './persistence'
 import { RunState } from './dynamics'
 import * as THREE from 'three'
 import { CITIES, CONTRACT_TYPES, JUICE_PRICE, VEHICLES, vehicleById, type ContractType } from './data'
-import { worldToLatLon, fetchCity, geocode, proceduralCity, streamerFor, type CityData, pointInPoly } from './map'
+import { worldToLatLon, fetchCity, geocode, streamerFor, type CityData, pointInPoly } from './map'
 import { Player, type Input } from './vehicle'
 import { MASKS, buildMask, validMask } from './character'
 import { World } from './world'
 import { TrafficSystem } from './traffic'
 import { CONTRABAND, DealerSystem } from './dealers'
 
-const SAVE_KEY = LOCAL_SAVE_KEY
 
 interface Holding {
   id: string
@@ -116,15 +116,6 @@ function defaultSave(): SaveData {
   }
 }
 
-function loadSave(): SaveData {
-  try {
-    const raw = localStorage.getItem(SAVE_KEY)
-    if (raw) {const parsed=JSON.parse(raw);return { ...defaultSave(), ...parsed,builds:normalizeBuilds(parsed.builds),tutorial:parsed.tutorial??{stage:'skipped'},allegiance:parsed.allegiance??(parsed.mask==='liar'?'LIARS':parsed.mask==='oni'?'HYENAS':parsed.mask==='jester'?'JESTERS':'SHINOBI')} }
-  } catch {
-    /* corrupted save: start fresh */
-  }
-  return defaultSave()
-}
 
 class Heap {
   private a: [number, number][] = []
@@ -163,6 +154,7 @@ class Heap {
 
 export class Game {
   cloud = new CloudSave(localStorage)
+  online = new OnlineSession(this.cloud)
   multiplayer: Multiplayer | null = null
   crewGate=new THREE.Mesh(new THREE.TorusGeometry(14,.5,6,32),new THREE.MeshBasicMaterial({color:0x73ffcb}))
   economy=new Economy(localStorage,()=>{if($('modal').dataset.view==='economy'&&!(document.activeElement instanceof HTMLInputElement))this.openModal('economy')})
@@ -180,7 +172,7 @@ export class Game {
   run = new RunState()
   private garageNode = 0
   private collisionCooldown = 0
-  save = loadSave()
+  save = defaultSave()
   world: World | null = null
   traffic: TrafficSystem | null = null
   dealers: DealerSystem | null = null
@@ -267,13 +259,19 @@ export class Game {
 
   persist() {
     this.save.hull=this.run.hull;this.save.heat=this.run.heat;this.save.notoriety=this.run.notoriety
-    localStorage.setItem(SAVE_KEY, JSON.stringify(this.save))
+    this.online.save(this.save)
   }
 
-  resetSave() {
-    localStorage.removeItem(SAVE_KEY)
-    location.reload()
+  applyAccountSave() {
+    const parsed=this.cloud.snapshot?.payload
+    this.save=parsed?{...defaultSave(),...parsed,builds:normalizeBuilds(parsed.builds)} as SaveData:defaultSave()
+    this.save.mask=validMask(this.save.mask)
+    this.player.setSpec(tunedVehicle(this.save.current,this.save.builds));this.player.setMask(this.save.mask)
+    this.run.hull=this.save.hull;this.run.heat=this.save.heat;this.run.notoriety=this.save.notoriety
+    this.juice=this.player.spec.tank
   }
+
+  get playable(){return this.online.ready&&(!this.world||!!this.multiplayer?.connection.connected)}
 
   toast(msg: string, kind: 'good' | 'bad' | 'info' = 'info') {
     const t = $('toast')
@@ -290,7 +288,7 @@ export class Game {
   // ---------- cities ----------
 
   async warp(name: string, lat: number, lon: number, newGame = false, friendSpawn = false) {
-    if (this.loading) return
+    if (this.loading || !this.online.ready) return
     this.settleFuel(false)
     this.loading = true
     this.paused = true
@@ -300,7 +298,7 @@ export class Game {
     let progress=0
     const status=(text:string,value=progress)=>{progress=Math.max(progress,value);$('loading-status').textContent=text;$('loading-progress').setAttribute('aria-valuenow',String(Math.round(progress)));$('loading-fill').style.width=`${progress}%`;$('loading-percent').textContent=`${Math.round(progress)}%`;for(const el of document.querySelectorAll<HTMLElement>('[data-load-stage]'))el.classList.toggle('active',progress>=Number(el.dataset.loadStage))}
     status('Connecting to city uplink…',2)
-    $('btn-load-sim').style.display=''
+    $('btn-load-sim').style.display='none'
     $('btn-load-cancel').style.display = this.world ? '' : 'none'
     const ctrl = new AbortController()
     let choice: 'sim' | 'cancel' | null = null
@@ -316,14 +314,7 @@ export class Game {
     try {
       city = await fetchCity(name, lat, lon, status, ctrl.signal)
     } catch (e) {
-      if (choice !== 'cancel') {
-        if (choice !== 'sim') {
-          console.warn('Map fetch failed, using simulation grid', e)
-          $('loading-status').textContent = 'Map servers unreachable. Compiling a simulation grid…'
-          await new Promise((r) => setTimeout(r, 0))
-        }
-        city = proceduralCity(name, lat, lon)
-      }
+      if(choice!=='cancel')this.toast('City connection failed. Choose a city to retry.','bad')
     } finally {
       $('btn-load-sim').removeEventListener('click', onSim)
       $('btn-load-cancel').removeEventListener('click', onCancel)
@@ -333,7 +324,7 @@ export class Game {
       this.paused=!this.world
       overlay.classList.remove('show')
       this.loading = false
-      this.toast('City transfer cancelled', 'info')
+      if(!this.world)this.openModal('couch')
       return
     }
     $('btn-load-cancel').style.display='none'
@@ -341,6 +332,7 @@ export class Game {
     $('loading-status').textContent = `Extruding ${city.buildings.length.toLocaleString()} towers…`
     await new Promise((r) => setTimeout(r, 30))
 
+    if(!this.online.ready){clearInterval(tick);overlay.classList.remove('show');this.loading=false;return}
     if(newGame){
       this.save=defaultSave();this.run=new RunState()
       this.player.setSpec(vehicleById('board'));this.player.setMask('balaclava')
@@ -651,6 +643,7 @@ export class Game {
   // ---------- fuel ----------
 
   refuel() {
+    if(!this.playable)return
     const w = this.world
     if (!w || this.paused) return
     const { dist } = w.nearestPump(this.player.pos.x, this.player.pos.z)
@@ -678,6 +671,7 @@ export class Game {
   }
 
   promptAction() {
+    if(!this.playable)return
     const w = this.world
     if (!w || this.paused) return
     const market = this.dealers?.nearest(this.actor.x, this.actor.z)
@@ -756,6 +750,7 @@ export class Game {
   }
 
   overclock() {
+    if(!this.playable)return
     if(this.paused || !(this.save.contraband.cyanade>0)) {this.toast('Carry one Cyan-ade to overclock', 'info');return}
     if(!this.run.burn()) {this.toast('Overclock unavailable: hull or coils depleted','bad');return}
     this.save.contraband.cyanade--;this.persist()
@@ -784,6 +779,7 @@ export class Game {
   }
 
   stash(withdraw=false) {
+    if(!this.playable)return
     if(!this.world || !this.player.parked)return
     const p=this.player.pos,n=this.world.city.nodes[this.garageNode]
     const owned=this.save.holdings.some(h=>{const b=this.world!.city.buildings.find(b=>b.id===h.id);return b&&Math.hypot(p.x-b.cx,p.z-b.cz)<40})
@@ -892,6 +888,7 @@ export class Game {
   }
 
   tow() {
+    if(!this.playable)return
     const w = this.world
     if (!w || this.paused) return
     const fee = Math.round(30 * this.player.spec.payMult)
@@ -903,6 +900,7 @@ export class Game {
   }
 
   toggleTestFlight() {
+    if(!this.playable)return
     if(!this.world)return
     this.player.testFlight=!this.player.testFlight
     if(this.player.testFlight && this.player.mode==='mag')this.player.unsnap()
@@ -912,6 +910,7 @@ export class Game {
   }
 
   toggleMode() {
+    if(!this.playable)return
     const w = this.world
     if (!w || this.paused) return
     if (this.player.mode === 'mag') {
@@ -1084,7 +1083,7 @@ export class Game {
     try{
       const mp=this.multiplayer
       if(act==='mp-join'){const value=($('mp-code') as HTMLInputElement).value.trim();let code=value;try{code=new URL(value).searchParams.get('join')??value}catch{}await this.joinFriend(code);return}
-      if(act==='mp-enable'||act==='mp-disable')mp?.setEnabled(act==='mp-enable')
+      if(act==='mp-enable')mp?.reconnect()
       if(act==='mp-name'){
         const res=await fetch('/api/multiplayer/profile',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:($('mp-name') as HTMLInputElement).value})})
         if(!res.ok)throw Error('Sign in and use 2–20 letters, numbers, spaces, dots, dashes or underscores.')
@@ -1114,29 +1113,24 @@ export class Game {
     if(this.cloud.busy)return
     this.cloud.busy=true
     try{
-      if(act==='cloud-login'){
-        this.persist();await this.cloud.prepareLogin();location.assign('/api/auth/login');return
-      }else if(act==='cloud-local-restore'){
-        if(!confirm('Restore the pre-cloud backup stored on this device?'))return
-        this.cloud.restoreLocalBackup();location.reload();return
-      }else if(act==='cloud-refresh')await this.cloud.refresh()
-      else if(act==='cloud-upload'){
-        if(this.cloud.snapshot?.payload&&!confirm('Replace the cloud legacy backup with this device’s progress?'))return
-        this.persist();await this.cloud.upload(this.save)
-      }else if(act==='cloud-retry')await this.cloud.retry()
-      else if(act==='cloud-discard'){
-        if(confirm('Discard the pending upload? Local progress stays. The server may already have accepted it.'))this.cloud.discardPending()
-      }else if(act==='cloud-restore'){
-        if(!confirm('Restore the cloud legacy backup? Current progress will be backed up on this device before reloading.'))return
-        this.persist();await this.cloud.restore();location.reload();return
-      }else await this.cloud.logout(act==='cloud-logout-all')
-    }catch(error){
-      if(error instanceof CloudError&&error.status===401){this.cloud.playerId=null;this.cloud.snapshot=null}
-      this.cloud.status=error instanceof Error?error.message:'Cloud unavailable. Local progress is safe.'
-    }finally{this.cloud.busy=false;if($('modal').dataset.view==='cloud')this.openModal('cloud')}
+      if(act==='cloud-login'||act==='cloud-github'){
+        if(this.online.ready){this.persist();await this.online.flush();if(!this.online.ready)throw Error(this.online.status)}
+        location.assign(act==='cloud-github'?'/api/auth/github/login':'/api/auth/google/login');return
+      }
+      if(act==='cloud-link'){
+        this.persist();await this.online.flush();if(!this.online.ready)throw Error(this.online.status)
+        const response=await fetch('/api/auth/google/link',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'})
+        const data=await response.json();if(!response.ok)throw Error(data.error??'Linking unavailable')
+        location.assign(data.url);return
+      }
+      if(act==='cloud-refresh'){await this.online.heartbeat();return}
+      await this.online.logout(act==='cloud-logout-all');location.reload()
+    }catch(error){this.cloud.status=error instanceof Error?error.message:'Account unavailable'}
+    finally{this.cloud.busy=false;if($('modal').dataset.view==='cloud')this.openModal('cloud')}
   }
 
   private onAction(act: string, arg: string) {
+    if(!this.playable&&!act.startsWith('cloud-')&&act!=='view'&&act!=='close')return
     switch (act) {
       case 'freight-refresh': void this.economy.refresh();break
       case 'freight-quote': {const [destination,commodity]=arg.split('|');void this.economy.getQuote(destination,commodity,($('freight-competitive') as HTMLInputElement)?.checked??false);break}
@@ -1167,9 +1161,9 @@ export class Game {
       case 'global-portfolio': this.openModal('properties');void this.properties.loadPortfolio();break
       case 'global-visit': {const p=this.properties.selected;if(p)void this.warp(p.name,p.lat,p.lon);break}
       case 'global-waypoint': {const p=this.properties.selected;if(p&&this.world){const point={x:wrapLon(p.lon-this.world.city.lon)*111320*Math.cos(this.world.city.lat*Math.PI/180),z:(this.world.city.lat-p.lat)*110540};this.waypoint={...point,label:p.name};this.routeTimer=0;this.closeModal()}break}
-      case 'mp-invite': case 'mp-join': case 'mp-name': case 'mp-enable': case 'mp-disable': case 'mp-create': case 'mp-start': case 'mp-leave': case 'mp-refresh': void this.multiplayerAction(act);break
+      case 'mp-invite': case 'mp-join': case 'mp-name': case 'mp-enable': case 'mp-create': case 'mp-start': case 'mp-leave': case 'mp-refresh': void this.multiplayerAction(act);break
       case 'cloud-title': $('modal').classList.remove('show');$('title').classList.add('show');break
-      case 'cloud-login': case 'cloud-local-restore': case 'cloud-refresh': case 'cloud-upload': case 'cloud-retry': case 'cloud-restore': case 'cloud-discard': case 'cloud-logout': case 'cloud-logout-all': void this.cloudAction(act);break
+      case 'cloud-login': case 'cloud-github': case 'cloud-link': case 'cloud-refresh': case 'cloud-logout': case 'cloud-logout-all': void this.cloudAction(act);break
       case 'skip-tutorial': this.skipTutorial();this.closeModal();break
       case 'tutorial-dealer': this.locateWhiteLie();this.closeModal();break
       case 'tutorial-sale': this.sellTutorialSample();break
@@ -1247,7 +1241,7 @@ export class Game {
         this.toast('+$5,000,000 test funds wired to your account', 'good')
         this.openModal($('modal').dataset.view || 'garage')
         break
-      case 'reset': if (confirm('Wipe your save and start over as a gutter courier?')) this.resetSave(); break
+
     }
   }
 
@@ -1303,8 +1297,8 @@ export class Game {
       }
       case 'multiplayer': {
         const mp=this.multiplayer,race=mp?.race
-        return `<h2>Cruise with friends</h2><p role="status">${esc(mp?.status??'Choose a real-world city to cruise')} · ${mp?.count??0} nearby</p><p>${esc(this.mpNotice||mp?.notice||'Sign in to see other drivers in your area. Driving stays responsive if the connection drops.')}</p>
-        <div class="row"><button class="btn" data-act="view" data-arg="cloud">Account / sign in</button><button class="btn" data-act="mp-enable">Go online</button><button class="btn ghost" data-act="mp-disable">Play solo</button><button class="btn ghost" data-act="mp-refresh">Refresh status</button></div>
+        return `<h2>Cruise with friends</h2><p role="status">${esc(mp?.status??'Choose a real-world city to cruise')} · ${mp?.count??0} nearby</p><p>${esc(this.mpNotice||mp?.notice||'Sign in to see other drivers in your area. The game pauses while reconnecting.')}</p>
+        <div class="row"><button class="btn" data-act="view" data-arg="cloud">Account / sign in</button><button class="btn" data-act="mp-enable">Reconnect</button><button class="btn ghost" data-act="mp-refresh">Refresh status</button></div>
         <div class="row"><input id="mp-name" maxlength="20" placeholder="Driver name" aria-label="Driver name"><button class="btn" data-act="mp-name">Save name</button></div>
         <button class="btn" data-act="mp-invite">Create invite</button>${this.mpInvite?`<input aria-label="Invite link" readonly value="${esc(this.mpInvite)}" style="width:100%">`:''}
         <div class="row"><input id="mp-code" placeholder="Friend invite link or code" aria-label="Friend invite"><button class="btn" data-act="mp-join">Join friend</button></div>
@@ -1313,17 +1307,14 @@ export class Game {
         ${!this.world?'<button class="btn ghost" data-act="cloud-title">Back to title</button>':''}`
       }
       case 'cloud':
-        return `<h2>Account & cloud saves</h2>${!this.world?'<button class="btn ghost" data-act="cloud-title">Back to title</button>':''}<p>Gameplay currently uses your legacy local save. Cloud backup carries that progress between devices. Local cash, property and test rewards never become global currency.</p><p role="status">${esc(this.cloud.status)}</p>
-          ${this.cloud.playerId?`<p class="muted">Player ${esc(this.cloud.playerId)}<br>Global wallet: ${(this.cloud.balance/100).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})} HG · No gameplay rewards enabled yet.<br>Cloud backup: ${this.cloud.snapshot?.payload?esc(String(this.cloud.snapshot.payload.city&&typeof this.cloud.snapshot.payload.city==='object'?(this.cloud.snapshot.payload.city as {name:string}).name:'No city')):'None'} · revision ${this.cloud.snapshot?.revision??'unknown'}</p>`:''}
-          <div class="row"><button class="btn" data-act="cloud-refresh">Check account / refresh</button><button class="btn" data-act="cloud-login">Sign in with GitHub</button></div>
-          ${this.cloud.playerId?`<div class="row"><button class="btn" data-act="cloud-upload" ${!this.cloud.snapshot||this.cloud.pending?'disabled':''}>Back up this device</button><button class="btn" data-act="cloud-restore" ${!this.cloud.snapshot?.payload||this.cloud.pending?'disabled':''}>Restore cloud backup</button></div>${this.cloud.pending?'<div class="row"><button class="btn" data-act="cloud-retry">Retry interrupted upload</button><button class="btn ghost" data-act="cloud-discard">Discard pending upload</button></div>':''}<div class="row"><button class="btn ghost" data-act="cloud-logout">Sign out</button><button class="btn ghost" data-act="cloud-logout-all">Sign out all devices</button></div>`:''}
-          <button class="btn ghost" data-act="cloud-local-restore">Recover pre-restore local backup</button><p class="muted small">Backups are manual. Playing offline, New Game and Reset affect this device only. Restore keeps a recovery copy on this device. Cloud accounts must be enabled on this game host.</p>`
+        return `<h2>Your account</h2>${!this.world?'<button class="btn ghost" data-act="cloud-title">Back to title</button>':''}<p role="status">${esc(this.online.status)}</p><p>${esc(this.cloud.status)}</p>
+          ${this.cloud.playerId?`<p>Driver ${esc(this.online.displayName||this.cloud.playerId.slice(0,8))}<br>Freight wallet: ${hg(this.cloud.balance)}</p><p>Progress saves automatically to this account.</p><div class="row">${!this.online.providers.includes('google')?'<button class="btn" data-act="cloud-link">Link Google to this account</button>':''}<button class="btn ghost" data-act="cloud-logout">Sign out</button><button class="btn ghost" data-act="cloud-logout-all">Sign out all devices</button></div>`:`<button class="btn" data-act="cloud-login">Continue with Google</button><details><summary>Existing GitHub player?</summary><p>Sign in once with GitHub, then link Google here to keep your player and holdings.</p><button class="btn ghost" data-act="cloud-github">Recover GitHub account</button></details>`}`
       case 'radio':
         return `<h2>Radio</h2><p class="muted">Gang frequencies, municipal dispatch, and late-night talk.</p><div class="radio-stations">${STATIONS.map(station=>`<button class="btn ${this.radio.station===station.id?'buy':''}" data-act="radio-station" data-arg="${station.id}" aria-pressed="${this.radio.station===station.id}"><strong>${station.name}</strong><small>${station.host}</small></button>`).join('')}</div><p id="radio-status" class="radio-status" aria-live="polite">${esc(this.radio.status)}</p><div class="row"><button class="btn" data-act="radio-play">Play / pause</button><button class="btn" data-act="radio-next">Next</button><button class="btn ghost" data-act="radio-station" data-arg="off">Off</button></div><button class="btn ghost" data-act="radio-refresh">Refresh stations</button><label class="radio-volume">Volume <input id="radio-volume" type="range" min="0" max="100" value="${Math.round(this.radio.volume*100)}" /></label><p class="muted small">Music and talk use the configured station playlists. Scanner chatter follows local Heat. Radio pauses when this tab is hidden.</p>`
       case 'menu':
         return `<h2>Off the clock</h2><p class="muted">${esc(s.city?.name??'City')} · ${money(s.money)} available</p>
-          <div class="menu-links">${[['economy','Global freight markets'],['crews','Crews & global districts'],['properties','Global property portfolio'],['multiplayer','Cruise with friends'],['cloud','Account & cloud saves'],['radio','Radio stations'],['market','Dealers & cargo'],['holdings','Safehouses & vaults'],['gangs','Gangs & territory'],['masks','Mask perks'],['tutorial','First-night guide'],['help','Controls & settings']].map(([id,label])=>`<button class="btn ghost" data-act="view" data-arg="${id}">${label}<span>→</span></button>`).join('')}</div>
-          <details class="fold"><summary>City & account details</summary><p class="muted">Net worth ${money(this.netWorth)} · Notoriety ${this.run.notoriety}<br>Vault ${money(s.vaultCash)} · Income ${money(this.incomePerMin)}/min<br>${esc(this.multiplayer?.status??'Local save')} · ${esc($('city-tag').textContent??'')}</p></details>`
+          <div class="menu-links">${[['economy','Global freight markets'],['crews','Crews & global districts'],['properties','Global property portfolio'],['multiplayer','Cruise with friends'],['cloud','Your account'],['radio','Radio stations'],['market','Dealers & cargo'],['holdings','Safehouses & vaults'],['gangs','Gangs & territory'],['masks','Mask perks'],['tutorial','First-night guide'],['help','Controls & settings']].map(([id,label])=>`<button class="btn ghost" data-act="view" data-arg="${id}">${label}<span>→</span></button>`).join('')}</div>
+          <details class="fold"><summary>City & account details</summary><p class="muted">Net worth ${money(this.netWorth)} · Notoriety ${this.run.notoriety}<br>Vault ${money(s.vaultCash)} · Income ${money(this.incomePerMin)}/min<br>${esc(this.multiplayer?.status??'Connecting')} · ${esc($('city-tag').textContent??'')}</p></details>`
 
       case 'tutorial':
         return `<h2>Your first night</h2><p>${esc(tutorialText(s.tutorial))}</p><p class="muted">Deliver a legal parcel for $250, then sell a sealed sample to WHITE LIE for $100. Use the map’s P / X markers. Dealers use D. Return to a safehouse to stash cargo and clear Heat.</p>${s.tutorial.stage==='deal'?'<button class="btn buy" data-act="tutorial-dealer">Locate WHITE LIE</button>':''}${tutorialActive(s.tutorial)?'<button class="btn ghost" data-act="skip-tutorial">Skip tutorial</button>':''}`
@@ -1522,7 +1513,7 @@ export class Game {
           <details class="fold" data-fold="testing"><summary>Testing tools</summary><div class="row test-funds"><span class="muted small">Playtesting?</span><button class="btn buy" data-act="cheat">+$5,000,000 test funds</button></div>
           <div class="row"><button class="btn buy" data-act="test-hoverghini" ${!this.save.owned.includes('hoverghini')&&this.save.money<vehicleById('hoverghini').price?'disabled':''}>${this.save.owned.includes('hoverghini')?'Drive Hoverghini':`Buy Hoverghini · ${money(vehicleById('hoverghini').price)}`}</button><span class="muted small">Test purchase. Bypasses the pink-slip unlock.</span></div>
           <div class="row"><button class="btn" data-act="test-flight">Test flight: ${this.player.testFlight?'ON':'OFF'} (Y)</button><span class="muted">Free Hover: Space / C climb / descend. Touch: RISE / DESCEND. Turning off restores street height.</span></div>
-          </details><div class="row"><span class="muted">${s.deliveries} deliveries · ${money(s.earned)} earned lifetime</span><button class="btn danger ghost" data-act="reset">Reset save</button></div>`
+          </details><div class="row"><span class="muted">${s.deliveries} deliveries · ${money(s.earned)} earned lifetime</span></div>`
       case 'win':
         return `<div class="win"><h1>HOVERGHINI</h1><p>From the gutter to the skyline. You own the ultimate status symbol.</p>
           <p class="muted">${s.deliveries} deliveries · ${s.holdings.length} properties · ${money(s.earned)} earned</p>
@@ -1658,6 +1649,11 @@ export class Game {
   update(dt: number, input: Input) {
     const w = this.world
     if (!w) return
+    if(!this.playable){
+      this.economy.step(0,0,null)
+      this.multiplayer?.update(0,this.player,undefined,w,0,buildFor(this.save.builds,this.save.current).paint)
+      return
+    }
     if (this.toastTimer > 0) {
       this.toastTimer -= dt
       if (this.toastTimer <= 0) $('toast').classList.remove('show')

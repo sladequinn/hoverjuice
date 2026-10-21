@@ -19,7 +19,7 @@ const saveInput=(playerId:string,revision=0,payload:any=sample)=>({playerId,sche
 before(async()=>{
  mf=new Miniflare(convertV4MiniflareOptions({workers:[{name:'test',modules:true,script:'export default {fetch(){return new Response("ok")}}',compatibilityDate:'2026-10-01',d1Databases:['DB']}]}))
  db=await mf.getD1Database('DB') as unknown as D1Database
- for(const name of ['0000_existing_scaffolding','0001_foundation','0002_multiplayer','0003_global_properties']){
+ for(const name of ['0000_existing_scaffolding','0001_foundation','0002_multiplayer','0003_global_properties','0006_google_auth']){
   const sql=readFileSync(new URL(`../server/migrations/${name}.sql`,import.meta.url),'utf8').replace(/^--.*$/gm,'')
   for(const statement of sql.split(/;\s*(?=CREATE|INSERT INTO property_catalog_clock|$)/).map(s=>s.trim()).filter(Boolean))await db.prepare(statement).run()
  }
@@ -46,7 +46,7 @@ test('repeat/concurrent provider login returns one stable player and preserves p
  assert.equal((await db.prepare('SELECT count(*) AS n FROM identities WHERE subject=?').bind(subject).first<any>()).n,1)
 })
 test('OAuth uses state, PKCE, verified provider subject, single-use callback and secure cookies',async()=>{
- const start=await authRoute(req('/api/auth/login'),env())
+ const start=await authRoute(req('/api/auth/github/login'),env())
  const target=new URL(start.headers.get('Location')!),state=target.searchParams.get('state')!
  assert.equal(target.searchParams.get('code_challenge_method'),'S256');assert.ok(target.searchParams.get('code_challenge'))
  assert.match(start.headers.get('Set-Cookie')!,/HttpOnly; Secure; SameSite=Lax/)
@@ -63,11 +63,11 @@ test('OAuth uses state, PKCE, verified provider subject, single-use callback and
  await assert.rejects(()=>authRoute(callback,env(),provider),/already used/);assert.equal(exchanges,1)
 })
 test('provider outage consumes attempt safely and allows starting fresh without an account',async()=>{
- const start=await authRoute(req('/api/auth/login'),env()),state=new URL(start.headers.get('Location')!).searchParams.get('state')!
+ const start=await authRoute(req('/api/auth/github/login'),env()),state=new URL(start.headers.get('Location')!).searchParams.get('state')!
  const callback=new Request(`${origin}/api/auth/callback?state=${state}&code=code`,{headers:{Cookie:`${stateCookie}=${state}`}})
  await assert.rejects(()=>authRoute(callback,env(),(async()=>new Response('',{status:503})) as typeof fetch),/unavailable/)
  await assert.rejects(()=>authRoute(callback,env()),/already used/)
- assert.equal((await authRoute(req('/api/auth/login'),env())).status,302)
+ assert.equal((await authRoute(req('/api/auth/github/login'),env())).status,302)
 })
 test('CSRF, wrong host, disabled backend and logout-all fail closed',async()=>{
  const subject=crypto.randomUUID(),a=await issueSession(db,subject),b=await issueSession(db,subject)

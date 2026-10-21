@@ -24,7 +24,10 @@ ECONOMY_ENABLED = "false"
 PROPERTY_SOURCE_URL = ""
 # Optional PROPERTY_SOURCE_TOKEN is a Worker secret.
 APP_ORIGIN = "https://YOUR-HOVERJUICE-HOST"
-GITHUB_CLIENT_ID = "REPLACE-WITH-OAUTH-CLIENT-ID"
+GOOGLE_CLIENT_ID = "REPLACE-WITH-GOOGLE-CLIENT-ID"
+# GOOGLE_CLIENT_SECRET is deployed from the GitHub environment secret.
+# Optional: existing GitHub accounts can sign in once to link Google.
+GITHUB_CLIENT_ID = ""
 # GITHUB_CLIENT_SECRET must be set with `wrangler secret put`, never here.
 # Public playlist JSON; may also be set in the deployed Worker dashboard.
 RADIO_CONFIG_JSON = '{"shinobi":[],"liars":[],"hyenas":[],"jesters":[],"talk":[]}'

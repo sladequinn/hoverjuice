@@ -14,7 +14,7 @@ export class Multiplayer {
  group=new THREE.Group()
  private checkpoint=new THREE.Mesh(new THREE.TorusGeometry(12,.5,6,32),new THREE.MeshBasicMaterial({color:0x73ffcb}))
  raceStatus=''
- status='LOCAL PLAY'
+ status='CONNECTING'
  race:RaceView|null=null
  notice=''
  id=''
@@ -26,14 +26,14 @@ export class Multiplayer {
  private maxPeers=matchMedia('(pointer: coarse)').matches?12:24
  private city:CityData
  connection:RealtimeConnection
- private visibility=()=>{if(document.hidden)this.connection.pause();else if(localStorage.getItem('hoverghini.multiplayer')!=='off')void this.connection.start()}
+ private visibility=()=>{if(document.hidden)this.connection.pause();else void this.connection.start()}
  constructor(city:CityData){
   this.city=city
   this.checkpoint.rotation.x=-Math.PI/2;this.checkpoint.visible=false;this.group.add(this.checkpoint)
   this.connection=new RealtimeConnection(city,{peerLimit:this.maxPeers,fetch:fetch.bind(globalThis),socket:url=>new WebSocket(url),origin:location.origin,status:status=>this.status=status,message:data=>this.receive(data)})
   this.meshTimer=setInterval(()=>{const next=this.queue.entries().next().value;if(next){this.queue.delete(next[0]);next[1]()}},40)
   document.addEventListener('visibilitychange',this.visibility)
-  if(localStorage.getItem('hoverghini.multiplayer')!=='off')void this.connection.start()
+  void this.connection.start()
  }
  private receive(data:any){
   if(data.type==='freight'){window.dispatchEvent(new CustomEvent('hoverghini:freight',{detail:data.freight}));return}
@@ -115,7 +115,7 @@ export class Multiplayer {
  }
  get count(){return this.peers.size}
  reconnect(){this.connection.pause();void this.connection.start()}
- setEnabled(enabled:boolean){localStorage.setItem('hoverghini.multiplayer',enabled?'on':'off');if(enabled)void this.connection.start();else{this.connection.pause();for(const id of [...this.peers.keys()])this.remove(id)}}
+
  private disposeMesh(mesh:THREE.Group){
   const rider=mesh.getObjectByName('rider');if(rider){rider.removeFromParent();rider.traverse(o=>{if(o instanceof THREE.Mesh)o.geometry.dispose()})}
   const materials=new Set<THREE.Material>();mesh.traverse(o=>{if(o instanceof THREE.Mesh||o instanceof THREE.Sprite){if(o instanceof THREE.Mesh)o.geometry.dispose();for(const m of Array.isArray(o.material)?o.material:[o.material])materials.add(m)}})

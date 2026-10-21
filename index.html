@@ -94,8 +94,12 @@
 
         <div class="title-actions">
           <button id="btn-continue" class="btn buy big" style="display: none"></button>
-          <button id="btn-cloud" class="btn ghost">Account & cloud saves</button>
-          <button id="btn-new" class="btn big">Enter the city ↗</button>
+          <p id="account-status" role="status">Connecting to your account…</p>
+          <label id="driver-profile" hidden>Choose your driver name<input id="driver-name" maxlength="20" autocomplete="nickname" placeholder="Driver name"></label>
+          <button id="btn-cloud" class="btn ghost">Your account</button>
+          <button id="account-latest" class="btn ghost" hidden>Load latest account save</button>
+          <button id="account-retry" class="btn ghost" hidden>Retry connection</button>
+          <button id="btn-new" class="btn big" disabled>Continue with Google</button>
         </div>
 
       </div>
@@ -116,12 +120,18 @@
       <div class="loading-readout"><span id="loading-status" role="status" aria-live="polite"></span><strong id="loading-percent">0%</strong></div>
       <div class="loading-time" id="loading-time"></div>
       <div class="loading-actions">
-        <button id="btn-load-sim" class="btn ghost">Use simulation grid</button>
+        <button id="btn-load-sim" hidden disabled></button>
         <button id="btn-load-cancel" class="btn ghost danger">Cancel</button>
       </div>
       <div class="muted small"><a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">Map data © OpenStreetMap contributors</a> · <a href="./terrain-credits.html" target="_blank" rel="noopener">Terrain credits</a></div>
     </div>
 
     <script type="module" src="/src/main.ts"></script>
+  <section id="online-blocker" hidden aria-label="Connection interrupted" role="dialog" aria-modal="true">
+      <div><h2>City connection paused</h2><p id="online-message" role="status">Reconnecting…</p>
+      <button id="online-retry" class="btn">Retry connection</button>
+      <button id="online-sign-in" class="btn" hidden>Continue with Google</button>
+      <button id="online-reload" class="btn ghost" hidden>Load latest account save</button></div>
+    </section>
   </body>
 </html>

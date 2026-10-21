@@ -1,4 +1,6 @@
-# Hoverjuice
+# HOVERGHINI
+
+**Current account model:** Google sign-in, online-only admission, automatic account saves and reconnect pauses. See [Google setup and migration](docs/google-online.md). Older phase notes below describe the historical local/cloud split; campaign snapshots remain untrusted until the authoritative economy migration is complete.
 
 Industrial-noir hover courier prototype built with Three.js, Vite and TypeScript. Real streets and buildings stream from OpenFreeMap; the player stays vehicle-bound.
 

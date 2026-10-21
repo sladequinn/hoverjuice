@@ -1,8 +1,6 @@
-name: Deploy Hoverjuice to Pages
+name: Legacy Pages deployment (retired)
 
 on:
-  push:
-    branches: [main]
   workflow_dispatch:
 
 permissions:

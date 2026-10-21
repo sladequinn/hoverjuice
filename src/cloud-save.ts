@@ -4,12 +4,12 @@ export const LOCAL_BACKUP_KEY='hoverghini.save.before-cloud.v1'
 export interface CloudSnapshot {playerId:string;schemaVersion:1;mode:'legacy-local';revision:number;payload:Record<string,unknown>|null;updatedAt:number}
 interface Pending {playerId:string;requestId:string;expectedRevision:number;schemaVersion:1;payload:Record<string,unknown>}
 export class CloudError extends Error {status:number;constructor(message:string,status=0){super(message);this.status=status}}
-/** Manual, explicit synchronization. No startup network dependency or silent overwrite. */
+/** Account snapshot transport with revision checks and a durable, account-scoped outbox. */
 export class CloudSave {
  playerId:string|null=null
  snapshot:CloudSnapshot|null=null
  balance=0
- status='Local play. Cloud backups keep legacy progress separate from the global wallet.'
+ status='Your account keeps progress across devices.'
  busy=false
  private storage:Storage
  private transport:typeof fetch
@@ -34,7 +34,7 @@ export class CloudSave {
   const [snapshot,wallet]=await Promise.all([this.call('/api/save'),this.call('/api/wallet')])
   if(snapshot.playerId!==me.playerId||wallet.playerId!==me.playerId||snapshot.schemaVersion!==1||snapshot.mode!=='legacy-local'||!Number.isSafeInteger(snapshot.revision)||snapshot.revision<0||(snapshot.payload!==null&&!validLegacySave(snapshot.payload))||!Number.isSafeInteger(wallet.balance)||wallet.balance<0)throw new CloudError('Invalid cloud response; local save untouched.')
   this.snapshot=snapshot;this.balance=wallet.balance
-  this.status=`Account connected. Cloud revision ${snapshot.revision}. ${this.pending?'An interrupted upload can be retried.':'Choose backup or restore.'}`
+  this.status=`Account connected. Cloud revision ${snapshot.revision}. ${this.pending?'An interrupted upload can be retried.':'Automatic saves are active.'}`
  }
  async upload(payload:unknown){
   if(!this.playerId||!this.snapshot)throw new CloudError('Check account before uploading.')
@@ -51,10 +51,11 @@ export class CloudSave {
   const pending=JSON.parse(raw) as Pending
   const me=await this.call('/api/me')
   if(me.playerId!==pending.playerId||me.playerId!==this.playerId)throw new CloudError('Account changed. Check account before retrying.')
-  await this.call('/api/save',{method:'PUT',body:JSON.stringify(pending)})
-  this.storage.removeItem(key)
+  const receipt=await this.call('/api/save',{method:'PUT',body:JSON.stringify(pending)})
   await this.refresh()
-  this.status='Legacy progress backed up. Global wallet unchanged.'
+  if(this.snapshot?.revision!==receipt.revision)throw new CloudError('Progress changed on another device. Reload the latest account save.',409)
+  this.storage.removeItem(key)
+  this.status='Progress saved.'
  }
  discardPending(){this.storage.removeItem(this.pendingKey());this.snapshot=null;this.status='Pending upload discarded locally. Check cloud before another upload.'}
  async restore(){
@@ -75,5 +76,5 @@ export class CloudSave {
   // Keep the recovery copy intact; no second write can fail after replacement.
   this.storage.setItem(LOCAL_SAVE_KEY,backup)
  }
- async logout(all=false){await this.call(all?'/api/auth/logout-all':'/api/auth/logout',{method:'POST'});this.playerId=null;this.snapshot=null;this.balance=0;this.status='Signed out. Local progress and pending backups are retained.'}
+ async logout(all=false){await this.call(all?'/api/auth/logout-all':'/api/auth/logout',{method:'POST'});this.playerId=null;this.snapshot=null;this.balance=0;this.status='Signed out.'}
 }
