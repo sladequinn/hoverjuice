@@ -5,7 +5,7 @@ const assert=require('node:assert/strict');
 (async()=>{
  const server=spawn(process.execPath,['node_modules/vite/bin/vite.js','--host','127.0.0.1','--port','47294','--strictPort'],{stdio:'pipe'});let browser;
  try{
-  await new Promise((resolve,reject)=>{const timer=setTimeout(()=>reject(Error('Vite timeout')),10000);server.stdout.on('data',d=>{if(d.toString().includes('Local:')){clearTimeout(timer);resolve()}});server.on('error',reject)});
+  await require('./vite-ready.cjs')(server);
   browser=await chromium.launch({headless:true,args:['--no-sandbox','--use-gl=angle','--use-angle=swiftshader']});
   const page=await browser.newPage({viewport:{width:430,height:932}}),errors=[];page.on('pageerror',e=>errors.push(e.message));
   await page.route('https://fonts.googleapis.com/**',r=>r.fulfill({body:''}));await page.route('https://fonts.gstatic.com/**',r=>r.fulfill({body:''}));
