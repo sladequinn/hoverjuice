@@ -1,5 +1,6 @@
 'use strict';
-module.exports=async function waitForVite(server,url='http://127.0.0.1:47291/',timeoutMs=60000){
+module.exports=async function waitForVite(server,url,timeoutMs=60000){
+ if(!url){const args=server.spawnargs||[];const i=args.indexOf('--port');const port=i>=0?Number(args[i+1]):47291;url=`http://127.0.0.1:${port}/`;}
  let output='',closed=false,exitCode;
  const collect=d=>{output=(output+d.toString()).slice(-4000)};
  server.stdout?.on('data',collect);
