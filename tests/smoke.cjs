@@ -6,7 +6,22 @@ const assert=require('node:assert/strict');
  const server=spawn(process.execPath,['node_modules/vite/bin/vite.js','preview','--host','127.0.0.1','--port','47291','--strictPort'],{stdio:'pipe'});
  let browser;
  try{
-  await new Promise((resolve,reject)=>{const timeout=setTimeout(()=>reject(new Error('Vite startup timeout')),10000);server.stdout.on('data',d=>{if(d.toString().includes('Local:')){clearTimeout(timeout);resolve()}});server.on('error',reject);server.on('exit',code=>{if(code)reject(new Error('Vite exited '+code))})});
+  await new Promise((resolve,reject)=>{
+   let settled=false,output='';
+   const deadline=Date.now()+60000;
+   const finish=(error)=>{if(settled)return;settled=true;clearTimeout(timer);error?reject(error):resolve()};
+   server.stdout.on('data',d=>{output+=d.toString().slice(-2000)});
+   server.stderr.on('data',d=>{output+=d.toString().slice(-2000)});
+   server.on('error',finish);
+   server.on('exit',code=>finish(new Error('Vite exited '+code+'\\n'+output.slice(-4000))));
+   const check=async()=>{
+    if(settled)return;
+    try{const response=await fetch('http://127.0.0.1:47291/');if(response.ok)return finish()}catch{}
+    if(Date.now()>=deadline)return finish(new Error('Vite startup timeout after 60s\\n'+output.slice(-4000)));
+    timer=setTimeout(check,250);
+   };
+   let timer=setTimeout(check,250);
+  });
   browser=await chromium.launch({headless:true,args:['--no-sandbox','--use-gl=angle','--use-angle=swiftshader','--enable-webgl']});
   const page=await browser.newPage({viewport:{width:1440,height:900},hasTouch:true}),errors=[];
   page.on('pageerror',e=>errors.push(e.message));page.on('console',m=>{if(m.type()==='error'&&!m.text().includes('503 (Service Unavailable)'))errors.push(m.text())});
