@@ -24,7 +24,7 @@ jobs:
       CF_DATABASE_ID: ${{ vars.CF_DATABASE_ID }}
       CF_DATABASE_NAME: ${{ vars.CF_DATABASE_NAME }}
       APP_ORIGIN: ${{ vars.APP_ORIGIN }}
-      GITHUB_CLIENT_ID: ${{ vars.GITHUB_CLIENT_ID }}
+      OAUTH_CLIENT_ID: ${{ vars.OAUTH_CLIENT_ID }}
       ECONOMY_ENABLED: ${{ vars.ECONOMY_ENABLED }}
       CREWS_ENABLED: ${{ vars.CREWS_ENABLED }}
       PROPERTIES_ENABLED: ${{ vars.PROPERTIES_ENABLED }}
