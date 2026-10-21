@@ -1,5 +1,8 @@
 # Industrial noir overhaul: implementation and next gates
 
+> Historical phase snapshot. Phase 2 supersedes the multiplayer scaffolding and deployment instructions; see [multiplayer.md](multiplayer.md).
+
+
 ## Implemented in this branch
 
 - Vehicle-only input and camera path; walking physics, walk animation, drone targets and plasma combat removed. Legacy animal-mask selections migrate to a balaclava.

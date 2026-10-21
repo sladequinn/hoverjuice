@@ -19,9 +19,9 @@ const saveInput=(playerId:string,revision=0,payload:any=sample)=>({playerId,sche
 before(async()=>{
  mf=new Miniflare(convertV4MiniflareOptions({workers:[{name:'test',modules:true,script:'export default {fetch(){return new Response("ok")}}',compatibilityDate:'2026-10-01',d1Databases:['DB']}]}))
  db=await mf.getD1Database('DB') as unknown as D1Database
- for(const name of ['0000_existing_scaffolding','0001_foundation']){
+ for(const name of ['0000_existing_scaffolding','0001_foundation','0002_multiplayer','0003_global_properties']){
   const sql=readFileSync(new URL(`../server/migrations/${name}.sql`,import.meta.url),'utf8').replace(/^--.*$/gm,'')
-  for(const statement of sql.split(/;\s*(?=CREATE|$)/).map(s=>s.trim()).filter(Boolean))await db.prepare(statement).run()
+  for(const statement of sql.split(/;\s*(?=CREATE|INSERT INTO property_catalog_clock|$)/).map(s=>s.trim()).filter(Boolean))await db.prepare(statement).run()
  }
 })
 after(async()=>{await mf?.dispose()})

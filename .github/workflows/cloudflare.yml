@@ -25,6 +25,11 @@ jobs:
       CF_DATABASE_NAME: ${{ vars.CF_DATABASE_NAME }}
       APP_ORIGIN: ${{ vars.APP_ORIGIN }}
       GITHUB_CLIENT_ID: ${{ vars.GITHUB_CLIENT_ID }}
+      ECONOMY_ENABLED: ${{ vars.ECONOMY_ENABLED }}
+      CREWS_ENABLED: ${{ vars.CREWS_ENABLED }}
+      PROPERTIES_ENABLED: ${{ vars.PROPERTIES_ENABLED }}
+      PROPERTY_SOURCE_URL: ${{ vars.PROPERTY_SOURCE_URL }}
+      MULTIPLAYER_ENABLED: ${{ vars.MULTIPLAYER_ENABLED }}
       APP_CONTACT: ${{ vars.APP_CONTACT }}
     steps:
       - uses: actions/checkout@v4

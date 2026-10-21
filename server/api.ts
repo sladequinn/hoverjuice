@@ -1,13 +1,36 @@
+import {economyHttp,type EconomyHttpEnv} from './economy-http'
+export {Freight} from './freight'
+import {crewsHttp,type CrewsEnv} from './crews-http'
+export {Territory} from './territory'
+import {propertiesHttp,type PropertiesEnv} from './properties-http'
+export {PropertySource} from './property-source'
+import {multiplayerHttp,type MultiplayerEnv} from './multiplayer-http'
+export {PlayerSession} from './player-session'
+export {GeoCell} from './geo-cell'
+export {CruiseRace} from './cruise-race'
 import {foundation,foundationPath,cleanup,type FoundationEnv} from './foundation'
 import {HttpError} from './security'
 import {parseRadioConfig} from '../src/radio-config'
 export { Geocoder } from './geocoder'
-interface Env extends FoundationEnv {ASSETS?:Fetcher;RADIO_CONFIG_JSON?:string;DB:D1Database; ALLOWED_ORIGIN:string; GEOCODER:DurableObjectNamespace}
+interface Env extends FoundationEnv,MultiplayerEnv,PropertiesEnv,CrewsEnv,EconomyHttpEnv {ASSETS?:Fetcher;RADIO_CONFIG_JSON?:string;DB:D1Database; ALLOWED_ORIGIN:string; GEOCODER:DurableObjectNamespace}
 /** Public map reads and an isolated same-origin account API. */
 export default {
- async scheduled(_event:ScheduledController,env:Env){await cleanup(env.DB)},
- async fetch(request:Request,env:Env):Promise<Response>{
+ async scheduled(_event:ScheduledController,env:Env){await cleanup(env.DB);if(env.ECONOMY_ENABLED==='true'){await env.DB.prepare('DELETE FROM freight_quotes WHERE id IN (SELECT q.id FROM freight_quotes q WHERE q.expires_at<? AND NOT EXISTS(SELECT 1 FROM shipments s WHERE s.quote_id=q.id) LIMIT 500)').bind(Date.now()-86400000).run();const rows=await env.DB.prepare("SELECT id FROM shipments WHERE status='active' AND expires_at<? LIMIT 100").bind(Date.now()).all<{id:string}>();await Promise.allSettled(rows.results.map(r=>env.FREIGHT.get(env.FREIGHT.idFromName(r.id)).fetch('https://freight/view',{method:'POST',body:JSON.stringify({id:r.id})})))}},
+ async fetch(request:Request,env:Env,ctx?:ExecutionContext):Promise<Response>{
   const path=new URL(request.url).pathname
+  if(path.startsWith('/api/economy/')){try{const r=await economyHttp(request,env);return new Response(r.body,{status:r.status,headers:{'Content-Type':'application/json','Cache-Control':'no-store'}})}catch(e){return Response.json({error:e instanceof HttpError?e.message:'Market service unavailable; retry safely'},{status:e instanceof HttpError?e.status:503,headers:{'Cache-Control':'no-store'}})}}
+  if(path.startsWith('/api/crews/')){
+   try{const r=await crewsHttp(request,env);return new Response(r.body,{status:r.status,headers:{'Content-Type':'application/json','Cache-Control':'no-store','X-Content-Type-Options':'nosniff'}})}catch(e){return Response.json({error:e instanceof HttpError?e.message:'Crew service unavailable; retry the same request'},{status:e instanceof HttpError?e.status:503,headers:{'Cache-Control':'no-store'}})}
+  }
+  if(path.startsWith('/api/properties/')){
+   let response:Response
+   try{response=await propertiesHttp(request,env,ctx)}catch(error){response=Response.json({error:error instanceof HttpError?error.message:'Property service unavailable; retry the same purchase request safely'},{status:error instanceof HttpError?error.status:503})}
+   const headers=new Headers(response.headers);headers.set('Cache-Control','no-store');headers.set('X-Content-Type-Options','nosniff');if(response.status===429)headers.set('Retry-After','60')
+   return new Response(response.body,{status:response.status,headers})
+  }
+  if(path.startsWith('/api/multiplayer/')){
+   try{const response=await multiplayerHttp(request,env);if(response.status===101)return response;const headers=new Headers(response.headers);headers.set('Cache-Control','no-store');headers.set('X-Content-Type-Options','nosniff');return new Response(response.body,{status:response.status,headers})}catch(error){return Response.json({error:error instanceof HttpError?error.message:'Multiplayer unavailable'},{status:error instanceof HttpError?error.status:503,headers:{'Cache-Control':'no-store'}})}
+  }
   if(foundationPath(path)){
    const requestId=crypto.randomUUID()
    let response:Response

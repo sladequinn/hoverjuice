@@ -1,3 +1,10 @@
+import {Economy} from './economy'
+import {COMMODITIES} from '../shared/economy'
+import {Crews} from './crews'
+import {CREW_COLORS,districtBounds} from '../shared/crews'
+import {GlobalProperties} from './global-properties'
+import {hg} from '../shared/properties'
+import {distance,validId,validGeo,wrapLon} from '../shared/multiplayer'
 import {CloudSave,CloudError,LOCAL_SAVE_KEY} from './cloud-save'
 import {routeGuide} from './route-guide'
 import {TrafficSound} from './traffic-sound'
@@ -10,7 +17,7 @@ import {GANGS,type Gang} from './filter'
 import {tutorialActive,tutorialText,type TutorialState} from './tutorial'
 import {NavigationMap,type MapView,type MapMarker} from './navigation-map'
 import {residential,houseOffer,localHome,distanceToHome,type Safehouse} from './housing'
-import { Campaign } from './campaign'
+import { Campaign, highwayLoop } from './campaign'
 import { ParticlePool } from './particles'
 import { HoverjuiceSpray } from './hoverjuice'
 import { Multiplayer } from './multiplayer'
@@ -18,7 +25,7 @@ import { OwnershipClient } from './persistence'
 import { RunState } from './dynamics'
 import * as THREE from 'three'
 import { CITIES, CONTRACT_TYPES, JUICE_PRICE, VEHICLES, vehicleById, type ContractType } from './data'
-import { fetchCity, geocode, proceduralCity, streamerFor, type CityData, pointInPoly } from './map'
+import { worldToLatLon, fetchCity, geocode, proceduralCity, streamerFor, type CityData, pointInPoly } from './map'
 import { Player, type Input } from './vehicle'
 import { MASKS, buildMask, validMask } from './character'
 import { World } from './world'
@@ -157,6 +164,10 @@ class Heap {
 export class Game {
   cloud = new CloudSave(localStorage)
   multiplayer: Multiplayer | null = null
+  crewGate=new THREE.Mesh(new THREE.TorusGeometry(14,.5,6,32),new THREE.MeshBasicMaterial({color:0x73ffcb}))
+  economy=new Economy(localStorage,()=>{if($('modal').dataset.view==='economy'&&!(document.activeElement instanceof HTMLInputElement))this.openModal('economy')})
+  crews=new Crews(localStorage,()=>{if($('modal').dataset.view==='crews'&&!(document.activeElement instanceof HTMLInputElement))this.openModal('crews')})
+  properties=new GlobalProperties(localStorage,()=>{const view=$('modal').dataset.view;if(view==='property'||view==='properties')this.openModal(view)})
   ownership = new OwnershipClient()
   radio=new Radio(()=>({heat:this.run.heat,speed:this.player.groundSpeed*3.6,gang:this.world?.gangAt(this.actor.x,this.actor.z)??this.gang}))
   trafficSound=new TrafficSound()
@@ -278,7 +289,7 @@ export class Game {
 
   // ---------- cities ----------
 
-  async warp(name: string, lat: number, lon: number, newGame = false) {
+  async warp(name: string, lat: number, lon: number, newGame = false, friendSpawn = false) {
     if (this.loading) return
     this.settleFuel(false)
     this.loading = true
@@ -356,7 +367,7 @@ export class Game {
     this.world = await World.create(city,status)
     this.spray.surfaceHeight=(x,z,reference)=>this.world!.surfaceHeightAt(x,z,reference)
     this.scene.add(this.world.group)
-    if(!city.procedural){this.multiplayer=new Multiplayer(city);this.scene.add(this.multiplayer.group)}
+    if(!city.procedural){this.multiplayer=new Multiplayer(city);this.scene.add(this.multiplayer.group);void this.properties.activate();void this.crews.activate();void this.economy.activate()}else {this.properties.setLocation(null);this.crews.setLocation(null);this.economy.setLocation(null)}
     void this.syncOwnership()
     this.traffic = new TrafficSystem(this.world)
     this.scene.add(this.traffic.group)
@@ -370,15 +381,16 @@ export class Game {
     const main = city.nodes.map((n, i) => ({ n, i })).filter(({ n }) => n.main && n.adj.length > 0)
     const home=this.save.safehouse
     const hx=(home.lon-lon)*111320*Math.cos(lat*Math.PI/180),hz=-(home.lat-lat)*110540
-    const nearHome=Math.hypot(hx,hz)<city.radius
+    const nearHome=!friendSpawn&&Math.hypot(hx,hz)<city.radius
     main.sort((a,b)=>Math.hypot(a.n.x-(nearHome?hx:0),a.n.z-(nearHome?hz:0))-Math.hypot(b.n.x-(nearHome?hx:0),b.n.z-(nearHome?hz:0)))
     this.garageNode = main[0]?.i ?? 0
     this.player.placeAtNode(this.world, this.garageNode)
     this.player.unsnap()
+    if(friendSpawn){this.player.pos.set(0,this.world.groundHeightAt(0,0,this.player.pos.y)+1.2,0)}
     this.traffic.setActivitySites(this.dealers.dealers,this.actor)
     this.traffic.prime(this.actor)
     this.campaign=new Campaign(this.world);this.scene.add(this.campaign.boss)
-    if(!this.save.coldOpenDone){this.campaign.coldOpen(this.player);this.introMessage=2;this.save.coldOpenDone=true}
+    if(!friendSpawn&&!this.save.coldOpenDone){this.campaign.coldOpen(this.player);this.introMessage=2;this.save.coldOpenDone=true}
     this.juice = Math.max(this.juice, this.player.spec.tank * 0.6)
     this.active = null
     this.waypoint = null
@@ -1015,7 +1027,7 @@ export class Game {
   // ---------- modals ----------
 
   openModal(view: string) {
-    if (!this.world && view !== 'warp' && view !== 'couch' && view !== 'cloud') return
+    if (!this.world && view !== 'warp' && view !== 'couch' && view !== 'cloud' && view !== 'multiplayer' && view !== 'property' && view !== 'properties' && view !== 'crews' && view !== 'economy') return
     const m = $('modal')
     m.dataset.view = view
     const body = $('modal-body')
@@ -1054,6 +1066,50 @@ export class Game {
     if (!this.loading) this.paused = false
   }
 
+  async openFriendInvite(code:string){try{await this.joinFriend(code)}catch(error){this.mpNotice=error instanceof Error?error.message:'Invite unavailable';if($('modal').dataset.view!=='cloud')this.openModal('multiplayer')}}
+  private mpNotice=''
+  private mpInvite=''
+  async joinFriend(code:string){
+    if(!validId(code))throw Error('Paste a valid invite link or code.')
+    const response=await fetch('/api/multiplayer/invite?code='+code,{credentials:'same-origin'})
+    if(response.status===401){sessionStorage.setItem('hoverghini.join',code);this.openModal('cloud');throw Error('Sign in first, then open the invite again.')}
+    if(!response.ok)throw Error('Invite unavailable or expired.')
+    const data=await response.json();if(!validGeo(data))throw Error('Invalid invite location')
+    if(validId(data.raceId))localStorage.setItem('hoverghini.race',data.raceId)
+    const url=new URL(location.href);url.searchParams.delete('join');history.replaceState(null,'',url)
+    sessionStorage.removeItem('hoverghini.join');localStorage.setItem('hoverghini.multiplayer','on')
+    $('title').classList.remove('show');await this.warp('Friend’s location',data.lat,data.lon,false,true)
+  }
+  private async multiplayerAction(act:string){
+    try{
+      const mp=this.multiplayer
+      if(act==='mp-join'){const value=($('mp-code') as HTMLInputElement).value.trim();let code=value;try{code=new URL(value).searchParams.get('join')??value}catch{}await this.joinFriend(code);return}
+      if(act==='mp-enable'||act==='mp-disable')mp?.setEnabled(act==='mp-enable')
+      if(act==='mp-name'){
+        const res=await fetch('/api/multiplayer/profile',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:($('mp-name') as HTMLInputElement).value})})
+        if(!res.ok)throw Error('Sign in and use 2–20 letters, numbers, spaces, dots, dashes or underscores.')
+        mp?.reconnect();this.mpNotice='Name saved.'
+      }
+      if(act==='mp-invite'){
+        const res=await fetch('/api/multiplayer/invite',{method:'POST'})
+        if(!res.ok)throw Error('Connect and drive into the city before creating an invite.')
+        const data=await res.json();this.mpInvite=data.url;this.mpNotice='Copy the invite below. It expires in three hours.'
+      }
+      if(act==='mp-create'&&mp&&this.world){
+        const world=this.world,here=worldToLatLon(world.city,this.player.pos.x,this.player.pos.z)
+        const loop=highwayLoop(world,this.player.edgeA)
+        const course=[here]
+        for(const i of loop){const n=world.city.nodes[i],p=worldToLatLon(world.city,n.x,n.z);if(distance(p,course.at(-1)!)>=60)course.push(p)}
+        if(distance(here,course.at(-1)!)>=60)course.push(here)
+        if(!mp.connection.send({type:'race-create',course}))throw Error('Connect before creating a race.')
+        this.mpNotice='Race requested. Refresh to see the lobby, then invite a friend.'
+      }
+      if(act==='mp-start')mp?.connection.send({type:'race-start'})
+      if(act==='mp-leave')mp?.connection.send({type:'race-leave'})
+    }catch(error){this.mpNotice=error instanceof Error?error.message:'Multiplayer unavailable'}
+    if($('modal').dataset.view!=='cloud')this.openModal('multiplayer')
+  }
+
   private async cloudAction(act:string) {
     if(this.cloud.busy)return
     this.cloud.busy=true
@@ -1082,6 +1138,36 @@ export class Game {
 
   private onAction(act: string, arg: string) {
     switch (act) {
+      case 'freight-refresh': void this.economy.refresh();break
+      case 'freight-quote': {const [destination,commodity]=arg.split('|');void this.economy.getQuote(destination,commodity,($('freight-competitive') as HTMLInputElement)?.checked??false);break}
+      case 'freight-start': void this.economy.start().then(()=>{if(this.economy.driving)this.closeModal()});break
+      case 'freight-retry': void this.economy.retry();break
+      case 'freight-resume': void this.economy.resume().then(()=>{if(this.economy.driving)this.closeModal()});break
+      case 'freight-cancel': if(confirm('Cancel this shipment? Departed cargo will be lost and no payout is earned.'))void this.economy.cancel();break
+      case 'freight-track': {const s=this.economy.shipments.find(s=>s.id===arg);if(s?.position&&this.world){this.waypoint={x:wrapLon(s.position.lon-this.world.city.lon)*111320*Math.cos(this.world.city.lat*Math.PI/180),z:(this.world.city.lat-s.position.lat)*110540,label:'Rival convoy · last reported position'};this.routeTimer=0;this.closeModal()}break}
+      case 'freight-intercept': if(confirm('Spend 25 HG to challenge this opted-in rival shipment? No loot or cash reward is paid.'))void this.economy.intercept(arg).then(()=>{if(this.economy.driving)this.closeModal()});break
+      case 'freight-waypoint': {const t=this.economy.target;if(t&&this.world){this.waypoint={x:wrapLon(t.lon-this.world.city.lon)*111320*Math.cos(this.world.city.lat*Math.PI/180),z:(this.world.city.lat-t.lat)*110540,label:'Freight depot / lane gate'};this.routeTimer=0;this.closeModal()}break}
+      case 'crew-rally': {const t=this.crews.crew?.territories?.find(t=>t.id===arg);if(t)void this.warp('Crew rally '+t.id,t.lat,t.lon);break}
+      case 'crew-refresh': void this.crews.refresh();break
+      case 'crew-current': this.crews.current();break
+      case 'crew-retry': void this.crews.retry();break
+      case 'crew-create': void this.crews.command({action:'create',name:($('crew-name') as HTMLInputElement).value,tag:($('crew-tag') as HTMLInputElement).value.toUpperCase(),color:($('crew-color') as HTMLSelectElement).value});break
+      case 'crew-join': void this.crews.command({action:'join',code:($('crew-code') as HTMLInputElement).value.trim()});break
+      case 'crew-command': {const [action,target,value]=arg.split('|');if(['leave','kick','transfer'].includes(action)&&!confirm('Confirm crew membership change? Leaving or removal starts a one-hour rejoin cooldown.'))break;void this.crews.command({action,...(target?{target}:{}),...(value?{value}:{})});break}
+      case 'crew-hq': {const p=this.properties.selected;if(p&&confirm('Establish your crew headquarters in this building? Your personal title remains yours.'))void this.crews.command({action:'hq',value:p.id});break}
+      case 'crew-contest': void this.crews.contest(arg as 'open'|'join');break
+      case 'crew-waypoint': {const t=this.crews.target??this.crews.crew?.headquarters;if(t&&this.world){this.waypoint={x:wrapLon(t.lon-this.world.city.lon)*111320*Math.cos(this.world.city.lat*Math.PI/180),z:(this.world.city.lat-t.lat)*110540,label:this.crews.target?'Crew delivery gate':'Crew headquarters'};this.routeTimer=0;this.closeModal()}break}
+      case 'global-inspect': {const [lat,lon]=arg.split('|').map(Number);this.toggleMap(false);this.openModal('property');void this.properties.inspect({lat,lon});break}
+      case 'global-item': this.toggleMap(false);this.openModal('property');void this.properties.select(arg);break
+      case 'global-quote': void this.properties.requote();break
+      case 'global-buy': if(confirm('Purchase this global title using your global wallet? This purchase is permanent; resale is not enabled.'))void this.properties.buy();break
+      case 'global-retry': void this.properties.retry();break
+      case 'global-refresh': void this.properties.activate().then(()=>this.properties.loadPortfolio());break
+      case 'global-more': void this.properties.loadPortfolio(true);break
+      case 'global-portfolio': this.openModal('properties');void this.properties.loadPortfolio();break
+      case 'global-visit': {const p=this.properties.selected;if(p)void this.warp(p.name,p.lat,p.lon);break}
+      case 'global-waypoint': {const p=this.properties.selected;if(p&&this.world){const point={x:wrapLon(p.lon-this.world.city.lon)*111320*Math.cos(this.world.city.lat*Math.PI/180),z:(this.world.city.lat-p.lat)*110540};this.waypoint={...point,label:p.name};this.routeTimer=0;this.closeModal()}break}
+      case 'mp-invite': case 'mp-join': case 'mp-name': case 'mp-enable': case 'mp-disable': case 'mp-create': case 'mp-start': case 'mp-leave': case 'mp-refresh': void this.multiplayerAction(act);break
       case 'cloud-title': $('modal').classList.remove('show');$('title').classList.add('show');break
       case 'cloud-login': case 'cloud-local-restore': case 'cloud-refresh': case 'cloud-upload': case 'cloud-retry': case 'cloud-restore': case 'cloud-discard': case 'cloud-logout': case 'cloud-logout-all': void this.cloudAction(act);break
       case 'skip-tutorial': this.skipTutorial();this.closeModal();break
@@ -1127,7 +1213,7 @@ export class Game {
       case 'radio-next': void this.radio.next();break
       case 'paint': this.customizeVehicle('paint',arg); break
       case 'upgrade': this.customizeVehicle('upgrade',arg); break
-      case 'view': this.openModal(arg); break
+      case 'view': this.openModal(arg);if(arg==='properties')void this.properties.loadPortfolio();if(arg==='economy')void this.economy.activate().then(()=>{if(this.economy.enabled)return this.economy.refresh()});if(arg==='crews')void this.crews.activate().then(()=>{if(this.crews.enabled)return this.crews.refresh()}); break
       case 'close': this.closeModal(); break
       case 'challenge': this.challenge(); break
       case 'stash': this.stash(); break
@@ -1191,6 +1277,41 @@ export class Game {
     const s = this.save
     const w = this.world
     switch (view) {
+      case 'economy': {
+        const e=this.economy,q=e.quote,v=e.active,disabled=e.busy||e.pending?'disabled':'',destinations=[...new Set(e.markets.map(m=>m.district))].filter(d=>d!==e.district)
+        return `<h2>Global freight markets</h2><p role="status">${esc(e.status)}</p><p>Global wallet <strong>${hg(e.balance)}</strong> · Freight reserve ${hg(e.fund)}</p><div class="row"><button class="btn" data-act="freight-refresh">Refresh board</button><button class="btn ghost" data-act="view" data-arg="cloud">Sign in</button></div>${e.pending?'<button class="btn" data-act="freight-retry">Recover pending cargo load</button>':''}
+        <p class="muted">Sealed consignments of fictional commodities. Prices reflect regional stock and shortages. Contracts pay from a finite reserve, up to six per day; local cash and local cargo stay separate.</p><label><input id="freight-competitive" type="checkbox"> Crew convoy: allow rival interception (optional)</label>
+        <div class="grid">${COMMODITIES.map(c=>{const local=e.markets.find(m=>m.district===e.district&&m.commodity===c.id);return `<div class="card"><h3>${esc(c.name)}</h3><p>Here: ${local?hg(local.price):'Enter a real city'} / unit · ${local?.stock??0} stock${local?.pressure?` · SHORTAGE ${local.pressure}`:''}</p>${destinations.map(d=>{const m=e.markets.find(m=>m.district===d&&m.commodity===c.id)!;return `<p>${esc(d)}<br>${hg(m.price)} · ${m.price>m.previous_price?'↑':m.price<m.previous_price?'↓':'→'} · stock ${m.stock} · incoming ${m.incoming??0}${m.pressure?' · shortage '+m.pressure:''}<br><button class="btn ghost" data-act="freight-quote" data-arg="${esc(d)}|${c.id}" ${disabled}>Plan delivery</button></p>`}).join('')}</div>`}).join('')}</div>
+        ${q?`<h3>Quoted freight</h3><p>${q.quantity} sealed units · payout ${hg(q.net)} after ${hg(q.fee)} service sink<br>${Math.round(q.route.total)} m · ${q.competitive?'Rival interception enabled':'Protected delivery'}<br>${Object.entries(q.benefits).filter(([,v])=>v).map(([k])=>esc(k)).join(' · ')||'Standard courier capacity'}</p><p class="muted">Go to the source waypoint within 60 seconds, or refresh the quote. Freight assist follows the server road route; use GO/BRAKE and steer into the indicated lane. Slow below 8 m/s to pass a lane gate safely. Three fast missed gates destroy cargo.</p><div class="row"><button class="btn" data-act="freight-waypoint">Guide to depot</button><button class="btn" data-act="freight-start" ${disabled}>Load cargo & drive</button></div>`:''}
+        ${v?`<h3>Shipment ${esc(v.status)}</h3><p>${esc(e.progress||v.commodity)} · ${hg(v.net)} potential payout</p><div class="row"><button class="btn" data-act="freight-resume" ${disabled}>Resume online driving</button><button class="btn ghost" data-act="freight-waypoint">Next lane gate</button>${v.player_id===e.player?`<button class="btn ghost" data-act="freight-cancel">Cancel shipment</button>`:`<span>Challenge ends when this convoy settles; entry fee is nonrefundable.</span>`}</div>`:''}
+        <h3>Rival convoys in this district</h3>${e.shipments.map(s=>`<div class="card"><p>${esc(s.commodity)} · crew ${esc(s.crew_id?.slice(0,8)??'')} · ${s.quantity} units</p><button class="btn ghost" data-act="freight-track" data-arg="${esc(s.id)}">Track convoy</button><button class="btn ghost" data-act="freight-intercept" data-arg="${esc(s.id)}" ${disabled}>Challenge nearby convoy · 25 HG</button></div>`).join('')||'<p class="muted">No opted-in rival convoys loaded.</p>'}<p class="muted">Interception requires rival crews, proximity within 200 m and a convoy between 25–85% of its route. Catch and match its lane for three seconds. Maximum two challenges per day; no theft payout.</p>
+        <h3>Recent consignments</h3>${e.history.map(s=>`<p>${esc(s.commodity)} · ${esc(s.status)} · ${s.status==='delivered'?hg(s.net):'no payout'}</p>`).join('')||'<p>No consignments yet.</p>'}<p class="muted">An owned warehouse of at least 150 m² in the source district raises capacity from four to six units. A destination property and live crew control reduce service fees. An eligible crew HQ adds two minutes of delivery time. Buildings never change owners.</p>`
+      }
+      case 'crews': {
+        const c=this.crews,v=c.crew,d=c.district,t=d?.contest,mine=t?.runs.find(r=>r.player===c.player),disabled=c.busy||c.pending?'disabled':''
+        return `<h2>Crews & global districts</h2><p role="status">${esc(c.status)}</p><div class="row"><button class="btn" data-act="crew-refresh">Refresh</button><button class="btn ghost" data-act="view" data-arg="cloud">Account</button><button class="btn ghost" data-act="crew-current">View current district</button></div>${c.pending?'<button class="btn" data-act="crew-retry">Recover pending crew change</button>':''}
+        ${v?`<h3 style="color:${esc(v.color)}">[${esc(v.tag)}] ${esc(v.name)}</h3><p>${esc(v.role)} · ${v.members.length}/16 members · ${v.reputation} reputation</p>${v.territories?.length?`<p>Controlled districts · shared rally travel</p><div class="row">${v.territories.map(t=>`<button class="btn" data-act="crew-rally" data-arg="${esc(t.id)}">Rally: ${esc(t.id)}</button>`).join('')}</div>`:''}<p>HQ: ${esc(v.headquarters?.name??'Not established')} · Select a title you own in your portfolio to establish HQ as leader or officer.</p><button class="btn" data-act="crew-waypoint">Rally at HQ / next delivery gate</button>${v.invite?`<p>Share this private crew invite with friends:</p><input aria-label="Crew invitation code" readonly value="${esc(v.invite)}" style="width:100%"><button class="btn ghost" data-act="crew-command" data-arg="invite" ${disabled}>Rotate invite (leader)</button>`:''}<div class="grid">${v.members.map(m=>`<div class="card">${esc(m.name)} · ${esc(m.role)}${v.role==='leader'&&m.id!==c.player?`<div class="row"><button class="btn ghost" data-act="crew-command" data-arg="role|${esc(m.id)}|${m.role==='officer'?'member':'officer'}" ${disabled}>${m.role==='officer'?'Demote':'Promote'}</button><button class="btn ghost" data-act="crew-command" data-arg="transfer|${esc(m.id)}" ${disabled}>Transfer leadership</button><button class="btn ghost" data-act="crew-command" data-arg="kick|${esc(m.id)}" ${disabled}>Remove</button></div>`:''}</div>`).join('')}</div><button class="btn ghost" data-act="crew-command" data-arg="leave" ${disabled}>Leave crew</button>`:`<p>Create a crew or join using a private invite. One crew per account; one-hour cooldown after leaving.</p><div class="row"><input id="crew-name" aria-label="Crew name" maxlength="24" placeholder="Crew name"><input id="crew-tag" aria-label="Crew tag" maxlength="5" placeholder="TAG"><select id="crew-color" aria-label="Crew color">${CREW_COLORS.map((color,i)=>`<option value="${color}">Color ${i+1}</option>`).join('')}</select><button class="btn" data-act="crew-create" ${disabled}>Create crew</button></div><div class="row"><input id="crew-code" aria-label="Crew invite code" placeholder="Private invite code"><button class="btn" data-act="crew-join" ${disabled}>Join crew</button></div>`}
+        ${d?`<h3>${esc(d.id)}</h3><p>Control: <strong>${esc(d.name??'Unclaimed')}</strong>${d.controller?` · expires ${esc(new Date(d.expiresAt).toLocaleDateString())}`:''}</p><p class="muted">Two-driver delivery squads. Best valid time wins; a second finisher gives a 5% team bonus. Three attempts per driver, 30-second warmup, two-minute admission, ten-minute round. Follow the public road out and back below 8 m and 90 m/s. No collisions, currency stakes or property transfers.</p><div class="row"><button class="btn" data-act="crew-contest" data-arg="open" ${disabled}>Open / view contest</button><button class="btn" data-act="crew-contest" data-arg="join" ${disabled}>Join squad</button><button class="btn" data-act="crew-waypoint">Guide to next gate</button></div>${t?`<p>${t.finished?'Final result':Date.now()<t.startsAt?'Warmup':'Delivery contest active'} · ${t.runs.length}/16 drivers · ${t.finished?`Controller: ${esc(d.name??'Unclaimed')}`:`${Math.max(0,Math.ceil((t.endsAt-Date.now())/1000))} seconds remaining`}</p>${mine?`<p>Your delivery: ${mine.next}/${t.course.length} gates · ${mine.attempts}/3 attempts · ${esc(mine.invalid)}</p>`:''}<div class="grid">${t.runs.map(r=>`<div class="card">${esc(r.name)} · crew ${esc(r.crew.slice(0,8))}<br>${r.best===null?`${r.next}/${t.course.length} gates`:(r.best/1000).toFixed(2)+' seconds'}</div>`).join('')}</div>`:''}`:'<p>Enter a real-world city to discover its global district.</p>'}<p class="muted">Control lasts seven days without a successful defence. Three active districts per crew; 30-minute rest between rounds. Reputation and a shared HQ rally point are the benefits—no income or driving-stat advantage. Legacy NPC gangs remain separate.</p>`
+      }
+      case 'properties': {
+        const p=this.properties
+        return `<h2>Global property portfolio</h2><p role="status">${esc(p.status)}</p><p>Global wallet: <strong>${hg(p.balance)}</strong></p><p class="muted">These permanent titles belong to your account across every city and device. Local cash, safehouses and rent remain separate legacy progress. Global properties do not produce income or grant territory.</p><div class="row"><button class="btn" data-act="global-refresh" ${p.busy?'disabled':''}>Refresh account & portfolio</button><button class="btn ghost" data-act="view" data-arg="cloud">Account / sign in</button></div>${p.pending?'<button class="btn" data-act="global-retry">Recover pending purchase</button>':''}<div class="grid">${p.items.map(v=>`<div class="card"><h3>${esc(v.name)}</h3><p>${esc(v.id)} · ${esc(v.status)}<br>${v.lat.toFixed(5)}, ${v.lon.toFixed(5)}<br>Acquired for ${hg(v.priceMinor)}</p><button class="btn" data-act="global-item" data-arg="${esc(v.id)}">Inspect title</button></div>`).join('')||'<p>No global titles loaded. Open the map and select a building to inspect it.</p>'}</div>${p.next?'<button class="btn" data-act="global-more">Load more titles</button>':''}${!this.world?'<button class="btn ghost" data-act="cloud-title">Back to title</button>':''}`
+      }
+      case 'property': {
+        const p=this.properties,v=p.selected,q=p.quote,canBuy=v&&!v.ownerId&&v.status==='active'&&q&&q.expiresAt>Date.now()&&p.balance>=q.priceMinor&&!p.pending&&!p.busy
+        return `<h2>${v?esc(v.name):'Global building inspection'}</h2><p role="status">${esc(p.status)}</p>${v?`<p>${esc(v.id)} · OSM version ${v.sourceVersion}<br>${v.lat.toFixed(5)}, ${v.lon.toFixed(5)} · ${v.area.toLocaleString()} m² · ${v.levels} estimated floor(s)</p><p><strong>${v.ownerId?`Owner: ${v.ownerId===p.playerId?'You':esc(v.ownerName||'Driver')} · ${esc(v.ownerId.slice(0,8))}`:'No registered owner'}</strong><br>Status: ${esc(v.status)}<br>Registry valuation: ${hg(v.priceMinor)}<br>Your global wallet: ${hg(p.balance)}</p><p class="muted">${v.status==='review'?'OSM geometry or identity needs reconciliation. Purchases are paused; existing titles remain protected.':v.status==='retired'?'The source building is absent from the current map snapshot. Its title and history remain preserved.':'Permanent personal title. Crew district changes never transfer this building.'}</p><div class="row">${!v.ownerId&&v.status==='active'?`<button class="btn" data-act="global-quote" ${p.busy?'disabled':''}>Refresh purchase quote</button><button class="btn buy" data-act="global-buy" ${canBuy?'':'disabled'}>Buy title · ${hg(q?.priceMinor??v.priceMinor)}</button>`:''}<button class="btn ghost" data-act="global-waypoint">Set waypoint</button>${v.ownerId===p.playerId?'<button class="btn" data-act="crew-hq">Establish crew HQ</button>':''}<button class="btn ghost" data-act="global-visit">Visit area</button></div>`:''}${p.pending?'<button class="btn" data-act="global-retry">Retry pending purchase safely</button>':''}<div class="row"><button class="btn ghost" data-act="global-portfolio">Global portfolio</button><button class="btn ghost" data-act="view" data-arg="cloud">Account / sign in</button></div><p class="muted small">Global purchases use server-issued wallet funds. Local cash and test funds cannot be imported. Map data © OpenStreetMap contributors, ODbL.</p>`
+      }
+      case 'multiplayer': {
+        const mp=this.multiplayer,race=mp?.race
+        return `<h2>Cruise with friends</h2><p role="status">${esc(mp?.status??'Choose a real-world city to cruise')} · ${mp?.count??0} nearby</p><p>${esc(this.mpNotice||mp?.notice||'Sign in to see other drivers in your area. Driving stays responsive if the connection drops.')}</p>
+        <div class="row"><button class="btn" data-act="view" data-arg="cloud">Account / sign in</button><button class="btn" data-act="mp-enable">Go online</button><button class="btn ghost" data-act="mp-disable">Play solo</button><button class="btn ghost" data-act="mp-refresh">Refresh status</button></div>
+        <div class="row"><input id="mp-name" maxlength="20" placeholder="Driver name" aria-label="Driver name"><button class="btn" data-act="mp-name">Save name</button></div>
+        <button class="btn" data-act="mp-invite">Create invite</button>${this.mpInvite?`<input aria-label="Invite link" readonly value="${esc(this.mpInvite)}" style="width:100%">`:''}
+        <div class="row"><input id="mp-code" placeholder="Friend invite link or code" aria-label="Friend invite"><button class="btn" data-act="mp-join">Join friend</button></div>
+        <h3>Casual road-loop race</h3><p class="muted">Create near a connected main-road loop. Invite friends before starting. Ghost racing: no vehicle collisions, rewards or ranked results.</p>
+        ${race?`<p>${esc(race.status)} · ${race.racers.length}/8 racers</p><p>${race.racers.map(p=>`${esc(p.name)}: ${p.finished===null?`${p.checkpoint}/${race.course.length} checkpoints`:(p.finished/1000).toFixed(1)+'s'}`).join('<br>')}</p><button class="btn" data-act="mp-start">Start (host)</button><button class="btn ghost" data-act="mp-leave">Leave race</button>`:'<button class="btn" data-act="mp-create">Create road-loop race</button>'}
+        ${!this.world?'<button class="btn ghost" data-act="cloud-title">Back to title</button>':''}`
+      }
       case 'cloud':
         return `<h2>Account & cloud saves</h2>${!this.world?'<button class="btn ghost" data-act="cloud-title">Back to title</button>':''}<p>Gameplay currently uses your legacy local save. Cloud backup carries that progress between devices. Local cash, property and test rewards never become global currency.</p><p role="status">${esc(this.cloud.status)}</p>
           ${this.cloud.playerId?`<p class="muted">Player ${esc(this.cloud.playerId)}<br>Global wallet: ${(this.cloud.balance/100).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})} HG · No gameplay rewards enabled yet.<br>Cloud backup: ${this.cloud.snapshot?.payload?esc(String(this.cloud.snapshot.payload.city&&typeof this.cloud.snapshot.payload.city==='object'?(this.cloud.snapshot.payload.city as {name:string}).name:'No city')):'None'} · revision ${this.cloud.snapshot?.revision??'unknown'}</p>`:''}
@@ -1201,7 +1322,7 @@ export class Game {
         return `<h2>Radio</h2><p class="muted">Gang frequencies, municipal dispatch, and late-night talk.</p><div class="radio-stations">${STATIONS.map(station=>`<button class="btn ${this.radio.station===station.id?'buy':''}" data-act="radio-station" data-arg="${station.id}" aria-pressed="${this.radio.station===station.id}"><strong>${station.name}</strong><small>${station.host}</small></button>`).join('')}</div><p id="radio-status" class="radio-status" aria-live="polite">${esc(this.radio.status)}</p><div class="row"><button class="btn" data-act="radio-play">Play / pause</button><button class="btn" data-act="radio-next">Next</button><button class="btn ghost" data-act="radio-station" data-arg="off">Off</button></div><button class="btn ghost" data-act="radio-refresh">Refresh stations</button><label class="radio-volume">Volume <input id="radio-volume" type="range" min="0" max="100" value="${Math.round(this.radio.volume*100)}" /></label><p class="muted small">Music and talk use the configured station playlists. Scanner chatter follows local Heat. Radio pauses when this tab is hidden.</p>`
       case 'menu':
         return `<h2>Off the clock</h2><p class="muted">${esc(s.city?.name??'City')} · ${money(s.money)} available</p>
-          <div class="menu-links">${[['cloud','Account & cloud saves'],['radio','Radio stations'],['market','Dealers & cargo'],['holdings','Safehouses & vaults'],['gangs','Gangs & territory'],['masks','Mask perks'],['tutorial','First-night guide'],['help','Controls & settings']].map(([id,label])=>`<button class="btn ghost" data-act="view" data-arg="${id}">${label}<span>→</span></button>`).join('')}</div>
+          <div class="menu-links">${[['economy','Global freight markets'],['crews','Crews & global districts'],['properties','Global property portfolio'],['multiplayer','Cruise with friends'],['cloud','Account & cloud saves'],['radio','Radio stations'],['market','Dealers & cargo'],['holdings','Safehouses & vaults'],['gangs','Gangs & territory'],['masks','Mask perks'],['tutorial','First-night guide'],['help','Controls & settings']].map(([id,label])=>`<button class="btn ghost" data-act="view" data-arg="${id}">${label}<span>→</span></button>`).join('')}</div>
           <details class="fold"><summary>City & account details</summary><p class="muted">Net worth ${money(this.netWorth)} · Notoriety ${this.run.notoriety}<br>Vault ${money(s.vaultCash)} · Income ${money(this.incomePerMin)}/min<br>${esc(this.multiplayer?.status??'Local save')} · ${esc($('city-tag').textContent??'')}</p></details>`
 
       case 'tutorial':
@@ -1351,7 +1472,7 @@ export class Game {
               .join('')
           : ''
         const elsewhere = s.holdings.filter((h) => h.cityKey !== w?.city.key)
-        return `<h2>Real Estate: ${esc(w?.city.name ?? '')}</h2>
+        return `<h2>Local safehouses: ${esc(w?.city.name ?? '')}</h2><button class="btn" data-act="global-portfolio">Global property portfolio</button><p class="muted">Legacy local holdings below do not grant global ownership.</p>
           ${s.homes.map(h=>`<div class="card"><h3>${esc(h.name)}</h3><p class="muted">Owned safehouse · No criminal turf or passive rent</p><button class="btn ghost" data-act="home-waypoint" data-arg="${esc(h.id)}">Set waypoint</button></div>`).join('')}
           <p class="muted">Open the map and tap a teal residential building to buy a safehouse.</p>
           ${s.safehouse?`<div class="card"><h3>Your couch · Starter safehouse</h3><p>${esc(s.safehouse.name)}</p><p class="muted">Free garage and stash. Park at the street entrance to clear Heat.</p><button class="btn" data-act="home">Return to couch</button><button class="btn ghost" data-act="stash">Stash</button><button class="btn ghost" data-act="withdraw">Withdraw</button></div>`:''}
@@ -1444,9 +1565,10 @@ export class Game {
     const panel=$('map-selection');panel.hidden=false;panel.innerHTML=html
     panel.querySelectorAll<HTMLElement>('[data-act]').forEach(el=>el.addEventListener('click',()=>this.onAction(el.dataset.act!,el.dataset.arg??'')))
   }
-  private showMapBuilding(index:number){
-    const w=this.world!,b=w.city.buildings[index],h=houseOffer(b,w.city),owned=this.save.homes.some(v=>v.id===h.id)
-    this.mapPanel(`<strong>${esc(h.name)}</strong><p>${owned?'Your safehouse · Park nearby to stash cargo and clear Heat.':`Residential safehouse · ${money(h.price)}`}</p>${owned?`<button class="btn" data-act="home-waypoint" data-arg="${esc(h.id)}">Set waypoint</button><button class="btn ghost" data-act="stash">Stash</button><button class="btn ghost" data-act="withdraw">Withdraw</button>`:`<button class="btn buy" data-act="buy-home" data-arg="${index}" ${this.save.money<h.price?'disabled':''}>Buy safehouse · ${money(h.price)}</button>`}`)
+  private showMapBuilding(index:number,point?:{x:number;z:number}){
+    const w=this.world!,b=w.city.buildings[index],h=houseOffer(b,w.city),owned=this.save.homes.some(v=>v.id===h.id),ll=worldToLatLon(w.city,point?.x??b.cx,point?.z??b.cz)
+    const legacy=residential(b,w.city)?`<p>${owned?'Local safehouse access · Park nearby to stash cargo and clear Heat.':`Local safehouse access · ${money(h.price)}`}</p>${owned?`<button class="btn" data-act="home-waypoint" data-arg="${esc(h.id)}">Set waypoint</button><button class="btn ghost" data-act="stash">Stash</button><button class="btn ghost" data-act="withdraw">Withdraw</button>`:`<button class="btn buy" data-act="buy-home" data-arg="${index}" ${this.save.money<h.price?'disabled':''}>Buy local access · ${money(h.price)}</button>`}`:''
+    this.mapPanel(`<strong>${esc(h.name)}</strong>${!w.city.procedural?`<p>Inspect the worldwide title and server price for this OSM footprint.</p><button class="btn" data-act="global-inspect" data-arg="${ll.lat}|${ll.lon}">Inspect global property</button>`:'<p>Simulated buildings have no global title.</p>'}${legacy}`)
   }
 
   mapPick(x:number,y:number){
@@ -1454,12 +1576,13 @@ export class Game {
     const cv=$<HTMLCanvasElement>('full-map'),dpr=cv.width/cv.clientWidth,v=this.fullView
     const m=this.mapMarkers().map(m=>{const p=this.navigation!.project(v,m.x,m.z);return {m,d:Math.hypot(p.x-x*dpr,p.y-y*dpr)}}).filter(v=>v.d<16*dpr).sort((a,b)=>a.d-b.d)[0]?.m
     if(m){
+      if(m.id.startsWith('global:')){this.onAction('global-item',m.id.slice(7));return}
       if(m.id.startsWith('dealer:')){this.mapPanel(`<strong>${esc(m.label)}</strong><p>Parked gang dealer</p><button class="btn" data-act="locate-dealer" data-arg="${esc(m.id.slice(7))}">Set waypoint</button>`);return}
       if(m.id.startsWith('offer:')){const id=Number(m.id.slice(6)),c=this.offers.find(c=>c.id===id)!;this.mapPanel(`<strong>${esc(c.client)}</strong><p>${esc(c.type.label)} · ${money(c.pay)}</p><button class="btn" data-act="accept" data-arg="${id}">Accept contract</button>`);return}
     }
     const p=this.navigation.unproject(v,x*dpr,y*dpr)
-    const i=this.world.city.buildings.findIndex(b=>residential(b,this.world!.city)&&pointInPoly(p.x,p.z,b.poly))
-    if(i>=0){this.showMapBuilding(i);return}
+    const i=this.world.city.buildings.findIndex(b=>pointInPoly(p.x,p.z,b.poly))
+    if(i>=0){this.showMapBuilding(i,p);return}
     this.waypoint={...p,label:m?.label??'Map waypoint'};this.dealerWaypoint=null;this.routeTimer=0;this.computeRoute();this.drawRoute()
     this.mapPanel(`<strong>${esc(this.waypoint.label)}</strong><p>Waypoint set. Close the map to drive.</p>`)
     this.drawFullMap()
@@ -1474,12 +1597,22 @@ export class Game {
 
   private mapMarkers():MapMarker[]{
     const w=this.world!,out:MapMarker[]=[]
+    for(const s of this.economy.shipments)if(s.position)out.push({id:'convoy:'+s.id,x:wrapLon(s.position.lon-w.city.lon)*111320*Math.cos(w.city.lat*Math.PI/180),z:(w.city.lat-s.position.lat)*110540,label:'Rival freight convoy',symbol:'F',color:'#ff8fb4'})
+    const freightTarget=this.economy.target;if(freightTarget)out.push({id:'freight-gate',x:wrapLon(freightTarget.lon-w.city.lon)*111320*Math.cos(w.city.lat*Math.PI/180),z:(w.city.lat-freightTarget.lat)*110540,label:'Freight depot / lane gate',symbol:'D',color:'#73ffcb'})
+    const district=this.crews.district,contest=district?.contest,target=this.crews.target
+    const mark=(p:{lat:number;lon:number},id:string,label:string,symbol:string,color:string)=>out.push({id,x:wrapLon(p.lon-w.city.lon)*111320*Math.cos(w.city.lat*Math.PI/180),z:(w.city.lat-p.lat)*110540,label,symbol,color})
+    for(const h of district?.headquarters??[])mark(h,'crew-hq:'+h.id,`[${h.tag}] HQ`,'H',h.color)
+    if(target)mark(target,'crew-gate','Next crew delivery gate','D','#73ffcb')
+    else if(contest&&!contest.finished)mark(contest.course[0],'crew-gate','Crew delivery start','D','#73ffcb')
+    for(const p of this.properties.nearby)out.push({id:'global:'+p.id,x:wrapLon(p.lon-w.city.lon)*111320*Math.cos(w.city.lat*Math.PI/180),z:(w.city.lat-p.lat)*110540,label:`${p.name} · ${p.ownerId===this.properties.playerId?'Your title':p.ownerName||'Owned'}`,symbol:'◆',color:p.ownerId===this.properties.playerId?'#ffe08a':'#c4b3f4'})
     for(const d of this.dealers?.dealers??[])out.push({id:`dealer:${d.id}`,x:d.x,z:d.z,label:d.name,symbol:'D',color:'#df8dcc'})
     for(const c of this.offers){const n=w.city.nodes[c.from];if(n)out.push({id:`offer:${c.id}`,x:n.x,z:n.z,label:`${c.type.label} · ${money(c.pay)}`,symbol:'C',color:'#78c6ff'})}
     if(this.active)for(const [node,label,symbol] of [[this.active.from,'Pickup','P'],[this.active.to,'Drop-off','X']] as const){const n=w.city.nodes[node];out.push({id:label,x:n.x,z:n.z,label,symbol,color:'#ffba4b'})}
     for(const h of this.save.homes)out.push({id:h.id,...localHome(h,w.city),label:h.name,symbol:'H',color:'#94e4b2'})
     const garage=w.city.nodes[this.garageNode];if(garage)out.push({id:'garage',x:garage.x,z:garage.z,label:'Garage / stash',symbol:'H',color:'#94e4b2'})
     for(const p of w.pumps)out.push({id:`fuel:${p.x}:${p.z}`,x:p.x,z:p.z,label:'HJ-77',symbol:'F',color:'#00d8e8'})
+    const race=this.multiplayer?.race,entry=race?.racers.find(p=>p.id===this.multiplayer?.id),checkpoint=entry&&race?.course[entry.checkpoint]
+    if(checkpoint&&race?.status!=='finished')out.push({id:'multiplayer-checkpoint',x:wrapLon(checkpoint.lon-w.city.lon)*111320*Math.cos(w.city.lat*Math.PI/180),z:(w.city.lat-checkpoint.lat)*110540,label:'Race checkpoint',symbol:'R',color:'#73ffcb'})
     if(this.waypoint)out.push({id:'waypoint',...this.waypoint,symbol:'W',color:'#fff280'})
     return out
   }
@@ -1499,6 +1632,11 @@ export class Game {
     const v:MapView={x:center.x,z:center.z,width,height,scale:full?Math.min(width,height)/3200*this.mapZoom:width/650}
     if(full)this.fullView=v
     this.navigation.draw(g,v,full?'full':'mini',dpr)
+    if(this.crews.district&&!this.world.city.procedural){const district=this.crews.district,b=districtBounds(district.id),city=this.world.city
+      g.save();g.strokeStyle=district.color??'#73ffcb';g.lineWidth=2*dpr;g.setLineDash([8*dpr,5*dpr]);g.beginPath()
+      for(const [i,[lat,lon]]of [[b.south,b.west],[b.south,b.east],[b.north,b.east],[b.north,b.west]].entries()){const p=this.navigation.project(v,wrapLon(lon-city.lon)*111320*Math.cos(city.lat*Math.PI/180),(city.lat-lat)*110540);if(i)g.lineTo(p.x,p.y);else g.moveTo(p.x,p.y)}g.closePath();g.stroke();g.restore()
+      if(full){g.fillStyle=district.color??'#73ffcb';g.font=`bold ${12*dpr}px sans-serif`;g.fillText(`${district.tag?'['+district.tag+']':'Unclaimed'} · ${district.id}${district.contest&&!district.contest.finished?' · CONTEST':''}`,12*dpr,48*dpr)}
+    }
     if(this.route.length>1){g.strokeStyle='#ffc36a';g.lineWidth=2*dpr;g.beginPath();this.route.forEach((i,j)=>{const n=this.world!.city.nodes[i],p=this.navigation!.project(v,n.x,n.z);if(j)g.lineTo(p.x,p.y);else g.moveTo(p.x,p.y)});g.stroke()}
     for(const m of this.mapMarkers()){
       if(!full&&m.symbol==='H'&&Math.hypot(m.x-v.x,m.z-v.z)>2600)continue
@@ -1527,7 +1665,7 @@ export class Game {
     if (!this.paused) {
       const spec = this.player.spec
       if(this.introMessage>0){this.introMessage-=dt;if(this.introMessage<=0){this.player.heading+=0.6;this.toast('BURNER: Get off the fucking rail before you get liquefied, kid.','info')}}
-      this.campaign?.update(dt,this.player)
+      if(!this.economy.driving)this.campaign?.update(dt,this.player)
       if(this.campaign?.intro || this.campaign?.racing){const boss=this.campaign.boss;this.particles.emit(boss.position.x,boss.position.y,boss.position.z)}
       if(this.campaign?.racing&&this.campaign.target){const t=this.campaign.target;this.waypoint={x:t.x,z:t.z,label:`PINK SLIP · LAP ${this.campaign.lap+1}/3`}}
       if(this.campaign?.result){
@@ -1541,9 +1679,9 @@ export class Game {
       }
       const p=this.player
       const tunnel=w.isTunnel(p.pos.x,p.pos.z,p.pos.y)
-      this.run.update(dt,this.cargoUsed+(this.save.tutorial.stage==='deal'?1:0)+(this.active?.type.id==='cyanade'&&this.active.stage==='dropoff'?1:0),tunnel,w.gangAt(p.pos.x,p.pos.z)!==this.gang,this.save.mask==='balaclava')
+      if(!this.economy.driving)this.run.update(dt,this.cargoUsed+(this.save.tutorial.stage==='deal'?1:0)+(this.active?.type.id==='cyanade'&&this.active.stage==='dropoff'?1:0),tunnel,w.gangAt(p.pos.x,p.pos.z)!==this.gang,this.save.mask==='balaclava')
       p.overclocking=this.run.overclock>0; p.limping=this.run.limp>=0
-      this.player.update(dt, input, w, this.juice > 0)
+      if(!this.economy.driving)this.player.update(dt, input, w, this.juice > 0)
       this.collisionCooldown=Math.max(0,this.collisionCooldown-dt)
       if(p.impact>3 && !this.collisionCooldown) { this.run.damage(Math.min(45,p.impact*0.65),this.save.mask==='oni'); this.collisionCooldown=0.6 }
       if(p.apex) this.run.chain()
@@ -1584,10 +1722,15 @@ export class Game {
         void this.streamMap()
       }
     }
-    this.multiplayer?.update(dt,this.player,this.spray,w,this.paused?0:dt)
+    if(!w.city.procedural){const geo=worldToLatLon(w.city,this.player.pos.x,this.player.pos.z);this.properties.setLocation(geo);this.crews.setLocation(geo);this.economy.setLocation(geo)}
+    const freight=this.economy.step(this.paused?-1:input.throttle,this.paused?0:input.steer,this.multiplayer?(v)=>{this.multiplayer?.connection.send(v)}:null)
+    if(freight&&!w.city.procedural){const p=this.player;p.pos.x=wrapLon(freight.lon-w.city.lon)*111320*Math.cos(w.city.lat*Math.PI/180);p.pos.z=(w.city.lat-freight.lat)*110540;p.pos.y=w.groundHeightAt(p.pos.x,p.pos.z,p.pos.y)+1;p.heading=freight.yaw;p.speed=freight.speed;p.vel.set(Math.sin(p.heading)*p.speed,Math.cos(p.heading)*p.speed);p.mesh.position.copy(p.pos);p.mesh.rotation.set(0,p.heading,0)}
+    const crewTarget=this.economy.target??this.crews.target
+    if(crewTarget&&!w.city.procedural){const x=wrapLon(crewTarget.lon-w.city.lon)*111320*Math.cos(w.city.lat*Math.PI/180),z=(w.city.lat-crewTarget.lat)*110540;this.crewGate.position.set(x,w.groundHeightAt(x,z,this.player.pos.y)+2,z);this.crewGate.rotation.x=-Math.PI/2;this.crewGate.scale.setScalar(this.economy.driving ? .12 : 1);this.crewGate.visible=true;if(this.crewGate.parent!==this.scene)this.scene.add(this.crewGate)}else this.crewGate.visible=false
+    this.multiplayer?.update(dt,this.player,this.spray,w,this.paused?0:dt,buildFor(this.save.builds,this.save.current).paint)
     w.update(this.paused?0:dt)
     const traffic=this.traffic?.update(this.paused?0:dt,this.actor,this.player.groundSpeed,this.run.heat,this.spray)
-    if(!this.paused&&traffic){
+    if(!this.paused&&traffic&&!this.economy.driving){
       if(traffic.horn)this.trafficSound.honk(traffic.horn.distance,traffic.horn.side,traffic.horn.freight)
       if(traffic.impact>0){this.run.damage(Math.min(30,traffic.impact*0.5),this.save.mask==='oni');if(this.player.mode==='mag' && traffic.impact>22)this.player.unsnap()}
       for(let i=0;i<traffic.nearMisses;i++)this.run.chain()
@@ -1649,7 +1792,8 @@ export class Game {
     $('money').textContent = money(s.money)
     $('income').textContent = this.incomePerMin ? `+${money(this.incomePerMin)}/min passive` : 'NO VAULTS · KEEP MOVING'
     $('vehicle-name').textContent = `${p.spec.name} · ${this.gang}`
-    $('network-status').textContent=this.multiplayer?.status ?? 'LOCAL SAVE'
+    const delivery=this.crews.district?.contest,driver=delivery?.runs.find(r=>r.player===this.crews.player)
+    $('network-status').textContent=this.economy.progress || (delivery&&!delivery.finished&&driver?`CREW DELIVERY ${driver.next}/${delivery.course.length} · ${driver.best!==null?'COMPLETE':Date.now()<delivery.startsAt?'WARMUP':driver.invalid||'FOLLOW GREEN GATES'}`:'') || this.multiplayer?.raceStatus || this.multiplayer?.status || 'LOCAL SAVE'
     const tunnel=this.world!.isTunnel(p.pos.x,p.pos.z,p.pos.y)
     $('minimap').style.visibility=tunnel?'hidden':'visible'
     $('alt').textContent=tunnel?'GPS LOST':`${Math.round(p.pos.y)} m${p.testFlight?' · TEST FLIGHT':''}`

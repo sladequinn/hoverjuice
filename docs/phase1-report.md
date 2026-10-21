@@ -1,5 +1,8 @@
 # Phase 1 implementation report
 
+> Historical phase snapshot. Phase 2 supersedes the multiplayer scaffolding and deployment instructions; see [multiplayer.md](multiplayer.md).
+
+
 ## Implemented
 
 - Audited existing gameplay, local saves/economy, Cloudflare scaffolding and PartyKit relay.
