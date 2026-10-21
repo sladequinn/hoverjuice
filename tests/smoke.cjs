@@ -17,7 +17,7 @@ const assert=require('node:assert/strict');
    const check=async()=>{
     if(settled)return;
     try{const response=await fetch('http://127.0.0.1:47291/');if(response.ok)return finish()}catch{}
-    if(Date.now()>=deadline)return finish(new Error('Vite startup timeout after 60s\\n'+output.slice(-4000)));
+  await require('./vite-ready.cjs')(server);
     timer=setTimeout(check,250);
    };
    let timer=setTimeout(check,250);
