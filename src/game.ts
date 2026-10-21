@@ -11,111 +11,32 @@ import {routeGuide} from './route-guide'
 import {TrafficSound} from './traffic-sound'
 import {Radio} from './radio'
 import {STATIONS} from './radio-config'
-import { PAINTS, UPGRADES, normalizeBuilds, buildFor, tunedVehicle, upgradeCost, type GarageBuilds } from './customization'
-import {jobPair} from './jobs'
+import { PAINTS } from './customization'
 import {GANG_INFO} from './gangs'
 import {GANGS,type Gang} from './filter'
-import {tutorialActive,tutorialText,type TutorialState} from './tutorial'
 import {NavigationMap,type MapView,type MapMarker} from './navigation-map'
-import {residential,houseOffer,localHome,distanceToHome,type Safehouse} from './housing'
-import { Campaign, highwayLoop } from './campaign'
+import { highwayLoop } from './campaign'
 import { ParticlePool } from './particles'
 import { HoverjuiceSpray } from './hoverjuice'
 import { Multiplayer } from './multiplayer'
-import { OwnershipClient } from './persistence'
 import { RunState } from './dynamics'
 import * as THREE from 'three'
-import { CITIES, CONTRACT_TYPES, JUICE_PRICE, VEHICLES, vehicleById, type ContractType } from './data'
+import { CITIES, VEHICLES, vehicleById } from './data'
 import { worldToLatLon, fetchCity, geocode, streamerFor, type CityData, pointInPoly } from './map'
 import { Player, type Input } from './vehicle'
 import { MASKS, buildMask, validMask } from './character'
 import { World } from './world'
 import { TrafficSystem } from './traffic'
-import { CONTRABAND, DealerSystem } from './dealers'
+import { DealerSystem } from './dealers'
 
 
-interface Holding {
-  id: string
-  name: string
-  city: string
-  cityKey: string
-  building: number
-  income: number
-}
-
-interface SaveData {
-  builds: GarageBuilds
-  tutorial: TutorialState
-  allegiance: Gang
-  gangRep: Record<Gang,number>
-  money: number
-  owned: string[]
-  current: string
-  holdings: Holding[]
-  city: { name: string; lat: number; lon: number } | null
-  homes: Safehouse[]
-  safehouse: { name: string; lat: number; lon: number } | null
-  deliveries: number
-  earned: number
-  won: boolean
-  masks: string[]
-  mask: string
-  cam: 'chase' | 'top'
-  coldOpenDone:boolean
-  hull:number
-  heat:number
-  notoriety:number
-  vaultCash: number
-  vaultCargo: Record<string, number>
-  contraband: Record<string, number>
-}
-
-interface Contract {
-  tutorial?: boolean
-  id: number
-  type: ContractType
-  client: string
-  from: number
-  to: number
-  dist: number
-  pay: number
-  time: number
-  stage: 'pickup' | 'dropoff'
-  remaining: number
-}
-
-const CLIENTS = [
-  'Mama Zhu’s Noodle Cartel', 'Kiroshi Optics', 'Dr. Vex (unlicensed)', 'Halo Pharma', 'Byte Street Fixers',
-  'The Chrome Saints', 'Nightline Radio', 'Okabe Heavy Industries', 'Solstice Hotels', 'Rust Alley Co-op',
-  'Mx. Arcadia', 'Velvet Circuit Club',
-]
+type SaveData = import('../shared/preferences').Preferences
 
 export const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T
-export const money = (n: number) => '$' + Math.floor(n).toLocaleString('en-US')
 
 function defaultSave(): SaveData {
-  return {
-    builds:{},
-    tutorial:{stage:'ready'},
-    allegiance:'SHINOBI',
-    gangRep:{SHINOBI:0,LIARS:0,HYENAS:0,JESTERS:0},
-    money: 150,
-    owned: ['board'],
-    current: 'board',
-    holdings: [],
-    city: null,
-    safehouse: null,
-    homes: [],
-    deliveries: 0,
-    earned: 0,
-    won: false,
-    masks: ['balaclava'],
-    mask: 'balaclava',
-    cam: 'chase',
-    contraband: {}, coldOpenDone:false, hull:100,heat:0,notoriety:0,vaultCash: 0, vaultCargo: {},
-  }
+  return {current:'board',mask:'balaclava',paint:'factory',allegiance:'SHINOBI',city:null,safehouse:null,cam:'chase'}
 }
-
 
 class Heap {
   private a: [number, number][] = []
@@ -160,15 +81,11 @@ export class Game {
   economy=new Economy(localStorage,()=>{if($('modal').dataset.view==='economy'&&!(document.activeElement instanceof HTMLInputElement))this.openModal('economy')})
   crews=new Crews(localStorage,()=>{if($('modal').dataset.view==='crews'&&!(document.activeElement instanceof HTMLInputElement))this.openModal('crews')})
   properties=new GlobalProperties(localStorage,()=>{const view=$('modal').dataset.view;if(view==='property'||view==='properties')this.openModal(view)})
-  ownership = new OwnershipClient()
   radio=new Radio(()=>({heat:this.run.heat,speed:this.player.groundSpeed*3.6,gang:this.world?.gangAt(this.actor.x,this.actor.z)??this.gang}))
   trafficSound=new TrafficSound()
   particles=new ParticlePool()
   spray=new HoverjuiceSpray()
   private fueling:{x:number;z:number;litres:number;limit:number}|null=null
-  private slicks:{x:number;z:number;life:number}[]=[]
-  campaign:Campaign|null=null
-  private introMessage=0
   run = new RunState()
   private garageNode = 0
   private collisionCooldown = 0
@@ -182,12 +99,7 @@ export class Game {
   paused = true
   prepareRender?:()=>Promise<void>
   loading = false
-  offers: Contract[] = []
-  active: Contract | null = null
   waypoint: { x: number; z: number; label: string } | null = null
-  private nextId = 1
-  private offerTimer = 0
-  private incomeTimer = 0
   private saveTimer = 0
   private routeTimer = 0
   private route: number[] = []
@@ -196,7 +108,6 @@ export class Game {
   private arrow: THREE.Mesh
   private territoryLast: Gang|null=null
   private hudTimer=0
-  private homeBuildings=new Map<string,number>()
   private navigation: NavigationMap | null = null
   private fullView: MapView | null = null
   private mapCenter: {x:number;z:number}|null = null
@@ -208,16 +119,13 @@ export class Game {
   private streamBusy = false
   private mapOpen = false
   private mapZoom = 2
-  private marketEpoch = -1
 
   constructor(scene: THREE.Scene) {
     this.scene = scene
     void this.radio.load().then(()=>{if($('modal').dataset.view==='radio')this.openModal('radio')})
     scene.add(this.particles.mesh, this.spray.mesh)
     this.save.mask = validMask(this.save.mask)
-    this.save.masks = [...new Set(["balaclava", ...this.save.masks.map(validMask)])]
-    this.player = new Player(tunedVehicle(this.save.current,this.save.builds), this.save.mask)
-    this.run.hull=this.save.hull;this.run.heat=this.save.heat;this.run.notoriety=this.save.notoriety
+    this.player = new Player(vehicleById(this.save.current), this.save.mask)
     this.juice = this.player.spec.tank
     scene.add(this.player.mesh)
 
@@ -258,16 +166,14 @@ export class Game {
   }
 
   persist() {
-    this.save.hull=this.run.hull;this.save.heat=this.run.heat;this.save.notoriety=this.run.notoriety
     this.online.save(this.save)
   }
 
   applyAccountSave() {
     const parsed=this.cloud.snapshot?.payload
-    this.save=parsed?{...defaultSave(),...parsed,builds:normalizeBuilds(parsed.builds)} as SaveData:defaultSave()
+    this.save=parsed?{...defaultSave(),...parsed} as SaveData:defaultSave()
     this.save.mask=validMask(this.save.mask)
-    this.player.setSpec(tunedVehicle(this.save.current,this.save.builds));this.player.setMask(this.save.mask)
-    this.run.hull=this.save.hull;this.run.heat=this.save.heat;this.run.notoriety=this.save.notoriety
+    this.player.setSpec(this.selectedSpec());this.player.setMask(this.save.mask)
     this.juice=this.player.spec.tank
   }
 
@@ -278,11 +184,6 @@ export class Game {
     t.textContent = msg
     t.className = `toast show ${kind}`
     this.toastTimer = 3.2
-  }
-
-  earn(amount: number) {
-    this.save.money += amount
-    this.save.earned += amount
   }
 
   // ---------- cities ----------
@@ -340,7 +241,6 @@ export class Game {
     }
     this.spray.clear()
     this.save.safehouse??={name,lat,lon}
-    if(this.campaign){this.scene.remove(this.campaign.boss);this.campaign.dispose();this.campaign=null}
     if(this.multiplayer){this.scene.remove(this.multiplayer.group);this.multiplayer.dispose();this.multiplayer=null}
     if (this.world) {
       if (this.traffic) {
@@ -360,15 +260,12 @@ export class Game {
     this.spray.surfaceHeight=(x,z,reference)=>this.world!.surfaceHeightAt(x,z,reference)
     this.scene.add(this.world.group)
     if(!city.procedural){this.multiplayer=new Multiplayer(city);this.scene.add(this.multiplayer.group);void this.properties.activate();void this.crews.activate();void this.economy.activate()}else {this.properties.setLocation(null);this.crews.setLocation(null);this.economy.setLocation(null)}
-    void this.syncOwnership()
     this.traffic = new TrafficSystem(this.world)
     this.scene.add(this.traffic.group)
     this.dealerAnchor={x:Infinity,z:Infinity}
     this.mapCenter=null
     this.dealers = new DealerSystem(this.world)
     this.scene.add(this.dealers.group)
-    this.marketEpoch = this.dealers.epoch
-    this.refreshOwned()
 
     const main = city.nodes.map((n, i) => ({ n, i })).filter(({ n }) => n.main && n.adj.length > 0)
     const home=this.save.safehouse
@@ -381,14 +278,8 @@ export class Game {
     if(friendSpawn){this.player.pos.set(0,this.world.groundHeightAt(0,0,this.player.pos.y)+1.2,0)}
     this.traffic.setActivitySites(this.dealers.dealers,this.actor)
     this.traffic.prime(this.actor)
-    this.campaign=new Campaign(this.world);this.scene.add(this.campaign.boss)
-    if(!friendSpawn&&!this.save.coldOpenDone){this.campaign.coldOpen(this.player);this.introMessage=2;this.save.coldOpenDone=true}
     this.juice = Math.max(this.juice, this.player.spec.tank * 0.6)
-    this.active = null
     this.waypoint = null
-    this.offers = []
-    this.generateOffers()
-    this.resumeTutorial()
     this.buildMinimap()
     this.save.city = { name, lat, lon }
     this.persist()
@@ -416,145 +307,8 @@ export class Game {
     )
   }
 
-  private resumeTutorial(){
-    const w=this.world,t=this.save.tutorial
-    if(!w||!tutorialActive(t))return
-    if(t.stage==='deal'){this.locateWhiteLie();return}
-    const nodes=w.city.nodes,pool=this.mainNodes()
-    const nearest=(x:number,z:number)=>pool.reduce((best,i)=>Math.hypot(nodes[i].x-x,nodes[i].z-z)<Math.hypot(nodes[best].x-x,nodes[best].z-z)?i:best,pool[0])
-    if(pool.length<2)return
-    let from:number,to:number
-    if(t.city?.lat===w.city.lat&&t.city.lon===w.city.lon&&t.from&&t.to){from=nearest(t.from.x,t.from.z);to=nearest(t.to.x,t.to.z)}
-    else {
-      const starts=pool.filter(i=>{const n=nodes[i],d=Math.hypot(n.x-this.actor.x,n.z-this.actor.z);return d>70&&d<300})
-      from=starts[0]??nearest(this.actor.x,this.actor.z)
-      const ends=pool.filter(i=>{const n=nodes[i],d=Math.hypot(n.x-nodes[from].x,n.z-nodes[from].z);return d>=400&&d<850})
-      if(!ends.length)return
-      to=ends[0]
-      this.save.tutorial={stage:'pickup',city:{lat:w.city.lat,lon:w.city.lon},from:{x:nodes[from].x,z:nodes[from].z},to:{x:nodes[to].x,z:nodes[to].z}}
-    }
-    const drop=this.save.tutorial.stage==='dropoff'
-    this.active={id:this.nextId++,tutorial:true,type:CONTRACT_TYPES[0],client:'First night · Courier induction',from,to,dist:Math.hypot(nodes[from].x-nodes[to].x,nodes[from].z-nodes[to].z),pay:250,time:0,stage:drop?'dropoff':'pickup',remaining:0}
-    this.routeTimer=0;this.persist()
-  }
-  private skipTutorial(){
-    if(this.active?.tutorial)this.active=null
-    this.save.tutorial={stage:'skipped'};this.persist()
-  }
-  private locateWhiteLie(){
-    const d=this.dealers?.dealers.find(d=>d.gang==='LIARS')
-    if(d)this.locateDealer(d.id)
-    else this.toast('WHITE LIE needs a commercial parking spot. Explore another sector; the sample stays with you.','info')
-  }
-  private sellTutorialSample(){
-    if(this.save.tutorial.stage!=='deal'||this.nearbyDealer()?.gang!=='LIARS'||!this.player.parked)return
-    this.save.tutorial={stage:'done'};this.save.gangRep.LIARS+=2;this.earn(100);this.persist()
-    this.toast('WHITE LIE: “You can drive. You can keep quiet. We’ll get along.” · +$100','good')
-    this.openModal('market')
-  }
-
-  // ---------- contracts ----------
-
-  private mainNodes() {
-    const w = this.world!
-    const out: number[] = []
-    w.city.nodes.forEach((n, i) => n.main && n.adj.length>0 && out.push(i))
-    return out
-  }
-
-  generateOffers() {
-    const w = this.world
-    if (!w) return
-    const pool = this.mainNodes()
-    if (pool.length < 2) return
-    const p = this.actor
-    const spec = this.player.spec
-    this.offers = []
-    for (let k = 0; k < 4; k++) {
-      const type = k === 3 || Math.random() < 0.18 ? CONTRACT_TYPES[2] : Math.random() < 0.35 ? CONTRACT_TYPES[1] : CONTRACT_TYPES[0]
-      const safePool = type.id === 'cyanade' ? pool.filter(i=>w.eligibleAt(w.city.nodes[i].x,w.city.nodes[i].z)) : pool
-      const pair=jobPair(w.city.nodes,safePool,p.x,p.z,this.offers.map(o=>o.from))
-      if(!pair)continue
-      const {from,to,dist}=pair
-      const pathDist = dist * 1.3
-      const pay = Math.round(((40 + pathDist * 0.13) * spec.payMult * type.payMult) / 5) * 5
-      const time = Math.round((pathDist / (spec.maxSpeed * 0.62) + 25) * type.timeMult)
-      this.offers.push({
-        id: this.nextId++,
-        type,
-        client: CLIENTS[Math.floor(Math.random() * CLIENTS.length)],
-        from,
-        to,
-        dist: pathDist,
-        pay,
-        time,
-        stage: 'pickup',
-        remaining: time,
-      })
-    }
-    this.offerTimer = 75
-    if ($('modal').dataset.view === 'contracts') this.openModal('contracts')
-  }
-
-  accept(id: number) {
-    const c = this.offers.find((o) => o.id === id)
-    if (!c) return
-    if(this.active?.tutorial)this.skipTutorial()
-    this.active = c
-    this.offers = this.offers.filter((o) => o.id !== id)
-    this.waypoint = null
-    this.routeTimer = 0
-    this.toggleMap(false)
-    this.closeModal()
-    this.toast(`Contract accepted: head to the pickup for ${c.client}`, 'info')
-  }
-
-  abandon() {
-    if (!this.active) return
-    if(this.active.tutorial){this.skipTutorial();this.closeModal();return}
-    this.toast('Contract abandoned. The client will remember that.', 'bad')
-    this.active = null
-    this.closeModal()
-  }
-
   private target() {
-    const w = this.world
-    if (!w) return null
-    if (this.active) {
-      const n = w.city.nodes[this.active.stage === 'pickup' ? this.active.from : this.active.to]
-      return { x: n.x, z: n.z, node: this.active.stage === 'pickup' ? this.active.from : this.active.to }
-    }
-    if (this.waypoint) return { ...this.waypoint, node: -1 }
-    return null
-  }
-
-  private updateContract(dt: number) {
-    const c = this.active
-    const w = this.world!
-    if (!c) return
-    const tgt = w.city.nodes[c.stage === 'pickup' ? c.from : c.to]
-    const d = Math.hypot(tgt.x - this.actor.x, tgt.z - this.actor.z)
-    if (c.stage === 'dropoff'&&!c.tutorial) c.remaining -= dt
-    if (d < 16 && Math.abs(this.actor.y-(tgt.y??0)) < 30) {
-      if (c.stage === 'pickup') {
-        c.stage = 'dropoff'
-        c.remaining = c.time
-        this.routeTimer = 0
-        if(c.tutorial){this.save.tutorial.stage='dropoff';this.persist();this.toast('Parcel secured. Follow X. No timer on your first run.','info')}
-        else this.toast(`Package secured. ${c.time}s on the clock.`, 'info')
-      } else {
-        const late = c.remaining < 0
-        const pay = c.tutorial?250:Math.round(late ? c.pay * 0.4 : c.pay + Math.max(0, c.remaining) * c.pay * 0.004 * this.run.flow)
-        this.earn(pay)
-        this.save.deliveries++
-        const turf=w.gangAt(tgt.x,tgt.z);this.save.gangRep[turf]++
-        if(c.tutorial){this.save.tutorial={stage:'deal'};this.locateWhiteLie()}
-        this.active = null
-        this.persist()
-        this.toast(c.tutorial?'First delivery complete · +$250. Take the sealed sample to WHITE LIE.':late ? `Late delivery. Client docked you: +${money(pay)}` : `Delivered! +${money(pay)} (incl. speed tip)`, late ? 'bad' : 'good')
-        this.generateOffers()
-      }
-    }
+    return this.waypoint ? {...this.waypoint,node:-1} : null
   }
 
   // ---------- routing ----------
@@ -654,20 +408,13 @@ export class Game {
     if(!this.player.parked){this.toast('Stop at the pump to refuel','info');return}
     const pump=w.nearestPump(this.player.pos.x,this.player.pos.z).pump!
     this.fueling={x:pump.x,z:pump.z,litres:0,limit:need}
-    this.toast('Fueling HJ-77. F to pay. Throttle to pump-and-dash.','info')
+    this.toast('Fueling HJ-77. F to stop. Refueling is free.','info')
   }
 
-  private settleFuel(theft:boolean){
+  private settleFuel(_theft:boolean){
     const fuel=this.fueling;if(!fuel)return
     this.fueling=null
-    const cost=fuel.litres*JUICE_PRICE
-    if(theft||cost>this.save.money){
-      this.run.heat=Math.min(5,this.run.heat+1)
-      this.slicks.push({x:this.player.pos.x,z:this.player.pos.z,life:12})
-      if(this.slicks.length>16)this.slicks.shift()
-      this.toast('PUMP-AND-DASH · +1 HEAT · ignited HJ-77 slick','bad')
-    }else{this.save.money-=cost;this.toast(`Paid ${money(cost)} for ${fuel.litres.toFixed(1)} L`,'good')}
-    this.persist()
+    this.toast(`Refueled ${fuel.litres.toFixed(1)} L`, 'good')
   }
 
   promptAction() {
@@ -689,14 +436,6 @@ export class Game {
     this.toast(this.save.cam === 'top' ? 'Camera: TOP-DOWN' : 'Camera: CHASE', 'info')
   }
 
-  get cargoUsed() {
-    return Object.values(this.save.contraband).reduce((sum, amount) => sum + amount, 0)
-  }
-
-  get cargoCapacity() {
-    return { board: 8, compact: 22, truck: 70, luxury: 36, super: 24 }[this.player.spec.kind]
-  }
-
   private nearbyDealer(range = 22) {
     const nearest = this.dealers?.nearest(this.actor.x, this.actor.z)
     return nearest?.dealer && nearest.dist <= range ? nearest.dealer : null
@@ -712,32 +451,6 @@ export class Game {
     this.openModal('market')
   }
 
-  private trade(goodId: string, quantity: number, buying: boolean) {
-    const dealer = this.nearbyDealer()
-    const good = CONTRABAND.find((item) => item.id === goodId)
-    if (!dealer || !good || !this.dealers) return
-    const quote = this.dealers.quote(dealer, good)
-    if (buying) {
-      const room = this.cargoCapacity - this.cargoUsed
-      const amount = Math.max(0, Math.min(quantity, room, Math.floor(this.save.money / quote.ask)))
-      if (!amount) {
-        this.toast(room <= 0 ? 'Cargo is full. Sell something or bring a bigger ride.' : 'Not enough cash for that buy.', 'bad')
-        return
-      }
-      this.save.money -= quote.ask * amount
-      this.save.contraband[good.id] = (this.save.contraband[good.id] ?? 0) + amount
-      this.toast(`Bought ${amount} ${good.unit}${amount === 1 ? '' : 's'} of ${good.name}`, 'good')
-    } else {
-      const amount = Math.max(0, Math.min(quantity, this.save.contraband[good.id] ?? 0))
-      if (!amount) return
-      this.save.contraband[good.id] -= amount
-      this.earn(quote.bid * amount)
-      this.toast(`Moved ${amount} ${good.unit}${amount === 1 ? '' : 's'} of ${good.name} · +${money(quote.bid * amount)}`, 'good')
-    }
-    this.persist()
-    this.openModal('market')
-  }
-
   private locateDealer(id: string) {
     const dealer = this.dealers?.dealers.find((candidate) => candidate.id === id)
     if (!dealer) return
@@ -749,50 +462,15 @@ export class Game {
     this.toast(`Night Market waypoint: ${dealer.name}`, 'info')
   }
 
-  overclock() {
-    if(!this.playable)return
-    if(this.paused || !(this.save.contraband.cyanade>0)) {this.toast('Carry one Cyan-ade to overclock', 'info');return}
-    if(!this.run.burn()) {this.toast('Overclock unavailable: hull or coils depleted','bad');return}
-    this.save.contraband.cyanade--;this.persist()
-    this.toast('OVERCLOCK · 300 km/h · 15 seconds · −25 hull','info')
-  }
-
   get gang(){return this.save.allegiance}
-  get netWorth(){return this.save.money+this.save.vaultCash+this.save.owned.reduce((sum,id)=>sum+vehicleById(id).price,0)+this.save.holdings.reduce((sum,h)=>sum+h.income/0.012,0)}
-  challenge(){
-    if(!this.world||!this.campaign)return
-    const tallest=this.world.city.buildings.reduce((a,b)=>a.height>b.height?a:b)
-    if(this.netWorth<10000000||!this.save.holdings.some(h=>h.id===tallest.id)){this.toast('Pink slip locked: $10M net worth and the tallest building required','info');return}
-    if(!this.campaign.challenge(this.player)){this.toast('No contiguous highway circuit loaded. Explore more sectors.','info');return}
-    this.closeModal();this.toast('SCANNER CHALLENGE · three laps · winner takes the Hoverghini','info')
-  }
 
   private bust() {
     if(!this.world)return
-    this.save.contraband={}; this.active=null
-    this.save.money=Math.max(0,this.save.money-250)
     this.player.placeAtNode(this.world,this.garageNode)
     this.player.unsnap()
     this.juice=Math.max(this.juice,this.player.spec.tank*0.25)
-    this.run.repair();this.persist();this.resumeTutorial()
-    this.toast('IMPOUNDED · cargo confiscated · $250 fee · stash untouched','bad')
-  }
-
-  stash(withdraw=false) {
-    if(!this.playable)return
-    if(!this.world || !this.player.parked)return
-    const p=this.player.pos,n=this.world.city.nodes[this.garageNode]
-    const owned=this.save.holdings.some(h=>{const b=this.world!.city.buildings.find(b=>b.id===h.id);return b&&Math.hypot(p.x-b.cx,p.z-b.cz)<40})
-    if(!owned&&!this.atOwnedHome()&&Math.hypot(p.x-n.x,p.z-n.z)>15){this.toast('Return to your garage or an owned property','info');return}
-    if(withdraw){
-      this.save.money+=this.save.vaultCash;this.save.vaultCash=0
-      let room=this.cargoCapacity-this.cargoUsed
-      for(const [id,q] of Object.entries(this.save.vaultCargo)){const take=Math.min(room,q);this.save.contraband[id]=(this.save.contraband[id]??0)+take;this.save.vaultCargo[id]-=take;room-=take}
-      this.persist();this.toast('Vault withdrawal complete. Excess cargo stays banked.','good');return
-    }
-    this.save.vaultCash+=this.save.money;this.save.money=0
-    for(const [id,q] of Object.entries(this.save.contraband)) this.save.vaultCargo[id]=(this.save.vaultCargo[id]??0)+q
-    this.save.contraband={};this.run.heat=0;this.persist();this.toast('Cash and cargo banked in your stash vault','good')
+    this.run.repair()
+    this.toast('Recovered at your starting garage', 'info')
   }
 
   toggleMap(force?: boolean) {
@@ -827,10 +505,8 @@ export class Game {
       if (delta && this.world === w) {
         await w.appendMap(delta)
         if(this.world !== w)return
-        void this.syncOwnership()
-        this.traffic?.ensurePopulation()
+            this.traffic?.ensurePopulation()
         this.refreshDealers()
-        if(this.save.tutorial.stage==='ready')this.resumeTutorial()
         this.buildMinimap()
         $('city-tag').textContent = `OSM · ${streamer.tileCount} SECTORS`
         if (this.mapOpen) this.drawFullMap()
@@ -844,16 +520,8 @@ export class Game {
     }
   }
 
-  buyMask(id: string) {
-    const m = MASKS.find((x) => x.id === id)
-    if (!m || this.save.masks.includes(id) || this.save.money < m.price) return
-    this.save.money -= m.price
-    this.save.masks.push(id)
-    this.equipMask(id)
-  }
-
   equipMask(id: string) {
-    if (!this.save.masks.includes(id)) return
+    if (!MASKS.some(m=>m.id===id)) return
     this.save.mask = id
     this.player.setMask(id)
     this.persist()
@@ -891,12 +559,10 @@ export class Game {
     if(!this.playable)return
     const w = this.world
     if (!w || this.paused) return
-    const fee = Math.round(30 * this.player.spec.payMult)
     const { pump } = w.nearestPump(this.player.pos.x, this.player.pos.z)
     if (!pump) return
-    this.save.money = Math.max(0, this.save.money - fee)
     this.player.placeAtNode(w, pump.node)
-    this.toast(`Grav-tow dropped you at the nearest HJ-77 pump (-${money(fee)})`, 'info')
+    this.toast('Grav-tow dropped you at the nearest HJ-77 pump. No charge.', 'info')
   }
 
   toggleTestFlight() {
@@ -926,28 +592,10 @@ export class Game {
 
   // ---------- garage & real estate ----------
 
-  buyVehicle(id: string) {
-    if(id==='hoverghini'){this.challenge();return}
-    const v = vehicleById(id)
-    if (this.save.owned.includes(id) || this.save.money < v.price) return
-    this.save.money -= v.price
-    this.save.owned.push(id)
-    this.selectVehicle(id)
-    this.juice = v.tank
-    this.persist()
-    if (id === 'hoverghini' && !this.save.won) {
-      this.save.won = true
-      this.persist()
-      this.openModal('win')
-      return
-    }
-    this.toast(`${v.name} is yours. Full tank on the house.`, 'good')
-    this.openModal('garage')
-  }
-
   selectVehicle(id: string, showGarage=true) {
-    if (!this.save.owned.includes(id)) return
-    const v = tunedVehicle(id,this.save.builds)
+    if (!VEHICLES.some(v=>v.id===id)) return
+    this.save.current=id
+    const v = this.selectedSpec()
     const ratio = this.juice / this.player.spec.tank
     this.player.setSpec(v)
     this.juice = v.tank * ratio
@@ -957,40 +605,16 @@ export class Game {
     if(showGarage)this.openModal('garage')
   }
 
-  customizeVehicle(kind:'paint'|'upgrade',arg:string){
-    const id=this.save.current
-    if(!this.save.owned.includes(id))return
-    const build={...buildFor(this.save.builds,id)}
-    if(kind==='paint'){
-      if(arg!=='factory'&&!PAINTS.some(p=>p.id===arg))return
-      build.paint=arg==='factory'?undefined:arg
-    }else{
-      const upgrade=UPGRADES.find(u=>u.id===arg)
-      if(!upgrade)return
-      const level=build[upgrade.id],cost=upgradeCost(id,level)
-      if(level>=3||this.save.money<cost)return
-      this.save.money-=cost;build[upgrade.id]++
-    }
-    this.save.builds[id]=build
-    // Preserve litres: fitting a larger tank does not dispense free fuel.
-    const fuel=this.juice
-    this.selectVehicle(id)
-    this.juice=Math.min(fuel,this.player.spec.tank)
-    this.persist()
-    this.openModal('garage')
+  private selectedSpec(){
+    const base=vehicleById(this.save.current),color=PAINTS.find(p=>p.id===this.save.paint)?.color
+    return {...base,...(color===undefined?{}:{body:color})}
   }
 
-  buyLandmark(id: string) {
-    const w = this.world
-    if (!w) return
-    const l = w.city.landmarks.find((x) => x.id === id)
-    if (!l || this.ownership.ownership.has(id) || !w.city.buildings[l.building].eligible || this.save.holdings.some((h) => h.id === id) || this.save.money < l.price) return
-    this.save.money -= l.price
-    this.save.holdings.push({ id, name: l.name, city: w.city.name, cityKey: w.city.key, building: l.building, income: l.income })
-    this.refreshOwned()
-    this.persist()
-    this.toast(`You now own ${l.name}. +${money(l.income)}/min`, 'good')
-    this.openModal('holdings')
+  paintVehicle(paint:string){
+    if(paint!=='factory'&&!PAINTS.some(p=>p.id===paint))return
+    this.save.paint=paint
+    this.player.setSpec(this.selectedSpec())
+    this.persist();this.openModal('garage')
   }
 
   locate(id: string) {
@@ -1004,33 +628,18 @@ export class Game {
     this.toast(`Waypoint set: ${l.name}`, 'info')
   }
 
-  get incomePerMin() {
-    return this.save.holdings.reduce((s, h) => s + h.income, 0)
-  }
-
-  private ownershipBusy=false
-  private async syncOwnership(){
-    const w=this.world;if(!w||w.city.procedural||this.ownershipBusy)return
-    this.ownershipBusy=true
-    try{await this.ownership.load(w.city.buildings.map(b=>b.tile).filter((t):t is string=>Boolean(t)));if(this.world===w)this.refreshOwned()}
-    finally{this.ownershipBusy=false}
-  }
-  private refreshOwned() {
-    const w = this.world
-    if (!w) return
-    const claims=this.save.holdings.map(h=>({building:w.city.buildings.findIndex(b=>b.id===h.id),gang:'SHINOBI'})).filter(c=>c.building>=0)
-    for(const row of this.ownership.ownership.values()){const building=w.city.buildings.findIndex(b=>b.id===row.buildingId);if(building>=0)claims.push({building,gang:row.gang})}
-    w.setTurf(claims)
-  }
-
   // ---------- modals ----------
 
   openModal(view: string) {
+    if(view==='holdings')void this.properties.loadPortfolio()
+    view=({contracts:'economy',market:'economy',holdings:'properties'} as Record<string,string>)[view]??view
+    if(view==='economy')void this.economy.activate()
+
     if (!this.world && view !== 'warp' && view !== 'couch' && view !== 'cloud' && view !== 'multiplayer' && view !== 'property' && view !== 'properties' && view !== 'crews' && view !== 'economy') return
     const m = $('modal')
     m.dataset.view = view
     const body = $('modal-body')
-    const tabs: [string, string][] = [['contracts','Jobs'],['garage','Garage'],['warp','City'],['menu','More']]
+    const tabs: [string, string][] = [['economy','Freight'],['garage','Garage'],['warp','City'],['menu','More']]
     const activeTab=tabs.some(([id])=>id===view)?view:'menu'
     const tabBar = this.world && view !== 'win' && view !== 'couch'
       ? `<nav class="tabs" aria-label="Game sections">${tabs.map(([id, label]) => `<button class="tab ${id === activeTab ? 'on' : ''}" data-act="view" data-arg="${id}">${label}</button>`).join('')}<button class="tab-close" data-act="close" aria-label="Close">✕</button></nav>`
@@ -1154,8 +763,8 @@ export class Game {
       case 'global-inspect': {const [lat,lon]=arg.split('|').map(Number);this.toggleMap(false);this.openModal('property');void this.properties.inspect({lat,lon});break}
       case 'global-item': this.toggleMap(false);this.openModal('property');void this.properties.select(arg);break
       case 'global-quote': void this.properties.requote();break
-      case 'global-buy': if(confirm('Purchase this global title using your global wallet? This purchase is permanent; resale is not enabled.'))void this.properties.buy();break
-      case 'global-retry': void this.properties.retry();break
+      case 'global-buy': if(confirm('Purchase this global title using your global wallet? This purchase is permanent; resale is not enabled.'))void this.properties.buy().then(()=>this.economy.refresh());break
+      case 'global-retry': void this.properties.retry().then(()=>this.economy.refresh());break
       case 'global-refresh': void this.properties.activate().then(()=>this.properties.loadPortfolio());break
       case 'global-more': void this.properties.loadPortfolio(true);break
       case 'global-portfolio': this.openModal('properties');void this.properties.loadPortfolio();break
@@ -1164,25 +773,9 @@ export class Game {
       case 'mp-invite': case 'mp-join': case 'mp-name': case 'mp-enable': case 'mp-create': case 'mp-start': case 'mp-leave': case 'mp-refresh': void this.multiplayerAction(act);break
       case 'cloud-title': $('modal').classList.remove('show');$('title').classList.add('show');break
       case 'cloud-login': case 'cloud-github': case 'cloud-link': case 'cloud-refresh': case 'cloud-logout': case 'cloud-logout-all': void this.cloudAction(act);break
-      case 'skip-tutorial': this.skipTutorial();this.closeModal();break
-      case 'tutorial-dealer': this.locateWhiteLie();this.closeModal();break
-      case 'tutorial-sale': this.sellTutorialSample();break
       case 'join-gang':
         if(GANGS.includes(arg as Gang)){this.save.allegiance=arg as Gang;this.persist();this.openModal('gangs')}
         break
-      case 'accept': this.accept(Number(arg)); break
-      case 'abandon': this.abandon(); break
-      case 'refresh': this.generateOffers(); break
-      case 'buy-vehicle': this.buyVehicle(arg); break
-      case 'select-vehicle': this.selectVehicle(arg); break
-      case 'buy-landmark': this.buyLandmark(arg); break
-      case 'locate': this.locate(arg); break
-      case 'buy-home': this.buyHome(Number(arg)); break
-      case 'home-waypoint': {
-        const h=this.save.homes.find(h=>h.id===arg)
-        if(h&&this.world){const p=localHome(h,this.world.city);this.waypoint={...p,label:h.name};this.routeTimer=0;this.toggleMap(false);this.closeModal()}
-        break
-      }
       case 'random-couch': {
         const c=CITIES[Math.floor(Math.random()*CITIES.length)]
         this.onAction('couch',`${c.lat}|${c.lon}|${c.name}`)
@@ -1195,7 +788,6 @@ export class Game {
       }
       case 'couch':
       case 'warp': {
-        if(act==='couch' && this.hasSave && !confirm('Start a new game here? This replaces your current progress.'))return
         const [lat, lon, ...name] = arg.split('|')
         void this.warp(name.join('|'), Number(lat), Number(lon), act==='couch')
         break
@@ -1205,42 +797,13 @@ export class Game {
       case 'traffic-sound':this.trafficSound.toggle();this.openModal('help');break
       case 'radio-play': if(this.radio.playing)this.radio.pause();else void this.radio.play();break
       case 'radio-next': void this.radio.next();break
-      case 'paint': this.customizeVehicle('paint',arg); break
-      case 'upgrade': this.customizeVehicle('upgrade',arg); break
+      case 'select-vehicle': this.selectVehicle(arg);break
+      case 'equip-mask': this.equipMask(arg);break
+      case 'paint': this.paintVehicle(arg); break
       case 'view': this.openModal(arg);if(arg==='properties')void this.properties.loadPortfolio();if(arg==='economy')void this.economy.activate().then(()=>{if(this.economy.enabled)return this.economy.refresh()});if(arg==='crews')void this.crews.activate().then(()=>{if(this.crews.enabled)return this.crews.refresh()}); break
       case 'close': this.closeModal(); break
-      case 'challenge': this.challenge(); break
-      case 'stash': this.stash(); break
-      case 'withdraw': this.stash(true); break
-      case 'buy-mask': this.buyMask(arg); break
-      case 'equip-mask': this.equipMask(arg); break
-      case 'buy-good': {
-        const [id, amount] = arg.split('|')
-        this.trade(id, Number(amount), true)
-        break
-      }
-      case 'sell-good': {
-        const [id, amount] = arg.split('|')
-        this.trade(id, Number(amount), false)
-        break
-      }
       case 'locate-dealer': this.locateDealer(arg); break
-      case 'test-hoverghini': {
-        const v=vehicleById('hoverghini')
-        if(!this.save.owned.includes(v.id)){
-          if(this.save.money<v.price){this.toast('Add test funds first.','bad');break}
-          this.save.money-=v.price;this.save.owned.push(v.id)
-        }
-        this.selectVehicle(v.id,false);this.juice=v.tank;this.persist();this.openModal('help')
-        this.toast('Hoverghini ready · full tank.','good');break
-      }
       case 'test-flight': this.toggleTestFlight(); this.openModal('help'); break
-      case 'cheat':
-        this.earn(5_000_000)
-        this.persist()
-        this.toast('+$5,000,000 test funds wired to your account', 'good')
-        this.openModal($('modal').dataset.view || 'garage')
-        break
 
     }
   }
@@ -1269,12 +832,11 @@ export class Game {
 
   private renderView(view: string): string {
     const s = this.save
-    const w = this.world
     switch (view) {
       case 'economy': {
         const e=this.economy,q=e.quote,v=e.active,disabled=e.busy||e.pending?'disabled':'',destinations=[...new Set(e.markets.map(m=>m.district))].filter(d=>d!==e.district)
         return `<h2>Global freight markets</h2><p role="status">${esc(e.status)}</p><p>Global wallet <strong>${hg(e.balance)}</strong> · Freight reserve ${hg(e.fund)}</p><div class="row"><button class="btn" data-act="freight-refresh">Refresh board</button><button class="btn ghost" data-act="view" data-arg="cloud">Sign in</button></div>${e.pending?'<button class="btn" data-act="freight-retry">Recover pending cargo load</button>':''}
-        <p class="muted">Sealed consignments of fictional commodities. Prices reflect regional stock and shortages. Contracts pay from a finite reserve, up to six per day; local cash and local cargo stay separate.</p><label><input id="freight-competitive" type="checkbox"> Crew convoy: allow rival interception (optional)</label>
+        <p class="muted">Sealed consignments of fictional commodities. Prices reflect regional stock and shortages. Shipments pay from a finite reserve, up to six per day. No upfront cash is needed; fees are deducted from the payout.</p><label><input id="freight-competitive" type="checkbox"> Crew convoy: allow rival interception (optional)</label>
         <div class="grid">${COMMODITIES.map(c=>{const local=e.markets.find(m=>m.district===e.district&&m.commodity===c.id);return `<div class="card"><h3>${esc(c.name)}</h3><p>Here: ${local?hg(local.price):'Enter a real city'} / unit · ${local?.stock??0} stock${local?.pressure?` · SHORTAGE ${local.pressure}`:''}</p>${destinations.map(d=>{const m=e.markets.find(m=>m.district===d&&m.commodity===c.id)!;return `<p>${esc(d)}<br>${hg(m.price)} · ${m.price>m.previous_price?'↑':m.price<m.previous_price?'↓':'→'} · stock ${m.stock} · incoming ${m.incoming??0}${m.pressure?' · shortage '+m.pressure:''}<br><button class="btn ghost" data-act="freight-quote" data-arg="${esc(d)}|${c.id}" ${disabled}>Plan delivery</button></p>`}).join('')}</div>`}).join('')}</div>
         ${q?`<h3>Quoted freight</h3><p>${q.quantity} sealed units · payout ${hg(q.net)} after ${hg(q.fee)} service sink<br>${Math.round(q.route.total)} m · ${q.competitive?'Rival interception enabled':'Protected delivery'}<br>${Object.entries(q.benefits).filter(([,v])=>v).map(([k])=>esc(k)).join(' · ')||'Standard courier capacity'}</p><p class="muted">Go to the source waypoint within 60 seconds, or refresh the quote. Freight assist follows the server road route; use GO/BRAKE and steer into the indicated lane. Slow below 8 m/s to pass a lane gate safely. Three fast missed gates destroy cargo.</p><div class="row"><button class="btn" data-act="freight-waypoint">Guide to depot</button><button class="btn" data-act="freight-start" ${disabled}>Load cargo & drive</button></div>`:''}
         ${v?`<h3>Shipment ${esc(v.status)}</h3><p>${esc(e.progress||v.commodity)} · ${hg(v.net)} potential payout</p><div class="row"><button class="btn" data-act="freight-resume" ${disabled}>Resume online driving</button><button class="btn ghost" data-act="freight-waypoint">Next lane gate</button>${v.player_id===e.player?`<button class="btn ghost" data-act="freight-cancel">Cancel shipment</button>`:`<span>Challenge ends when this convoy settles; entry fee is nonrefundable.</span>`}</div>`:''}
@@ -1289,11 +851,11 @@ export class Game {
       }
       case 'properties': {
         const p=this.properties
-        return `<h2>Global property portfolio</h2><p role="status">${esc(p.status)}</p><p>Global wallet: <strong>${hg(p.balance)}</strong></p><p class="muted">These permanent titles belong to your account across every city and device. Local cash, safehouses and rent remain separate legacy progress. Global properties do not produce income or grant territory.</p><div class="row"><button class="btn" data-act="global-refresh" ${p.busy?'disabled':''}>Refresh account & portfolio</button><button class="btn ghost" data-act="view" data-arg="cloud">Account / sign in</button></div>${p.pending?'<button class="btn" data-act="global-retry">Recover pending purchase</button>':''}<div class="grid">${p.items.map(v=>`<div class="card"><h3>${esc(v.name)}</h3><p>${esc(v.id)} · ${esc(v.status)}<br>${v.lat.toFixed(5)}, ${v.lon.toFixed(5)}<br>Acquired for ${hg(v.priceMinor)}</p><button class="btn" data-act="global-item" data-arg="${esc(v.id)}">Inspect title</button></div>`).join('')||'<p>No global titles loaded. Open the map and select a building to inspect it.</p>'}</div>${p.next?'<button class="btn" data-act="global-more">Load more titles</button>':''}${!this.world?'<button class="btn ghost" data-act="cloud-title">Back to title</button>':''}`
+        return `<h2>Global property portfolio</h2><p role="status">${esc(p.status)}</p><p>Global wallet: <strong>${hg(p.balance)}</strong></p><p class="muted">These permanent titles belong to your account across every city and device. Global properties do not produce income or grant territory.</p><div class="row"><button class="btn" data-act="global-refresh" ${p.busy?'disabled':''}>Refresh account & portfolio</button><button class="btn ghost" data-act="view" data-arg="cloud">Account / sign in</button></div>${p.pending?'<button class="btn" data-act="global-retry">Recover pending purchase</button>':''}<div class="grid">${p.items.map(v=>`<div class="card"><h3>${esc(v.name)}</h3><p>${esc(v.id)} · ${esc(v.status)}<br>${v.lat.toFixed(5)}, ${v.lon.toFixed(5)}<br>Acquired for ${hg(v.priceMinor)}</p><button class="btn" data-act="global-item" data-arg="${esc(v.id)}">Inspect title</button></div>`).join('')||'<p>No global titles loaded. Open the map and select a building to inspect it.</p>'}</div>${p.next?'<button class="btn" data-act="global-more">Load more titles</button>':''}${!this.world?'<button class="btn ghost" data-act="cloud-title">Back to title</button>':''}`
       }
       case 'property': {
         const p=this.properties,v=p.selected,q=p.quote,canBuy=v&&!v.ownerId&&v.status==='active'&&q&&q.expiresAt>Date.now()&&p.balance>=q.priceMinor&&!p.pending&&!p.busy
-        return `<h2>${v?esc(v.name):'Global building inspection'}</h2><p role="status">${esc(p.status)}</p>${v?`<p>${esc(v.id)} · OSM version ${v.sourceVersion}<br>${v.lat.toFixed(5)}, ${v.lon.toFixed(5)} · ${v.area.toLocaleString()} m² · ${v.levels} estimated floor(s)</p><p><strong>${v.ownerId?`Owner: ${v.ownerId===p.playerId?'You':esc(v.ownerName||'Driver')} · ${esc(v.ownerId.slice(0,8))}`:'No registered owner'}</strong><br>Status: ${esc(v.status)}<br>Registry valuation: ${hg(v.priceMinor)}<br>Your global wallet: ${hg(p.balance)}</p><p class="muted">${v.status==='review'?'OSM geometry or identity needs reconciliation. Purchases are paused; existing titles remain protected.':v.status==='retired'?'The source building is absent from the current map snapshot. Its title and history remain preserved.':'Permanent personal title. Crew district changes never transfer this building.'}</p><div class="row">${!v.ownerId&&v.status==='active'?`<button class="btn" data-act="global-quote" ${p.busy?'disabled':''}>Refresh purchase quote</button><button class="btn buy" data-act="global-buy" ${canBuy?'':'disabled'}>Buy title · ${hg(q?.priceMinor??v.priceMinor)}</button>`:''}<button class="btn ghost" data-act="global-waypoint">Set waypoint</button>${v.ownerId===p.playerId?'<button class="btn" data-act="crew-hq">Establish crew HQ</button>':''}<button class="btn ghost" data-act="global-visit">Visit area</button></div>`:''}${p.pending?'<button class="btn" data-act="global-retry">Retry pending purchase safely</button>':''}<div class="row"><button class="btn ghost" data-act="global-portfolio">Global portfolio</button><button class="btn ghost" data-act="view" data-arg="cloud">Account / sign in</button></div><p class="muted small">Global purchases use server-issued wallet funds. Local cash and test funds cannot be imported. Map data © OpenStreetMap contributors, ODbL.</p>`
+        return `<h2>${v?esc(v.name):'Global building inspection'}</h2><p role="status">${esc(p.status)}</p>${v?`<p>${esc(v.id)} · OSM version ${v.sourceVersion}<br>${v.lat.toFixed(5)}, ${v.lon.toFixed(5)} · ${v.area.toLocaleString()} m² · ${v.levels} estimated floor(s)</p><p><strong>${v.ownerId?`Owner: ${v.ownerId===p.playerId?'You':esc(v.ownerName||'Driver')} · ${esc(v.ownerId.slice(0,8))}`:'No registered owner'}</strong><br>Status: ${esc(v.status)}<br>Registry valuation: ${hg(v.priceMinor)}<br>Your global wallet: ${hg(p.balance)}</p><p class="muted">${v.status==='review'?'OSM geometry or identity needs reconciliation. Purchases are paused; existing titles remain protected.':v.status==='retired'?'The source building is absent from the current map snapshot. Its title and history remain preserved.':'Permanent personal title. Crew district changes never transfer this building.'}</p><div class="row">${!v.ownerId&&v.status==='active'?`<button class="btn" data-act="global-quote" ${p.busy?'disabled':''}>Refresh purchase quote</button><button class="btn buy" data-act="global-buy" ${canBuy?'':'disabled'}>Buy title · ${hg(q?.priceMinor??v.priceMinor)}</button>`:''}<button class="btn ghost" data-act="global-waypoint">Set waypoint</button>${v.ownerId===p.playerId?'<button class="btn" data-act="crew-hq">Establish crew HQ</button>':''}<button class="btn ghost" data-act="global-visit">Visit area</button></div>`:''}${p.pending?'<button class="btn" data-act="global-retry">Retry pending purchase safely</button>':''}<div class="row"><button class="btn ghost" data-act="global-portfolio">Global portfolio</button><button class="btn ghost" data-act="view" data-arg="cloud">Account / sign in</button></div><p class="muted small">Purchases use your server wallet. Map data © OpenStreetMap contributors, ODbL.</p>`
       }
       case 'multiplayer': {
         const mp=this.multiplayer,race=mp?.race
@@ -1308,177 +870,25 @@ export class Game {
       }
       case 'cloud':
         return `<h2>Your account</h2>${!this.world?'<button class="btn ghost" data-act="cloud-title">Back to title</button>':''}<p role="status">${esc(this.online.status)}</p><p>${esc(this.cloud.status)}</p>
-          ${this.cloud.playerId?`<p>Driver ${esc(this.online.displayName||this.cloud.playerId.slice(0,8))}<br>Freight wallet: ${hg(this.cloud.balance)}</p><p>Progress saves automatically to this account.</p><div class="row">${!this.online.providers.includes('google')?'<button class="btn" data-act="cloud-link">Link Google to this account</button>':''}<button class="btn ghost" data-act="cloud-logout">Sign out</button><button class="btn ghost" data-act="cloud-logout-all">Sign out all devices</button></div>`:`<button class="btn" data-act="cloud-login">Continue with Google</button><details><summary>Existing GitHub player?</summary><p>Sign in once with GitHub, then link Google here to keep your player and holdings.</p><button class="btn ghost" data-act="cloud-github">Recover GitHub account</button></details>`}`
+          ${this.cloud.playerId?`<p>Driver ${esc(this.online.displayName||this.cloud.playerId.slice(0,8))}<br>Wallet: ${hg(this.economy.enabled?this.economy.balance:this.cloud.balance)}</p><p>Progress saves automatically to this account.</p><div class="row">${!this.online.providers.includes('google')?'<button class="btn" data-act="cloud-link">Link Google to this account</button>':''}<button class="btn ghost" data-act="cloud-logout">Sign out</button><button class="btn ghost" data-act="cloud-logout-all">Sign out all devices</button></div>`:`<button class="btn" data-act="cloud-login">Continue with Google</button><details><summary>Existing GitHub player?</summary><p>Sign in once with GitHub, then link Google here to keep your player and holdings.</p><button class="btn ghost" data-act="cloud-github">Recover GitHub account</button></details>`}`
       case 'radio':
         return `<h2>Radio</h2><p class="muted">Gang frequencies, municipal dispatch, and late-night talk.</p><div class="radio-stations">${STATIONS.map(station=>`<button class="btn ${this.radio.station===station.id?'buy':''}" data-act="radio-station" data-arg="${station.id}" aria-pressed="${this.radio.station===station.id}"><strong>${station.name}</strong><small>${station.host}</small></button>`).join('')}</div><p id="radio-status" class="radio-status" aria-live="polite">${esc(this.radio.status)}</p><div class="row"><button class="btn" data-act="radio-play">Play / pause</button><button class="btn" data-act="radio-next">Next</button><button class="btn ghost" data-act="radio-station" data-arg="off">Off</button></div><button class="btn ghost" data-act="radio-refresh">Refresh stations</button><label class="radio-volume">Volume <input id="radio-volume" type="range" min="0" max="100" value="${Math.round(this.radio.volume*100)}" /></label><p class="muted small">Music and talk use the configured station playlists. Scanner chatter follows local Heat. Radio pauses when this tab is hidden.</p>`
       case 'menu':
-        return `<h2>Off the clock</h2><p class="muted">${esc(s.city?.name??'City')} · ${money(s.money)} available</p>
-          <div class="menu-links">${[['economy','Global freight markets'],['crews','Crews & global districts'],['properties','Global property portfolio'],['multiplayer','Cruise with friends'],['cloud','Your account'],['radio','Radio stations'],['market','Dealers & cargo'],['holdings','Safehouses & vaults'],['gangs','Gangs & territory'],['masks','Mask perks'],['tutorial','First-night guide'],['help','Controls & settings']].map(([id,label])=>`<button class="btn ghost" data-act="view" data-arg="${id}">${label}<span>→</span></button>`).join('')}</div>
-          <details class="fold"><summary>City & account details</summary><p class="muted">Net worth ${money(this.netWorth)} · Notoriety ${this.run.notoriety}<br>Vault ${money(s.vaultCash)} · Income ${money(this.incomePerMin)}/min<br>${esc(this.multiplayer?.status??'Connecting')} · ${esc($('city-tag').textContent??'')}</p></details>`
-
+        return `<h2>Off the clock</h2><p>${esc(s.city?.name??'City')}</p><div class="menu-links">${[['economy','Freight jobs'],['crews','Crews & districts'],['properties','Property portfolio'],['multiplayer','Cruise with friends'],['cloud','Your account'],['radio','Radio'],['masks','Masks'],['tutorial','Getting started'],['help','Controls']].map(([id,label])=>`<button class="btn ghost" data-act="view" data-arg="${id}">${label}</button>`).join('')}</div>`
       case 'tutorial':
-        return `<h2>Your first night</h2><p>${esc(tutorialText(s.tutorial))}</p><p class="muted">Deliver a legal parcel for $250, then sell a sealed sample to WHITE LIE for $100. Use the map’s P / X markers. Dealers use D. Return to a safehouse to stash cargo and clear Heat.</p>${s.tutorial.stage==='deal'?'<button class="btn buy" data-act="tutorial-dealer">Locate WHITE LIE</button>':''}${tutorialActive(s.tutorial)?'<button class="btn ghost" data-act="skip-tutorial">Skip tutorial</button>':''}`
-      case 'gangs':
-        return `<h2>Four gangs. One city.</h2><p class="muted">You represent ${this.gang}. Your mask keeps its own perk. Rival turf increases Heat gain while carrying contraband; the Street Balaclava reduces that penalty. Deliveries build local respect. Gang control follows mapped landuse, with stable generated districts filling unmapped areas.</p><div class="grid">${GANGS.map(g=>`<div class="card" style="border-color:${GANG_INFO[g].color}"><h3 style="color:${GANG_INFO[g].color}">${g}</h3><p>${GANG_INFO[g].leader} · ${GANG_INFO[g].district}</p><p>Respect: ${s.gangRep[g]}</p><button class="btn" data-act="join-gang" data-arg="${g}" ${this.gang===g?'disabled':''}>${this.gang===g?'Representing':'Represent '+g}</button></div>`).join('')}</div>`
-      case 'contracts': {
-        const active = this.active
-          ? `<div class="card active-card">
-              <div class="row"><span class="pill ${this.active.type.id}">${this.active.type.label}</span><strong>${money(this.active.pay)}</strong></div>
-              <h3>${esc(this.active.client)}</h3><p class="muted">${this.active.type.blurb}</p>
-              <p>${this.active.tutorial ? 'Training delivery · no timer' : this.active.stage === 'pickup' ? 'Heading to pickup' : `Delivering, ${Math.max(0, Math.ceil(this.active.remaining))}s left`}</p>
-              <button class="btn danger" data-act="abandon">Abandon contract</button></div>`
-          : ''
-        const offers = this.offers
-          .map(
-            (o) => `<div class="card">
-              <div class="row"><span class="pill ${o.type.id}">${o.type.label}</span><strong class="pay">${money(o.pay)}</strong></div>
-              <h3>${esc(o.client)}</h3>
-              <p class="muted">${o.type.blurb}</p>
-              <div class="row meta"><span>${(o.dist / 1000).toFixed(1)} km</span><span>${o.time}s limit</span>${o.type.leak ? '<span class="warn">HJ leak</span>' : ''}</div>
-              <button class="btn" data-act="accept" data-arg="${o.id}" ${this.active ? 'disabled' : ''}>${this.active ? 'Finish current job first' : 'Accept'}</button>
-            </div>`,
-          )
-          .join('')
-        return `<h2>Contract Board</h2>
-          <p class="muted">Pay scales with your ride's cargo class (${this.player.spec.name}: ×${this.player.spec.payMult}). Beat the clock for a speed tip.</p>
-          ${active}<div class="grid">${offers || '<p class="muted">No offers right now.</p>'}</div>
-          <button class="btn ghost" data-act="refresh">Refresh board</button>`
-      }
-      case 'market': {
-        const dealer = this.nearbyDealer()
-        const inventory = CONTRABAND.map((good) => {
-          const amount = s.contraband[good.id] ?? 0
-          return amount ? `<li><i style="--good:#${good.color.toString(16).padStart(6, '0')}"></i><span>${esc(good.name)}</span><strong>${amount}</strong></li>` : ''
-        }).join('')
-        const cargo = `<div class="market-cargo">
-          <div class="row"><span>CONTRABAND HOLD</span><strong>${this.cargoUsed} / ${this.cargoCapacity}</strong></div>
-          <div class="bar"><i style="width:${Math.min(100, this.cargoUsed / this.cargoCapacity * 100)}%"></i></div>
-          <ul>${inventory || '<li class="muted">Your hold is clean.</li>'}</ul>
-        </div>`
-        if (!dealer || !this.dealers) {
-          const cards = this.dealers?.dealers.map((candidate) => {
-            const specialty = CONTRABAND.find((good) => good.id === candidate.specialty)!
-            const dist = Math.hypot(candidate.x - this.actor.x, candidate.z - this.actor.z)
-            return `<div class="card dealer-card" style="--dealer:#${candidate.color.toString(16).padStart(6, '0')}">
-              <div class="row"><h3>${esc(candidate.name)}</h3><span>${(dist / 1000).toFixed(1)} km</span></div>
-              <p class="muted">${esc(candidate.gang)} · ${esc(candidate.bio)}<br>Known for cheap ${esc(specialty.name)}. Get within 22 m to trade.</p>
-              <button class="btn ghost" data-act="locate-dealer" data-arg="${candidate.id}">Set waypoint</button>
-            </div>`
-          }).join('') ?? ''
-          return `<h2>Night Market</h2><p class="muted">SLADE runs SHINOBI. WHITE LIE runs LIARS. FASA runs HYENAS. FRECKLES runs JESTERS. Find their parked cars to trade; prices shift with the local supply.</p>
-            ${cargo}<div class="grid dealers">${cards || '<p class="muted">No eligible dealer parking in these sectors yet. Explore more of the city.</p>'}</div>`
-        }
-        const tutorialDeal=s.tutorial.stage==='deal'&&dealer.gang==='LIARS'?'<div class="card"><h3>WHITE LIE · First deal</h3><p>Hand over the sealed sample from your courier run.</p><button class="btn buy" data-act="tutorial-sale">Sell sealed sample · $100</button></div>':''
-        const event = this.dealers.event(dealer)
-        const specialty = CONTRABAND.find((good) => good.id === dealer.specialty)!
-        const rows = CONTRABAND.map((good) => {
-          const quote = this.dealers!.quote(dealer, good)
-          const owned = s.contraband[good.id] ?? 0
-          const maxBuy = Math.max(0, Math.min(this.cargoCapacity - this.cargoUsed, Math.floor(s.money / quote.ask)))
-          return `<div class="market-row" style="--good:#${good.color.toString(16).padStart(6, '0')}">
-            <div class="good-info"><i></i><div><strong>${esc(good.name)}</strong><small>${esc(good.blurb)}</small></div></div>
-            <div class="quote ask"><small>BUY</small><strong>${money(quote.ask)}</strong></div>
-            <div class="trade-buttons">
-              <button data-act="buy-good" data-arg="${good.id}|1" ${maxBuy < 1 ? 'disabled' : ''}>+1</button>
-              <button data-act="buy-good" data-arg="${good.id}|5" ${maxBuy < 1 ? 'disabled' : ''}>+5</button>
-              <button data-act="buy-good" data-arg="${good.id}|999">MAX</button>
-            </div>
-            <div class="quote bid"><small>SELL</small><strong>${money(quote.bid)}</strong><span>${owned} held</span></div>
-            <div class="trade-buttons sell">
-              <button data-act="sell-good" data-arg="${good.id}|1" ${owned < 1 ? 'disabled' : ''}>−1</button>
-              <button data-act="sell-good" data-arg="${good.id}|999" ${owned < 1 ? 'disabled' : ''}>ALL</button>
-            </div>
-          </div>`
-        }).join('')
-        return `<div class="market-head" style="--dealer:#${dealer.color.toString(16).padStart(6, '0')}">
-            <div><p class="kicker">${esc(dealer.gang)} // leader & dealer</p><h2>${esc(dealer.name)}</h2><p class="muted">${esc(dealer.bio)}<br>Specialty: ${esc(specialty.name)} · new prices in ${this.dealers.timeRemaining()}s</p></div>
-            <strong class="market-cash">${money(s.money)}</strong>
-          </div>
-          ${event ? `<div class="market-event ${event.kind}"><b>${event.kind === 'shortage' ? 'SUPPLY SHOCK' : 'STREET GLUT'}</b>${esc(event.headline)}</div>` : ''}
-          ${cargo}<div class="market-table">${tutorialDeal}${rows}</div>`
-      }
-      case 'garage': {
-        const max = { speed: 95, tank: 120, pay: 15 }
-        const bar = (v: number, m: number) => `<div class="bar"><i style="width:${Math.min(100, (v / m) * 100)}%"></i></div>`
-        const cards = VEHICLES.map((base) => {
-          const v=tunedVehicle(base.id,s.builds)
-          const owned = s.owned.includes(v.id)
-          const current = s.current === v.id
-          const afford = s.money >= v.price
-          const btn = current
-            ? '<button class="btn" disabled>Riding</button>'
-            : owned
-              ? `<button class="btn" data-act="select-vehicle" data-arg="${v.id}">Ride this</button>`
-              : v.id==='hoverghini' ? '<button class="btn" data-act="challenge">Pink-slip challenge</button>' : `<button class="btn ${afford ? 'buy' : ''}" data-act="buy-vehicle" data-arg="${v.id}" ${afford ? '' : 'disabled'}>Buy ${money(v.price)}</button>`
-          return `<div class="card vehicle ${current ? 'current' : ''} ${v.id === 'hoverghini' ? 'goal' : ''}">
-            <div class="swatch" style="--c:#${v.body.toString(16).padStart(6, '0')};--g:#${v.glow.toString(16).padStart(6, '0')}"></div>
-            <h3>${v.name}</h3><p class="muted">${v.tagline}</p>
-            <div class="stats">
-              <label>Top speed <span>${Math.round(v.maxSpeed * 3.6)} km/h</span></label>${bar(v.maxSpeed, max.speed)}
-              <label>HJ-77 tank <span>${v.tank} L</span></label>${bar(v.tank, max.tank)}
-              <label>Cargo pay <span>×${v.payMult}</span></label>${bar(v.payMult, max.pay)}
-              <label>Evaporation <span>${v.evap.toFixed(3)} L/s</span></label>
-            </div>${btn}</div>`
-        }).join('')
-        const build=buildFor(s.builds,s.current)
-        const workshop=`<details class="fold" data-fold="paint"><summary>Paint <span>${esc(PAINTS.find(p=>p.id===build.paint)?.name??'Factory')}</span></summary><div class="paint-options"><button class="btn" data-act="paint" data-arg="factory" ${!build.paint?'disabled':''}>Factory paint</button>${PAINTS.map(p=>`<button class="btn" data-act="paint" data-arg="${p.id}" aria-pressed="${build.paint===p.id}" ${build.paint===p.id?'disabled':''}><span style="display:inline-block;width:12px;height:12px;background:#${p.color.toString(16).padStart(6,'0')};margin-right:6px"></span>${p.name}</button>`).join('')}</div></details>
-          <details class="fold" data-fold="upgrades"><summary>Performance <span>${build.drive+build.handling+build.efficiency}/9 stages</span></summary><div class="upgrade-list">${UPGRADES.map(u=>{const level=build[u.id],cost=upgradeCost(s.current,level);return `<div class="upgrade-row"><div><strong>${u.name} · ${level}/3</strong><p class="muted small">${u.description}</p></div><button class="btn" data-act="upgrade" data-arg="${u.id}" ${level>=3||s.money<cost?'disabled':''}>${level>=3?'Max':money(cost)}</button></div>`}).join('')}</div></details>`
-        return `<h2>Garage</h2><p class="muted">${money(s.money)} available</p><div class="garage-current"><span class="kicker">CURRENT RIDE</span><h3>${esc(this.player.spec.name)}</h3><p>${Math.round(this.player.spec.maxSpeed*3.6)} km/h · ${this.player.spec.tank} L · Cargo ×${this.player.spec.payMult}</p></div>
-          ${workshop}<details class="fold" data-fold="vehicles"><summary>Vehicles <span>${s.owned.length} owned</span></summary><div class="grid">${cards}</div></details>
-          <button class="btn ghost garage-vault" data-act="view" data-arg="holdings">Safehouses & vaults →</button>`
-      }
-      case 'masks': {
+        return `<h2>Your first freight run</h2><p>Open Freight, choose a destination and commodity, and request a quote. Follow the depot waypoint, then start the shipment near its source depot. Drive through the lane gates to earn HG.</p><p>No starting cash is required. The fee comes out of the payout. Shipments, payouts, wallet funds and property titles are recorded by the server.</p><button class="btn" data-act="view" data-arg="economy">Open freight</button>`
+      case 'garage':
+        return `<h2>Garage</h2><p>Choose a ride. Vehicles and paint are available to everyone; freight uses server-controlled driving and payouts.</p><div class="grid">${VEHICLES.map(v=>`<div class="card"><h3>${esc(v.name)}</h3><p>${esc(v.tagline)}</p><button class="btn" data-act="select-vehicle" data-arg="${v.id}" ${s.current===v.id?'disabled':''}>${s.current===v.id?'Riding':'Ride this'}</button></div>`).join('')}</div><h3>Paint</h3><div class="row"><button class="btn" data-act="paint" data-arg="factory">Factory</button>${PAINTS.map(p=>`<button class="btn" data-act="paint" data-arg="${p.id}">${p.name}</button>`).join('')}</div>`
+      case 'masks':
         this.maskThumbs()
-        const cards = MASKS.map((m) => {
-          const owned = s.masks.includes(m.id)
-          const current = s.mask === m.id
-          const afford = s.money >= m.price
-          const btn = current
-            ? '<button class="btn" disabled>Wearing</button>'
-            : owned
-              ? `<button class="btn" data-act="equip-mask" data-arg="${m.id}">Wear</button>`
-              : `<button class="btn ${afford ? 'buy' : ''}" data-act="buy-mask" data-arg="${m.id}" ${afford ? '' : 'disabled'}>${m.price ? 'Buy ' + money(m.price) : 'Free'}</button>`
-          return `<div class="card mask ${current ? 'current' : ''}">
-            <img src="${this.thumbs.get(m.id)}" alt="${m.name} mask" width="96" height="96" />
-            <h3>${m.name}</h3><p class="muted small">${m.blurb}</p>${btn}</div>`
-        }).join('')
-        return `<h2>Masks</h2><p class="muted">Every courier needs a face for the job. Your mask stays visible on your ride.</p>
-          <div class="grid masks">${cards}</div>`
-      }
-      case 'holdings': {
-        const list = w
-          ? w.city.landmarks
-              .map((l) => {
-                const owned = s.holdings.some((h) => h.id === l.id)
-                const afford = s.money >= l.price
-                const b = w.city.buildings[l.building]
-                return `<div class="card land ${owned ? 'owned' : ''}">
-                  <div class="row"><h3>${esc(l.name)}</h3>${owned ? '<span class="pill owned">OWNED</span>' : ''}</div>
-                  <div class="row meta"><span>${Math.round(b.height)} m tall</span><span>+${money(l.income)}/min</span></div>
-                  <div class="row">
-                    <button class="btn ghost" data-act="locate" data-arg="${l.id}">Set waypoint</button>
-                    ${owned ? '' : `<button class="btn ${afford ? 'buy' : ''}" data-act="buy-landmark" data-arg="${l.id}" ${afford ? '' : 'disabled'}>Buy ${money(l.price)}</button>`}
-                  </div></div>`
-              })
-              .join('')
-          : ''
-        const elsewhere = s.holdings.filter((h) => h.cityKey !== w?.city.key)
-        return `<h2>Local safehouses: ${esc(w?.city.name ?? '')}</h2><button class="btn" data-act="global-portfolio">Global property portfolio</button><p class="muted">Legacy local holdings below do not grant global ownership.</p>
-          ${s.homes.map(h=>`<div class="card"><h3>${esc(h.name)}</h3><p class="muted">Owned safehouse · No criminal turf or passive rent</p><button class="btn ghost" data-act="home-waypoint" data-arg="${esc(h.id)}">Set waypoint</button></div>`).join('')}
-          <p class="muted">Open the map and tap a teal residential building to buy a safehouse.</p>
-          ${s.safehouse?`<div class="card"><h3>Your couch · Starter safehouse</h3><p>${esc(s.safehouse.name)}</p><p class="muted">Free garage and stash. Park at the street entrance to clear Heat.</p><button class="btn" data-act="home">Return to couch</button><button class="btn ghost" data-act="stash">Stash</button><button class="btn ghost" data-act="withdraw">Withdraw</button></div>`:''}
-          <p class="muted">Buy landmark towers to earn passive rent every minute, in every city, forever. Owned towers glow gold.</p>
-          <div class="summary"><div><small>Portfolio</small><strong>${s.holdings.length} properties</strong></div><div><small>Passive income</small><strong>${money(this.incomePerMin)}/min</strong></div></div>
-          <div class="grid">${list || '<p class="muted">No landmarks found in this district.</p>'}</div>
-          ${elsewhere.length ? `<h3 class="sub">Holdings in other cities</h3><ul class="plain">${elsewhere.map((h) => `<li>${esc(h.name)} <span class="muted">(${esc(h.city)})</span> <strong>+${money(h.income)}/min</strong></li>`).join('')}</ul>` : ''}`
-      }
+        return `<h2>Masks</h2><p>Choose your look.</p><div class="grid masks">${MASKS.map(m=>`<div class="card"><img src="${this.thumbs.get(m.id)}" alt="${esc(m.name)}" width="96" height="96"><h3>${esc(m.name)}</h3><button class="btn" data-act="equip-mask" data-arg="${m.id}" ${s.mask===m.id?'disabled':''}>${s.mask===m.id?'Wearing':'Wear'}</button></div>`).join('')}</div>`
       case 'couch':
         return `<h2>Where’s your couch?</h2>
-          <p class="muted">Every empire starts somewhere. Pick an address for your first safehouse. You’ll spawn on the nearest connected street.</p>
+          <p class="muted">Every empire starts somewhere. Pick an address for your starting location. You’ll spawn on the nearest connected street.</p>
           <form id="search-form" class="search"><input name="q" aria-label="Safehouse address" placeholder="Street number, street, city, country" maxlength="160" required autocomplete="off" /><button class="btn">Find couch</button></form>
           <div id="search-results" class="cities" aria-live="polite"></div>
           <button class="btn buy big" data-act="random-couch">Random couch</button>
-          <p class="muted small">Random chooses a starting district. Your safehouse stays saved on this device.</p>`
+          <p class="muted small">Random chooses a starting district. Your starting location is saved to your account.</p>`
       case 'warp':
         return `<h2>${this.world ? 'City uplink' : 'Choose your district'}</h2>
           <p class="muted">Pick a city. Take the night shift. Run cargo, dodge traffic and keep enough HJ-77 in the tank to get home.</p>
@@ -1487,37 +897,7 @@ export class Game {
           <h3 class="sub">Deployment zones</h3>
           <div class="cities">${CITIES.map((c) => `<button class="city-btn" data-act="warp" data-arg="${c.lat}|${c.lon}|${c.name}"><strong>${c.name}</strong><span>${c.area}</span></button>`).join('')}</div>`
       case 'help':
-        return `<h2>Courier Manual</h2><button class="btn ghost" data-act="traffic-sound">Traffic sound: ${this.trafficSound.enabled?'ON':'OFF'}</button>
-          <div class="help">
-            <div><h3>Street handling</h3><ul class="plain keys">
-              <li><kbd>W</kbd>/<kbd>S</kbd> Thrust and brake (hold S when stopped to reverse on a conduit)</li>
-              <li><kbd>A</kbd>/<kbd>D</kbd> Steer, or pick the branch at the next junction in Mag-Lock</li>
-              <li><kbd>E</kbd> Toggle Mag-Lock / Free Hover</li>
-              <li><kbd>Shift</kbd> Boost in either drive mode; burns HJ-77 fast</li>
-              <li><kbd>Space</kbd> Hop off the rail</li>
-              <li><kbd>V</kbd> Switch chase / top-down camera</li>
-              <li><kbd>B</kbd>/<kbd>U</kbd> Bank / withdraw at a garage or owned property</li><li><kbd>Q</kbd> Burn one Cyan-ade: 15 seconds at 300 km/h, costs 25 hull</li>
-            </ul></div>
-            <div><h3>Business</h3><ul class="plain keys">
-              <li><kbd>J</kbd> Contract board</li><li><kbd>N</kbd> Night Market map</li><li><kbd>R</kbd> Trade with a nearby dealer</li>
-              <li><kbd>G</kbd> Garage</li><li><kbd>P</kbd> Turf & vaults</li><li><kbd>M</kbd> Move to another city</li>
-              <li><kbd>F</kbd> Refuel at a turquoise HJ-77 pump</li><li><kbd>T</kbd> Call a grav-tow to the nearest pump</li>
-            </ul></div>
-            <div><h3>Hoverjuice (HJ-77)</h3><p class="muted">Your repulsors drink a volatile turquoise fluid that evaporates constantly, even while parked. Run dry and you sink to a crawl.
-            HJ-77 is also the precursor to the street drug Cyan-ade. Precursor contracts pay big, but the leaking canisters double your evaporation.</p></div>
-            <div><h3>Night Market</h3><p class="muted">Four gang leaders trade from parked cars where suitable commercial sites are available. Buy contraband where it is cheap and move it where bids are high. Quotes refresh every 150 seconds; supply shocks and street gluts can make or erase a fortune. Cargo capacity depends on your current ride.</p></div>
-            <div><h3>Touch controls</h3><p class="muted">Use the analog stick in either mode: sideways steers or queues a junction turn, forward thrusts, back brakes. <b>GO</b> and <b>BRAKE</b> also control speed.
-            Start in Free Hover. Use the lower <b>MAG-LOCK / UNLOCK</b> button to switch modes; <b>BOOST</b> burns extra HJ-77. <b>BURN</b> appears only when carrying Cyan-ade. Tap the fuel prompt at a pump to refuel.</p></div>
-            <div><h3>Drive modes</h3><p class="muted"><b>Mag-Lock</b> snaps you between three rail lanes. Tap A/D to slide and queue a turn for 6 seconds; hold to keep your turn queued. Corner assist slows you through sharp turns. Heavy ramming can break lock. <b>Free Hover</b> carries your momentum across the road plane. Water breaks rail cohesion.</p></div>
-          </div>
-          <details class="fold" data-fold="testing"><summary>Testing tools</summary><div class="row test-funds"><span class="muted small">Playtesting?</span><button class="btn buy" data-act="cheat">+$5,000,000 test funds</button></div>
-          <div class="row"><button class="btn buy" data-act="test-hoverghini" ${!this.save.owned.includes('hoverghini')&&this.save.money<vehicleById('hoverghini').price?'disabled':''}>${this.save.owned.includes('hoverghini')?'Drive Hoverghini':`Buy Hoverghini · ${money(vehicleById('hoverghini').price)}`}</button><span class="muted small">Test purchase. Bypasses the pink-slip unlock.</span></div>
-          <div class="row"><button class="btn" data-act="test-flight">Test flight: ${this.player.testFlight?'ON':'OFF'} (Y)</button><span class="muted">Free Hover: Space / C climb / descend. Touch: RISE / DESCEND. Turning off restores street height.</span></div>
-          </details><div class="row"><span class="muted">${s.deliveries} deliveries · ${money(s.earned)} earned lifetime</span></div>`
-      case 'win':
-        return `<div class="win"><h1>HOVERGHINI</h1><p>From the gutter to the skyline. You own the ultimate status symbol.</p>
-          <p class="muted">${s.deliveries} deliveries · ${s.holdings.length} properties · ${money(s.earned)} earned</p>
-          <button class="btn buy" data-act="close">Take her for a spin</button></div>`
+        return `<h2>Driver controls</h2><p>W/S thrust and brake · A/D steer · E Mag-Lock · Shift boost · Space hop · V camera.</p><p>J or N freight · G garage · K masks · P properties · M city · F free refuel · T free tow.</p><p>Touch: use the stick, GO / BRAKE, MAG-LOCK and BOOST. Tap a fuel prompt to refuel.</p><p>HG is earned through server-settled freight and spent on global property. Casual races have no currency rewards.</p><button class="btn" data-act="traffic-sound">Traffic sound: ${this.trafficSound.enabled?'ON':'OFF'}</button>`
     }
     return ''
   }
@@ -1534,32 +914,13 @@ export class Game {
     }
   }
 
-  private atOwnedHome(){
-    if(!this.world)return false
-    return this.save.homes.some(h=>{
-      const i=this.homeBuildings.get(h.id),b=i===undefined?undefined:this.world!.city.buildings[i]
-      return b ? distanceToHome(this.actor.x,this.actor.z,b)<18 : Math.hypot(this.actor.x-localHome(h,this.world!.city).x,this.actor.z-localHome(h,this.world!.city).z)<18
-    })
-  }
-
-  buyHome(index:number){
-    const w=this.world,b=w?.city.buildings[index]
-    if(!w||!b||!residential(b,w.city))return
-    const offer=houseOffer(b,w.city)
-    if(this.save.homes.some(h=>h.id===offer.id))return
-    if(this.save.money<offer.price){this.toast('Not enough cash for this safehouse','bad');return}
-    this.save.money-=offer.price;this.save.homes.push(offer);this.homeBuildings.set(offer.id,index);this.persist()
-    this.showMapBuilding(index);this.toast('Safehouse acquired. Park nearby to clear Heat and use your stash.','good')
-  }
-
   private mapPanel(html:string){
     const panel=$('map-selection');panel.hidden=false;panel.innerHTML=html
     panel.querySelectorAll<HTMLElement>('[data-act]').forEach(el=>el.addEventListener('click',()=>this.onAction(el.dataset.act!,el.dataset.arg??'')))
   }
   private showMapBuilding(index:number,point?:{x:number;z:number}){
-    const w=this.world!,b=w.city.buildings[index],h=houseOffer(b,w.city),owned=this.save.homes.some(v=>v.id===h.id),ll=worldToLatLon(w.city,point?.x??b.cx,point?.z??b.cz)
-    const legacy=residential(b,w.city)?`<p>${owned?'Local safehouse access · Park nearby to stash cargo and clear Heat.':`Local safehouse access · ${money(h.price)}`}</p>${owned?`<button class="btn" data-act="home-waypoint" data-arg="${esc(h.id)}">Set waypoint</button><button class="btn ghost" data-act="stash">Stash</button><button class="btn ghost" data-act="withdraw">Withdraw</button>`:`<button class="btn buy" data-act="buy-home" data-arg="${index}" ${this.save.money<h.price?'disabled':''}>Buy local access · ${money(h.price)}</button>`}`:''
-    this.mapPanel(`<strong>${esc(h.name)}</strong>${!w.city.procedural?`<p>Inspect the worldwide title and server price for this OSM footprint.</p><button class="btn" data-act="global-inspect" data-arg="${ll.lat}|${ll.lon}">Inspect global property</button>`:'<p>Simulated buildings have no global title.</p>'}${legacy}`)
+    const w=this.world!,b=w.city.buildings[index],ll=worldToLatLon(w.city,point?.x??b.cx,point?.z??b.cz)
+    this.mapPanel(`<strong>${esc(b.name||'Building')}</strong><p>Inspect the worldwide title and server price.</p><button class="btn" data-act="global-inspect" data-arg="${ll.lat}|${ll.lon}">Inspect property</button>`)
   }
 
   mapPick(x:number,y:number){
@@ -1569,7 +930,6 @@ export class Game {
     if(m){
       if(m.id.startsWith('global:')){this.onAction('global-item',m.id.slice(7));return}
       if(m.id.startsWith('dealer:')){this.mapPanel(`<strong>${esc(m.label)}</strong><p>Parked gang dealer</p><button class="btn" data-act="locate-dealer" data-arg="${esc(m.id.slice(7))}">Set waypoint</button>`);return}
-      if(m.id.startsWith('offer:')){const id=Number(m.id.slice(6)),c=this.offers.find(c=>c.id===id)!;this.mapPanel(`<strong>${esc(c.client)}</strong><p>${esc(c.type.label)} · ${money(c.pay)}</p><button class="btn" data-act="accept" data-arg="${id}">Accept contract</button>`);return}
     }
     const p=this.navigation.unproject(v,x*dpr,y*dpr)
     const i=this.world.city.buildings.findIndex(b=>pointInPoly(p.x,p.z,b.poly))
@@ -1597,10 +957,7 @@ export class Game {
     else if(contest&&!contest.finished)mark(contest.course[0],'crew-gate','Crew delivery start','D','#73ffcb')
     for(const p of this.properties.nearby)out.push({id:'global:'+p.id,x:wrapLon(p.lon-w.city.lon)*111320*Math.cos(w.city.lat*Math.PI/180),z:(w.city.lat-p.lat)*110540,label:`${p.name} · ${p.ownerId===this.properties.playerId?'Your title':p.ownerName||'Owned'}`,symbol:'◆',color:p.ownerId===this.properties.playerId?'#ffe08a':'#c4b3f4'})
     for(const d of this.dealers?.dealers??[])out.push({id:`dealer:${d.id}`,x:d.x,z:d.z,label:d.name,symbol:'D',color:'#df8dcc'})
-    for(const c of this.offers){const n=w.city.nodes[c.from];if(n)out.push({id:`offer:${c.id}`,x:n.x,z:n.z,label:`${c.type.label} · ${money(c.pay)}`,symbol:'C',color:'#78c6ff'})}
-    if(this.active)for(const [node,label,symbol] of [[this.active.from,'Pickup','P'],[this.active.to,'Drop-off','X']] as const){const n=w.city.nodes[node];out.push({id:label,x:n.x,z:n.z,label,symbol,color:'#ffba4b'})}
-    for(const h of this.save.homes)out.push({id:h.id,...localHome(h,w.city),label:h.name,symbol:'H',color:'#94e4b2'})
-    const garage=w.city.nodes[this.garageNode];if(garage)out.push({id:'garage',x:garage.x,z:garage.z,label:'Garage / stash',symbol:'H',color:'#94e4b2'})
+    const garage=w.city.nodes[this.garageNode];if(garage)out.push({id:'garage',x:garage.x,z:garage.z,label:'Starting garage',symbol:'H',color:'#94e4b2'})
     for(const p of w.pumps)out.push({id:`fuel:${p.x}:${p.z}`,x:p.x,z:p.z,label:'HJ-77',symbol:'F',color:'#00d8e8'})
     const race=this.multiplayer?.race,entry=race?.racers.find(p=>p.id===this.multiplayer?.id),checkpoint=entry&&race?.course[entry.checkpoint]
     if(checkpoint&&race?.status!=='finished')out.push({id:'multiplayer-checkpoint',x:wrapLon(checkpoint.lon-w.city.lon)*111320*Math.cos(w.city.lat*Math.PI/180),z:(w.city.lat-checkpoint.lat)*110540,label:'Race checkpoint',symbol:'R',color:'#73ffcb'})
@@ -1609,9 +966,7 @@ export class Game {
   }
   private buildMinimap(){
     const city=this.world!.city;this.navigation=new NavigationMap(city)
-    this.homeBuildings.clear()
-    const owned=new Set(this.save.homes.map(h=>h.id))
-    if(owned.size)city.buildings.forEach((b,i)=>{const id=b.id??houseOffer(b,city).id;if(owned.has(id))this.homeBuildings.set(id,i)})
+
   }
 
   private drawNavigation(cv:HTMLCanvasElement,full:boolean){
@@ -1651,7 +1006,7 @@ export class Game {
     if (!w) return
     if(!this.playable){
       this.economy.step(0,0,null)
-      this.multiplayer?.update(0,this.player,undefined,w,0,buildFor(this.save.builds,this.save.current).paint)
+      this.multiplayer?.update(0,this.player,undefined,w,0,this.save.paint==='factory'?undefined:this.save.paint)
       return
     }
     if (this.toastTimer > 0) {
@@ -1660,22 +1015,13 @@ export class Game {
     }
     if (!this.paused) {
       const spec = this.player.spec
-      if(this.introMessage>0){this.introMessage-=dt;if(this.introMessage<=0){this.player.heading+=0.6;this.toast('BURNER: Get off the fucking rail before you get liquefied, kid.','info')}}
-      if(!this.economy.driving)this.campaign?.update(dt,this.player)
-      if(this.campaign?.intro || this.campaign?.racing){const boss=this.campaign.boss;this.particles.emit(boss.position.x,boss.position.y,boss.position.z)}
-      if(this.campaign?.racing&&this.campaign.target){const t=this.campaign.target;this.waypoint={x:t.x,z:t.z,label:`PINK SLIP · LAP ${this.campaign.lap+1}/3`}}
-      if(this.campaign?.result){
-        if(this.campaign.result==='win'){if(!this.save.owned.includes('hoverghini'))this.save.owned.push('hoverghini');this.save.won=true;this.persist();this.openModal('win')}
-        else this.toast('The Hoverghini keeps its pink slip. Race lost.','bad')
-        this.campaign.result=null;this.waypoint=null
-      }
       if(this.fueling){
         if(input.throttle>0.1||Math.hypot(this.player.pos.x-this.fueling.x,this.player.pos.z-this.fueling.z)>18)this.settleFuel(true)
         else {const amount=Math.min(dt*4,this.fueling.limit-this.fueling.litres,this.player.spec.tank-this.juice);this.juice+=amount;this.fueling.litres+=amount;if(this.fueling.litres>=this.fueling.limit-0.01)this.settleFuel(false)}
       }
       const p=this.player
       const tunnel=w.isTunnel(p.pos.x,p.pos.z,p.pos.y)
-      if(!this.economy.driving)this.run.update(dt,this.cargoUsed+(this.save.tutorial.stage==='deal'?1:0)+(this.active?.type.id==='cyanade'&&this.active.stage==='dropoff'?1:0),tunnel,w.gangAt(p.pos.x,p.pos.z)!==this.gang,this.save.mask==='balaclava')
+      if(!this.economy.driving)this.run.update(dt,0,tunnel,w.gangAt(p.pos.x,p.pos.z)!==this.gang,this.save.mask==='balaclava')
       p.overclocking=this.run.overclock>0; p.limping=this.run.limp>=0
       if(!this.economy.driving)this.player.update(dt, input, w, this.juice > 0)
       this.collisionCooldown=Math.max(0,this.collisionCooldown-dt)
@@ -1683,24 +1029,15 @@ export class Game {
       if(p.apex) this.run.chain()
       if(this.run.limp===0) this.bust()
       const garage=w.city.nodes[this.garageNode]
-      if(p.groundSpeed<3 && (Math.hypot(p.pos.x-garage.x,p.pos.z-garage.z)<12 || this.atOwnedHome())) { this.run.heat=0; if(this.run.limp>=0)this.run.repair() }
+      if(p.groundSpeed<3 && (Math.hypot(p.pos.x-garage.x,p.pos.z-garage.z)<12)) { this.run.heat=0; if(this.run.limp>=0)this.run.repair() }
       if(tunnel) this.route=[]
 
-      const leak = this.save.mask==='respirator' ? 0 : this.active?.stage === 'dropoff' ? this.active.type.leak : 0
       const magEff = this.player.mode === 'mag' ? 0.7 : 1
-      this.juice -= (spec.evap * (1 + leak) / this.run.flow + spec.burn * this.player.lastBurn * magEff) * dt
+      this.juice -= (spec.evap / this.run.flow + spec.burn * this.player.lastBurn * magEff) * dt
       if (this.juice <= 0 && this.juice + dt * spec.evap > 0) this.toast(`HJ-77 depleted! Crawl to a pump or ${isTouch() ? 'tap the prompt' : 'press T'} for a tow.`, 'bad')
       this.juice = Math.max(0, this.juice)
-      this.updateContract(dt)
-      this.offerTimer -= dt
-      if (this.offerTimer <= 0 && !this.active) this.generateOffers()
-      this.incomeTimer += dt
-      if (this.incomeTimer >= 1) {
-        this.earn((this.incomePerMin / 60) * this.incomeTimer)
-        this.incomeTimer = 0
-      }
       this.saveTimer += dt
-      if (this.saveTimer > 10) { this.persist(); void this.syncOwnership(); this.saveTimer = 0 }
+      if (this.saveTimer > 10) { this.persist(); this.saveTimer = 0 }
       if (this.waypoint && Math.hypot(this.waypoint.x - this.actor.x, this.waypoint.z - this.actor.z) < 40) {
         this.toast(`Arrived at ${this.waypoint.label}`, 'good')
         this.waypoint = null
@@ -1723,7 +1060,7 @@ export class Game {
     if(freight&&!w.city.procedural){const p=this.player;p.pos.x=wrapLon(freight.lon-w.city.lon)*111320*Math.cos(w.city.lat*Math.PI/180);p.pos.z=(w.city.lat-freight.lat)*110540;p.pos.y=w.groundHeightAt(p.pos.x,p.pos.z,p.pos.y)+1;p.heading=freight.yaw;p.speed=freight.speed;p.vel.set(Math.sin(p.heading)*p.speed,Math.cos(p.heading)*p.speed);p.mesh.position.copy(p.pos);p.mesh.rotation.set(0,p.heading,0)}
     const crewTarget=this.economy.target??this.crews.target
     if(crewTarget&&!w.city.procedural){const x=wrapLon(crewTarget.lon-w.city.lon)*111320*Math.cos(w.city.lat*Math.PI/180),z=(w.city.lat-crewTarget.lat)*110540;this.crewGate.position.set(x,w.groundHeightAt(x,z,this.player.pos.y)+2,z);this.crewGate.rotation.x=-Math.PI/2;this.crewGate.scale.setScalar(this.economy.driving ? .12 : 1);this.crewGate.visible=true;if(this.crewGate.parent!==this.scene)this.scene.add(this.crewGate)}else this.crewGate.visible=false
-    this.multiplayer?.update(dt,this.player,this.spray,w,this.paused?0:dt,buildFor(this.save.builds,this.save.current).paint)
+    this.multiplayer?.update(dt,this.player,this.spray,w,this.paused?0:dt,this.save.paint==='factory'?undefined:this.save.paint)
     w.update(this.paused?0:dt)
     const traffic=this.traffic?.update(this.paused?0:dt,this.actor,this.player.groundSpeed,this.run.heat,this.spray)
     if(!this.paused&&traffic&&!this.economy.driving){
@@ -1736,20 +1073,8 @@ export class Game {
       this.spray.emit(this.player,dt,this.actor,this.player.heading,this.player.groundSpeed,
         this.player.mesh.userData.halfW,this.player.mesh.userData.halfL,
         w.groundHeightAt(this.actor.x,this.actor.z,this.actor.y),this.player.boosting)
-      if(this.campaign?.intro || this.campaign?.racing){
-        const boss=this.campaign.boss
-        this.spray.emit(boss,dt,boss.position,boss.rotation.y,60,boss.userData.halfW,boss.userData.halfL,
-          w.groundHeightAt(boss.position.x,boss.position.z,boss.position.y),true)
-      }
       this.spray.update(dt)
-      for(const slick of this.slicks){slick.life-=dt;this.particles.emit(slick.x+(Math.random()-0.5)*5,w.groundHeightAt(slick.x,slick.z,this.actor.y)+.4,slick.z+(Math.random()-0.5)*5);if(Math.hypot(this.actor.x-slick.x,this.actor.z-slick.z)<3)this.run.hull=Math.max(0,this.run.hull-dt*2)}
-      this.slicks=this.slicks.filter(s=>s.life>0)
       this.particles.update(dt)
-    }
-    if (this.dealers && this.marketEpoch !== this.dealers.epoch) {
-      this.marketEpoch = this.dealers.epoch
-      if ($('modal').dataset.view === 'market') this.openModal('market')
-      this.toast('Night Market prices just shifted across the city', 'info')
     }
     this.updateMarkers(dt)
     this.hudTimer -= dt
@@ -1761,7 +1086,7 @@ export class Game {
     this.beacon.visible = !!t
     this.arrow.visible = !!t
     if (!t) return
-    const color = this.active ? (this.active.stage === 'pickup' ? 0x00f0ff : 0xff9d00) : 0x19ffe6
+    const color = 0x19ffe6
     this.beacon.position.set(t.x, this.world!.groundHeightAt(t.x,t.z,this.actor.y), t.z)
     this.beacon.children.forEach((c) => ((c as THREE.Mesh).material as THREE.MeshBasicMaterial).color.setHex(color))
     this.beacon.getObjectByName('ring')!.rotation.z += dt
@@ -1775,21 +1100,17 @@ export class Game {
 
   private updateHud() {
     const radioStatus=document.getElementById('radio-status');if(radioStatus)radioStatus.textContent=this.radio.status
-    const s = this.save
     const p = this.player
     const turf=this.world!.gangAt(p.pos.x,p.pos.z)
     $('territory-status').textContent=`${turf} · ${turf===this.gang?'FRIENDLY':'RIVAL'} TURF`
     $('territory-status').style.color=GANG_INFO[turf].color
     if(this.territoryLast!==turf){if(this.territoryLast)this.toast(`${turf} territory · ${GANG_INFO[turf].leader}`,'info');this.territoryLast=turf}
-    const training=tutorialActive(s.tutorial)
-    $('tutorial-tip').hidden=!training
-    document.body.classList.toggle('training',training)
-    $('tutorial-tip').textContent=tutorialText(s.tutorial)
-    $('money').textContent = money(s.money)
-    $('income').textContent = this.incomePerMin ? `+${money(this.incomePerMin)}/min passive` : 'NO VAULTS · KEEP MOVING'
+    $('tutorial-tip').hidden=true
+    $('money').textContent = this.economy.enabled ? hg(this.economy.balance) : 'Wallet unavailable'
+    $('income').textContent = 'SERVER WALLET · HG'
     $('vehicle-name').textContent = `${p.spec.name} · ${this.gang}`
     const delivery=this.crews.district?.contest,driver=delivery?.runs.find(r=>r.player===this.crews.player)
-    $('network-status').textContent=this.economy.progress || (delivery&&!delivery.finished&&driver?`CREW DELIVERY ${driver.next}/${delivery.course.length} · ${driver.best!==null?'COMPLETE':Date.now()<delivery.startsAt?'WARMUP':driver.invalid||'FOLLOW GREEN GATES'}`:'') || this.multiplayer?.raceStatus || this.multiplayer?.status || 'LOCAL SAVE'
+    $('network-status').textContent=this.economy.progress || (delivery&&!delivery.finished&&driver?`CREW DELIVERY ${driver.next}/${delivery.course.length} · ${driver.best!==null?'COMPLETE':Date.now()<delivery.startsAt?'WARMUP':driver.invalid||'FOLLOW GREEN GATES'}`:'') || this.multiplayer?.raceStatus || this.multiplayer?.status || 'CONNECTING'
     const tunnel=this.world!.isTunnel(p.pos.x,p.pos.z,p.pos.y)
     $('minimap').style.visibility=tunnel?'hidden':'visible'
     $('alt').textContent=tunnel?'GPS LOST':`${Math.round(p.pos.y)} m${p.testFlight?' · TEST FLIGHT':''}`
@@ -1803,9 +1124,6 @@ export class Game {
     const lock = $('touch-mode')
     lock.setAttribute('aria-pressed', String(p.mode === 'mag'))
     lock.textContent = p.mode === 'mag' ? 'UNLOCK' : 'MAG-LOCK'
-    const burn = $('touch-burn') as HTMLButtonElement
-    burn.hidden = !(s.contraband.cyanade > 0)
-    burn.disabled = this.run.overclock > 0 || this.run.limp >= 0
     const touch = isTouch()
     const pct = this.juice / p.spec.tank
     const fill = $('juice-fill')
@@ -1825,40 +1143,22 @@ export class Game {
         : `Next junction <b>${arrows[nt.dir + 1]}</b>${hint !== null ? ` <span class="${hint === nt.dir ? 'ok' : 'warn'}">route ${arrows[hint + 1]}</span>` : ''}`)
     } else turn.style.display = 'none'
 
-    const c = this.active
     const panel = $('contract')
-    panel.classList.toggle('idle',!c && !this.waypoint)
-    panel.classList.toggle('waypoint',!c && !!this.waypoint)
-    if (c) {
-      panel.classList.add('show')
-      const w = this.world!
-      const tn = w.city.nodes[c.stage === 'pickup' ? c.from : c.to]
-      const d = Math.hypot(tn.x - p.pos.x, tn.z - p.pos.z)
-      const dist = d < 1000 ? Math.round(d / 5) * 5 + ' m' : (d / 1000).toFixed(1) + ' km'
-      setHtml(panel, `<div class="row"><span class="pill ${c.type.id}">${c.type.label}</span><strong class="pay">${money(c.pay)}</strong></div>
-        <div class="client">${esc(c.client)}</div>
-        <div class="row"><span>${c.stage === 'pickup' ? 'PICKUP' : 'DROP-OFF'} · ${dist}</span>
-        <span class="timer ${c.stage === 'dropoff' && c.remaining < 15 ? 'hot' : ''}">${c.tutorial?'TRAINING':c.stage === 'dropoff' ? (c.remaining > 0 ? Math.ceil(c.remaining) + 's' : 'LATE') : c.time + 's'}</span></div>`)
-    } else if (this.waypoint) {
-      panel.classList.add('show')
-      setHtml(panel, `<div class="client">Waypoint: ${esc(this.waypoint.label)}</div><div class="muted">${touch ? 'Tap for contracts' : 'Press <kbd>J</kbd> for contracts'}</div>`)
-    } else {
-      panel.classList.remove('show')
-      setHtml(panel, `<span class="muted">DISPATCH</span> · ${touch?'Tap for work':'<kbd>J</kbd> Find a contract'}`)
-    }
+    panel.classList.toggle('show',!!this.waypoint)
+    setHtml(panel,this.waypoint?`<div class="client">Waypoint: ${esc(this.waypoint.label)}</div>`:`<span class="muted">FREIGHT</span> · ${touch?'Tap for work':'<kbd>J</kbd> Find a shipment'}`)
 
     const { dist } = this.world!.nearestPump(p.pos.x, p.pos.z)
     const prompt = $('prompt')
     const market = this.dealers?.nearest(this.actor.x, this.actor.z)
     if (market?.dealer && market.dist < 22 && !this.paused) {
-      setHtml(prompt, `${touch ? 'Tap to trade' : '<kbd>R</kbd> Trade'} with ${esc(market.dealer.name)} · ${market.dealer.gang}`)
+      setHtml(prompt, `${touch ? 'Tap for freight' : '<kbd>R</kbd> Freight'} with ${esc(market.dealer.name)} · ${market.dealer.gang}`)
       prompt.classList.add('show')
     } else if (dist < 18 && !this.paused) {
       const need = p.spec.tank - this.juice
-      setHtml(prompt, this.fueling ? `Fueling ${this.fueling.litres.toFixed(1)} L · F to pay / throttle to steal` : need > 0.5 ? `${touch ? '⛽ Tap to refuel' : '<kbd>F</kbd> Refuel'} ${need.toFixed(0)} L · ${money(need * JUICE_PRICE)}` : 'Tank full')
+      setHtml(prompt, this.fueling ? `Fueling ${this.fueling.litres.toFixed(1)} L · F to stop` : need > 0.5 ? `${touch ? '⛽ Tap to refuel' : '<kbd>F</kbd> Refuel'} ${need.toFixed(0)} L · FREE` : 'Tank full')
       prompt.classList.add('show')
     } else if (this.juice <= 0 && !this.paused) {
-      setHtml(prompt, `${touch ? 'Tap to call' : '<kbd>T</kbd> Call'} grav-tow (${money(30 * p.spec.payMult)})`)
+      setHtml(prompt, `${touch ? 'Tap to call' : '<kbd>T</kbd> Call'} grav-tow (free)`)
       prompt.classList.add('show')
     } else prompt.classList.remove('show')
   }

@@ -1,7 +1,6 @@
-import {validLegacySave} from '../shared/legacy-save'
+import {validPreferences} from '../shared/preferences'
 export const LOCAL_SAVE_KEY='hoverghini.save.v1'
-export const LOCAL_BACKUP_KEY='hoverghini.save.before-cloud.v1'
-export interface CloudSnapshot {playerId:string;schemaVersion:1;mode:'legacy-local';revision:number;payload:Record<string,unknown>|null;updatedAt:number}
+export interface CloudSnapshot {playerId:string;schemaVersion:1;mode:'preferences';revision:number;payload:Record<string,unknown>|null;updatedAt:number}
 interface Pending {playerId:string;requestId:string;expectedRevision:number;schemaVersion:1;payload:Record<string,unknown>}
 export class CloudError extends Error {status:number;constructor(message:string,status=0){super(message);this.status=status}}
 /** Account snapshot transport with revision checks and a durable, account-scoped outbox. */
@@ -20,10 +19,10 @@ export class CloudSave {
   if(!res.ok)throw new CloudError(body.error??'Cloud request failed',res.status)
   return body
  }
- private pendingKey(){if(!this.playerId)throw new CloudError('Connect your account first.');return `hoverghini.cloud.pending.${this.playerId}`}
+ private pendingKey(){if(!this.playerId)throw new CloudError('Connect your account first.');return `hoverghini.preferences.pending.${this.playerId}`}
  get pending(){return this.playerId?!!this.storage.getItem(this.pendingKey()):false}
  async prepareLogin(){
-  // Probe before leaving the game: static-only hosts and disabled backends stay playable.
+  // Probe before leaving the game: static-only hosts and disabled backends cannot admit players.
   try{await this.call('/api/me')}catch(error){if(!(error instanceof CloudError)||error.status!==401)throw error}
  }
  async refresh(){
@@ -31,15 +30,15 @@ export class CloudSave {
   if(typeof me.playerId!=='string')throw new CloudError('Invalid account response')
   // Do not retain a previous account's snapshot if a follow-up read fails.
   this.playerId=me.playerId;this.snapshot=null
-  const [snapshot,wallet]=await Promise.all([this.call('/api/save'),this.call('/api/wallet')])
-  if(snapshot.playerId!==me.playerId||wallet.playerId!==me.playerId||snapshot.schemaVersion!==1||snapshot.mode!=='legacy-local'||!Number.isSafeInteger(snapshot.revision)||snapshot.revision<0||(snapshot.payload!==null&&!validLegacySave(snapshot.payload))||!Number.isSafeInteger(wallet.balance)||wallet.balance<0)throw new CloudError('Invalid cloud response; local save untouched.')
+  const [snapshot,wallet]=await Promise.all([this.call('/api/preferences'),this.call('/api/wallet')])
+  if(snapshot.playerId!==me.playerId||wallet.playerId!==me.playerId||snapshot.schemaVersion!==1||snapshot.mode!=='preferences'||!Number.isSafeInteger(snapshot.revision)||snapshot.revision<0||(snapshot.payload!==null&&!validPreferences(snapshot.payload))||!Number.isSafeInteger(wallet.balance)||wallet.balance<0)throw new CloudError('Invalid cloud response; local save untouched.')
   this.snapshot=snapshot;this.balance=wallet.balance
   this.status=`Account connected. Cloud revision ${snapshot.revision}. ${this.pending?'An interrupted upload can be retried.':'Automatic saves are active.'}`
  }
  async upload(payload:unknown){
   if(!this.playerId||!this.snapshot)throw new CloudError('Check account before uploading.')
   if(this.pending)throw new CloudError('Retry the interrupted upload before starting another.')
-  if(!validLegacySave(payload))throw new CloudError('Local save is not compatible; it has not been changed.')
+  if(!validPreferences(payload))throw new CloudError('Local save is not compatible; it has not been changed.')
   // Durable outbox BEFORE sending. Lost responses retry the exact same key and payload.
   const pending:Pending={playerId:this.playerId,requestId:crypto.randomUUID(),expectedRevision:this.snapshot.revision,schemaVersion:1,payload}
   this.storage.setItem(this.pendingKey(),JSON.stringify(pending))
@@ -51,7 +50,7 @@ export class CloudSave {
   const pending=JSON.parse(raw) as Pending
   const me=await this.call('/api/me')
   if(me.playerId!==pending.playerId||me.playerId!==this.playerId)throw new CloudError('Account changed. Check account before retrying.')
-  const receipt=await this.call('/api/save',{method:'PUT',body:JSON.stringify(pending)})
+  const receipt=await this.call('/api/preferences',{method:'PUT',body:JSON.stringify(pending)})
   await this.refresh()
   if(this.playerId!==pending.playerId)throw new CloudError('Account changed during saving. Reload to continue.',409)
   if(this.snapshot?.revision!==receipt.revision)throw new CloudError('Progress changed on another device. Reload the latest account save.',409)
@@ -59,23 +58,5 @@ export class CloudSave {
   this.status='Progress saved.'
  }
  discardPending(){this.storage.removeItem(this.pendingKey());this.snapshot=null;this.status='Pending upload discarded locally. Check cloud before another upload.'}
- async restore(){
-  if(this.pending)throw new CloudError('Resolve the interrupted upload before restoring.')
-  const account=this.playerId,revision=this.snapshot?.revision
-  await this.refresh()
-  if(account!==this.playerId||revision!==this.snapshot?.revision)throw new CloudError('Cloud save changed. Review it and confirm restore again.')
-  const payload=this.snapshot?.payload
-  if(!payload||!validLegacySave(payload))throw new CloudError('No compatible cloud backup to restore.')
-  const old=this.storage.getItem(LOCAL_SAVE_KEY)
-  // If backup storage fails, abort before replacing the active save.
-  if(old!==null)this.storage.setItem(LOCAL_BACKUP_KEY,old)
-  this.storage.setItem(LOCAL_SAVE_KEY,JSON.stringify(payload))
- }
- restoreLocalBackup(){
-  const backup=this.storage.getItem(LOCAL_BACKUP_KEY)
-  if(!backup||!validLegacySave(JSON.parse(backup)))throw new CloudError('No compatible pre-restore backup on this device.')
-  // Keep the recovery copy intact; no second write can fail after replacement.
-  this.storage.setItem(LOCAL_SAVE_KEY,backup)
- }
  async logout(all=false){await this.call(all?'/api/auth/logout-all':'/api/auth/logout',{method:'POST'});this.playerId=null;this.snapshot=null;this.balance=0;this.status='Signed out.'}
 }

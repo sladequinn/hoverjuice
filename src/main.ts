@@ -105,10 +105,7 @@ window.addEventListener('keydown', (e) => {
     if (k === 'f') game.refuel()
     if (k === 't') game.tow()
     if (k === 'v') game.cycleCamera()
-    if (k === 'q') game.overclock()
     if (k === 'r') game.openDealer()
-    if (k === 'b') game.stash()
-    if (k === 'u') game.stash(true)
   }
   if ([' ', 'arrowup', 'arrowdown'].includes(k)) e.preventDefault()
 })
@@ -137,7 +134,6 @@ document.querySelectorAll<HTMLElement>('[data-tap]').forEach((el) =>
     else if (a === 'prompt') game.promptAction()
     else if (a === 'cam') game.cycleCamera()
     else if (a === 'map') game.toggleMap()
-    else if (a === 'overclock') game.overclock()
     else game.openModal(a)
   }),
 )
@@ -288,7 +284,7 @@ $('online-sign-in').addEventListener('click',()=>location.assign('/api/auth/goog
 $('online-retry').addEventListener('click',async()=>{await game.online.heartbeat();game.multiplayer?.reconnect();accountUI()})
 function loadLatest(){
   if(!confirm('Load the latest account save? Unsynced changes on this device will be archived for recovery.'))return
-  if(game.cloud.playerId){const key=`hoverghini.cloud.pending.${game.cloud.playerId}`,pending=localStorage.getItem(key);localStorage.setItem(key+'.conflict.'+Date.now(),JSON.stringify({pending:pending?JSON.parse(pending):null,campaign:game.save}));localStorage.removeItem(key)}
+  if(game.cloud.playerId){const key=`hoverghini.preferences.pending.${game.cloud.playerId}`,pending=localStorage.getItem(key);localStorage.setItem(key+'.conflict.'+Date.now(),JSON.stringify({pending:pending?JSON.parse(pending):null,preferences:game.save}));localStorage.removeItem(key)}
   location.reload()
 }
 $('online-reload').addEventListener('click',loadLatest)

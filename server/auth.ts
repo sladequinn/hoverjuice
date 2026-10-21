@@ -8,11 +8,10 @@ export async function issueSession(db:D1Database,subject:string,provider:'github
   db.prepare(`INSERT INTO players(id,created_at) SELECT ?,? WHERE NOT EXISTS(SELECT 1 FROM identities WHERE provider=? AND subject=?)`).bind(playerId,now,provider,subject),
   db.prepare(`INSERT INTO identities(provider,subject,player_id) VALUES(?,?,?) ON CONFLICT(provider,subject) DO NOTHING`).bind(provider,subject,playerId),
   db.prepare(`INSERT INTO wallets(player_id) SELECT player_id FROM identities WHERE provider=? AND subject=? ON CONFLICT(player_id) DO NOTHING`).bind(provider,subject),
-  db.prepare(`INSERT INTO legacy_saves(player_id,updated_at) SELECT player_id,? FROM identities WHERE provider=? AND subject=? ON CONFLICT(player_id) DO NOTHING`).bind(now,provider,subject),
   db.prepare(`INSERT INTO sessions(token_hash,player_id,expires_at) SELECT ?,player_id,? FROM identities WHERE provider=? AND subject=?`).bind(await hash(secret),now+lifetime*1000,provider,subject),
   db.prepare(`SELECT player_id FROM identities WHERE provider=? AND subject=?`).bind(provider,subject)
  ])
- return {secret,playerId:(result[5].results[0] as {player_id:string}).player_id}
+ return {secret,playerId:(result[result.length-1].results[0] as {player_id:string}).player_id}
 }
 export async function authenticate(request:Request,db:D1Database){
  const secret=cookie(request,sessionCookie)

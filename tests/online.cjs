@@ -23,13 +23,13 @@ const assert=require('node:assert/strict');
    if(path==='/api/me')return reply({playerId:'test-player',displayName:state.name,providers:['google']});
    if(path==='/api/wallet')return reply({playerId:'test-player',balance:0});
    if(path==='/api/multiplayer/profile'){state.name=request.postDataJSON().name;return reply({name:state.name})}
-   if(path==='/api/save'){
+   if(path==='/api/preferences'){
     if(request.method()==='PUT'){
      const body=request.postDataJSON();writes.push(body);
      if(body.expectedRevision!==state.revision)return reply({error:'Changed on another device'},409);
      state.revision++;state.payload=body.payload;return reply({revision:state.revision});
     }
-    return reply({playerId:'test-player',mode:'legacy-local',schemaVersion:1,revision:state.revision,payload:state.payload,updatedAt:1});
+    return reply({playerId:'test-player',mode:'preferences',schemaVersion:1,revision:state.revision,payload:state.payload,updatedAt:1});
    }
    return reply({enabled:false});
   });
@@ -40,7 +40,7 @@ const assert=require('node:assert/strict');
   assert.equal(await page.locator('#btn-continue').isVisible(),false);
   await page.evaluate(()=>window.hoverghini.warp('Unauthenticated',43.45,-80.49));
   assert.equal(await page.evaluate(()=>window.hoverghini.world),null);
-  assert.equal(await page.evaluate(()=>window.hoverghini.save.money),150);
+  assert.equal(await page.evaluate(()=>window.hoverghini.save.money),undefined);
   mkdirSync('.test-artifacts',{recursive:true});
   await page.screenshot({path:'.test-artifacts/google-signin-mobile.png'});
   await page.locator('#btn-new').click();await page.waitForURL('**/api/auth/google/login');
@@ -52,23 +52,33 @@ const assert=require('node:assert/strict');
   await page.evaluate(()=>window.hoverghini.warp('Map outage',43.45,-80.49));
   assert.equal(await page.evaluate(()=>window.hoverghini.world),null);
   assert.equal(await page.locator('#btn-load-sim').isVisible(),false);
+  // Retired campaign actions and screens cannot create balances, inventory or claims.
+  const economyUI=await page.evaluate(()=>{
+   const g=window.hoverghini;
+   for(const action of ['cheat','buy-landmark','buy-home','buy-good','sell-good','upgrade','test-hoverghini','challenge','stash','withdraw','accept','tutorial-sale'])g.onAction(action,'hoverghini');
+   const html=['menu','garage','help','tutorial','properties'].map(view=>g.renderView(view)).join('');
+   return {keys:Object.keys(g.save).sort(),html};
+  });
+  assert.deepEqual(economyUI.keys,['allegiance','cam','city','current','mask','paint','safehouse']);
+  assert.doesNotMatch(economyUI.html,/data-act="(?:cheat|buy-home|buy-landmark|buy-vehicle|upgrade|buy-good|sell-good|stash|withdraw|challenge)"/);
+  assert.match(economyUI.html,/No starting cash is required/);
   // Account progress automatically persists without writing the retired local-save key.
-  await page.evaluate(async()=>{const g=window.hoverghini;g.save.money=250;g.save.city={name:'Kitchener',lat:43.45,lon:-80.49};g.persist();await g.online.flush()});
-  assert.equal(state.payload.money,250);assert.equal(state.revision,1);
+  await page.evaluate(async()=>{const g=window.hoverghini;g.save.paint='steel';g.save.city={name:'Kitchener',lat:43.45,lon:-80.49};g.persist();await g.online.flush()});
+  assert.equal(state.payload.paint,'steel');assert.equal(state.revision,1);
   assert.equal(await page.evaluate(()=>JSON.parse(localStorage.getItem('hoverghini.save.v1')).money),9999999);
   await page.reload();await page.waitForFunction(()=>window.hoverghini?.online.ready);
-  assert.equal(await page.evaluate(()=>window.hoverghini.save.money),250);
+  assert.equal(await page.evaluate(()=>window.hoverghini.save.paint),'steel');
   assert.ok(await page.locator('#btn-continue').isVisible());
   for(const [name,width,height] of [['mobile',390,844],['desktop',1440,900]]){
    await page.setViewportSize({width,height});await page.screenshot({path:`.test-artifacts/online-account-${name}.png`});
    const bounds=await page.locator('#btn-new').boundingBox();assert.ok(bounds.y>=0&&bounds.y+bounds.height<=height,'account controls fit viewport');
   }
   state.available=false;await page.evaluate(()=>window.hoverghini.online.heartbeat());assert.equal(await page.evaluate(()=>window.hoverghini.online.ready),false);
-  const previous=writes.length;await page.evaluate(()=>{const g=window.hoverghini;g.save.money=999;g.persist()});assert.equal(writes.length,previous);
+  const previous=writes.length;await page.evaluate(()=>{const g=window.hoverghini;g.save.paint='rust';g.persist()});assert.equal(writes.length,previous);
   state.available=true;await page.evaluate(()=>window.hoverghini.online.heartbeat());assert.equal(await page.evaluate(()=>window.hoverghini.online.ready),true);
-  state.revision++;state.payload.money=500;
-  await page.evaluate(async()=>{const g=window.hoverghini;g.save.money=300;g.persist();await g.online.flush()});
-  assert.equal(await page.evaluate(()=>window.hoverghini.online.conflict),true);assert.equal(state.payload.money,500);
+  state.revision++;state.payload.paint='bone';
+  await page.evaluate(async()=>{const g=window.hoverghini;g.save.paint='olive';g.persist();await g.online.flush()});
+  assert.equal(await page.evaluate(()=>window.hoverghini.online.conflict),true);assert.equal(state.payload.paint,'bone');
   // Independently test simulation suspension. Keep the title visible so rendering cannot access the sentinel world.
   const stopped=await page.evaluate(()=>{const g=window.hoverghini;let updates=0;g.world={};g.multiplayer={connection:{connected:false},update(){updates++}};g.player.pos.set(10,2,10);g.update(1,{throttle:1,brake:0,steer:0,boost:false,up:false,down:false});g.world=null;g.multiplayer=null;return {updates,x:g.player.pos.x}});
   assert.equal(stopped.x,10);assert.equal(stopped.updates,1);

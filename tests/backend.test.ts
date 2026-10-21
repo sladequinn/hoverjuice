@@ -9,7 +9,7 @@ import {transactWallet} from '../server/wallet'
 import {cleanup} from '../server/foundation'
 import {readSave,writeSave} from '../server/saves'
 
-export const sample={money:150,owned:['board'],current:'board',holdings:[],city:{name:'Kitchener',lat:43.45,lon:-80.49},masks:['balaclava'],mask:'balaclava',vaultCash:0,contraband:{},tutorial:{stage:'skipped'}}
+export const sample={current:'board',mask:'balaclava',paint:'factory',allegiance:'SHINOBI',city:{name:'Kitchener',lat:43.45,lon:-80.49},safehouse:null,cam:'chase'}
 let mf:Miniflare,db:D1Database
 const origin='https://game.test'
 const env=()=>({DB:db,APP_ORIGIN:origin,ALLOWED_ORIGIN:origin,BACKEND_ENABLED:'true',GITHUB_CLIENT_ID:'test-id',GITHUB_CLIENT_SECRET:'test-secret'} as any)
@@ -19,7 +19,7 @@ const saveInput=(playerId:string,revision=0,payload:any=sample)=>({playerId,sche
 before(async()=>{
  mf=new Miniflare(convertV4MiniflareOptions({workers:[{name:'test',modules:true,script:'export default {fetch(){return new Response("ok")}}',compatibilityDate:'2026-10-01',d1Databases:['DB']}]}))
  db=await mf.getD1Database('DB') as unknown as D1Database
- for(const name of ['0000_existing_scaffolding','0001_foundation','0002_multiplayer','0003_global_properties','0006_google_auth']){
+ for(const name of ['0000_existing_scaffolding','0001_foundation','0002_multiplayer','0003_global_properties','0006_google_auth','0007_preferences']){
   const sql=readFileSync(new URL(`../server/migrations/${name}.sql`,import.meta.url),'utf8').replace(/^--.*$/gm,'')
   for(const statement of sql.split(/;\s*(?=CREATE|INSERT INTO property_catalog_clock|$)/).map(s=>s.trim()).filter(Boolean))await db.prepare(statement).run()
  }
@@ -79,48 +79,48 @@ test('CSRF, wrong host, disabled backend and logout-all fail closed',async()=>{
  assert.match(res.headers.get('Set-Cookie')!,/Max-Age=0/)
  for(const session of [a,b])assert.equal((await api.fetch(req('/api/me',session.secret),env())).status,401)
 })
-test('save persistence survives new session, isolates players and never credits imported money',async()=>{
- const subject=crypto.randomUUID(),a=await issueSession(db,subject),b=await create(),input=saveInput(a.playerId,0,{...sample,money:999999999,vaultCash:888888888})
- assert.equal((await api.fetch(req('/api/save',a.secret,'PUT',input),env())).status,200)
+test('save persistence survives new session, isolates players and does not change wallet funds',async()=>{
+ const subject=crypto.randomUUID(),a=await issueSession(db,subject),b=await create(),input=saveInput(a.playerId,0,{...sample,paint:'petrol'})
+ assert.equal((await api.fetch(req('/api/preferences',a.secret,'PUT',input),env())).status,200)
  const again=await issueSession(db,subject)
- const saved=await (await api.fetch(req('/api/save',again.secret),env())).json() as any
- assert.equal(saved.payload.money,999999999);assert.equal(saved.revision,1)
+ const saved=await (await api.fetch(req('/api/preferences',again.secret),env())).json() as any
+ assert.equal(saved.payload.paint,'petrol');assert.equal(saved.revision,1)
  assert.equal((await readSave(db,b.playerId)).payload,null)
- assert.equal((await api.fetch(req('/api/save',b.secret,'PUT',input),env())).status,400)
+ assert.equal((await api.fetch(req('/api/preferences',b.secret,'PUT',input),env())).status,400)
  const wallet=await (await api.fetch(req('/api/wallet',a.secret),env())).json() as any
  assert.equal(wallet.balance,0)
  for(const path of ['/api/wallet','/api/wallet/reward','/api/ownership'])assert.ok((await api.fetch(req(path,a.secret,'POST',{balance:999,delta:999,reward:999}),env())).status>=400)
 })
 test('save optimistic concurrency, exact retries, key mismatch and lost-response recovery',async()=>{
- const a=await create(),one=saveInput(a.playerId),two=saveInput(a.playerId,0,{...sample,money:500})
- const responses=await Promise.all([api.fetch(req('/api/save',a.secret,'PUT',one),env()),api.fetch(req('/api/save',a.secret,'PUT',two),env())])
+ const a=await create(),one=saveInput(a.playerId),two=saveInput(a.playerId,0,{...sample,paint:'bone'})
+ const responses=await Promise.all([api.fetch(req('/api/preferences',a.secret,'PUT',one),env()),api.fetch(req('/api/preferences',a.secret,'PUT',two),env())])
  assert.deepEqual(responses.map(r=>r.status).sort(),[200,409])
  const winner=responses[0].status===200?one:two
  // Discard successful response and retry, including after another save.
  assert.equal((await writeSave(db,a.playerId,winner)).revision,1)
- await writeSave(db,a.playerId,saveInput(a.playerId,1,{...sample,money:800}))
+ await writeSave(db,a.playerId,saveInput(a.playerId,1,{...sample,paint:'olive'}))
  assert.equal((await writeSave(db,a.playerId,winner)).revision,1)
  assert.equal((await readSave(db,a.playerId)).revision,2)
- await assert.rejects(()=>writeSave(db,a.playerId,{...winner,payload:{...sample,money:1}}),/different data/)
+ await assert.rejects(()=>writeSave(db,a.playerId,{...winner,payload:{...sample,paint:'amber'}}),/different data/)
 })
 test('failed save batch rolls back receipt and payload, then exact request recovers',async()=>{
  const a=await create(),input=saveInput(a.playerId)
- await db.prepare(`CREATE TRIGGER fail_save BEFORE UPDATE ON legacy_saves BEGIN SELECT RAISE(ABORT,'injected failure'); END`).run()
+ await db.prepare(`CREATE TRIGGER fail_save BEFORE UPDATE ON driver_preferences BEGIN SELECT RAISE(ABORT,'injected failure'); END`).run()
  try{
-  assert.equal((await api.fetch(req('/api/save',a.secret,'PUT',input),env())).status,503)
+  assert.equal((await api.fetch(req('/api/preferences',a.secret,'PUT',input),env())).status,503)
   assert.equal((await readSave(db,a.playerId)).revision,0)
-  assert.equal((await db.prepare('SELECT count(*) AS n FROM save_receipts WHERE player_id=?').bind(a.playerId).first<any>()).n,0)
+  assert.equal((await db.prepare('SELECT count(*) AS n FROM preference_receipts WHERE player_id=?').bind(a.playerId).first<any>()).n,0)
  }finally{await db.prepare('DROP TRIGGER fail_save').run()}
  assert.equal((await writeSave(db,a.playerId,input)).revision,1)
 })
 test('save validation rejects malformed, excessive, unsafe, foreign and future schemas',async()=>{
  const a=await create(),valid=saveInput(a.playerId)
- for(const body of [{...valid,schemaVersion:2},{...valid,payload:{...sample,owned:null}},{...valid,payload:{...sample,current:'" onclick="bad'}},{...valid,payload:{...sample,city:{name:'X',lat:999,lon:1}}},{...valid,balance:1}])assert.equal((await api.fetch(req('/api/save',a.secret,'PUT',body),env())).status,400)
- const malformed=new Request(origin+'/api/save',{method:'PUT',headers:{Cookie:`${sessionCookie}=${a.secret}`,Origin:origin,'Content-Type':'application/json'},body:'{'})
+ for(const body of [{...valid,schemaVersion:2},{...valid,payload:{...sample,owned:null}},{...valid,payload:{...sample,current:'" onclick="bad'}},{...valid,payload:{...sample,city:{name:'X',lat:999,lon:1}}},{...valid,balance:1}])assert.equal((await api.fetch(req('/api/preferences',a.secret,'PUT',body),env())).status,400)
+ const malformed=new Request(origin+'/api/preferences',{method:'PUT',headers:{Cookie:`${sessionCookie}=${a.secret}`,Origin:origin,'Content-Type':'application/json'},body:'{'})
  assert.equal((await api.fetch(malformed,env())).status,400)
- const oversized=new Request(origin+'/api/save',{method:'PUT',headers:{Cookie:`${sessionCookie}=${a.secret}`,Origin:origin,'Content-Type':'application/json'},body:' '.repeat(131073)})
+ const oversized=new Request(origin+'/api/preferences',{method:'PUT',headers:{Cookie:`${sessionCookie}=${a.secret}`,Origin:origin,'Content-Type':'application/json'},body:' '.repeat(131073)})
  assert.equal((await api.fetch(oversized,env())).status,413)
- const wrongType=req('/api/save',a.secret,'PUT',valid);wrongType.headers.set('Content-Type','text/plain')
+ const wrongType=req('/api/preferences',a.secret,'PUT',valid);wrongType.headers.set('Content-Type','text/plain')
  assert.equal((await api.fetch(wrongType,env())).status,415)
  assert.equal((await readSave(db,a.playerId)).revision,0)
 })
@@ -165,7 +165,21 @@ test('cleanup removes expired credentials and rate buckets; responses prevent ca
 test('rate limits return 429 without changing the save and include retry guidance',async()=>{
  const a=await create(),bucket=`player:${a.playerId}:${Math.floor(Date.now()/60000)}`
  await db.prepare('INSERT INTO request_limits VALUES(?,120,?)').bind(bucket,Date.now()+120000).run()
- const response=await api.fetch(req('/api/save',a.secret,'PUT',saveInput(a.playerId)),env())
+ const response=await api.fetch(req('/api/preferences',a.secret,'PUT',saveInput(a.playerId)),env())
  assert.equal(response.status,429);assert.equal(response.headers.get('Retry-After'),'60')
  assert.equal((await readSave(db,a.playerId)).revision,0)
+})
+
+test('retired campaign endpoint rejects old clients and preferences cannot import economic state',async()=>{
+ const a=await create()
+ await db.prepare("INSERT OR REPLACE INTO legacy_saves(player_id,payload,updated_at) VALUES(?,?,?)").bind(a.playerId,JSON.stringify({money:999999999,owned:['hoverghini'],holdings:[{id:'osm:way:123'}]}),Date.now()).run()
+ assert.equal((await readSave(db,a.playerId)).payload,null)
+ for(const method of ['GET','PUT'])assert.equal((await api.fetch(req('/api/save',a.secret,method,method==='PUT'?saveInput(a.playerId):undefined),env())).status,410)
+ for(const [key,value] of Object.entries({money:999999999,balance:999999999,owned:['hoverghini'],holdings:[{id:'osm:way:123'}],homes:[],builds:{board:{drive:3}},contraband:{cyanade:100},vaultCash:10000,earned:1000,deliveries:100,won:true})){
+  assert.equal((await api.fetch(req('/api/preferences',a.secret,'PUT',saveInput(a.playerId,0,{...sample,[key]:value})),env())).status,400,key)
+ }
+ assert.equal((await readSave(db,a.playerId)).revision,0)
+ assert.equal((await db.prepare('SELECT balance FROM wallets WHERE player_id=?').bind(a.playerId).first<any>()).balance,0)
+ assert.equal((await db.prepare('SELECT count(*) AS n FROM wallet_ledger WHERE player_id=?').bind(a.playerId).first<any>()).n,0)
+ assert.ok((await db.prepare('SELECT payload FROM legacy_saves WHERE player_id=?').bind(a.playerId).first<any>()).payload.includes('999999999'))
 })

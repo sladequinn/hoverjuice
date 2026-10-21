@@ -3,14 +3,14 @@ import {authenticate,authRoute,type AuthEnv} from './auth'
 import {cookie,hash,HttpError,limit,readJson,sameOrigin,sessionCookie,setCookie} from './security'
 import {readSave,writeSave} from './saves'
 export interface FoundationEnv extends AuthEnv {BACKEND_ENABLED?:string}
-const paths=new Set(['/api/auth/login','/api/auth/providers','/api/auth/google/login','/api/auth/google/callback','/api/auth/google/link','/api/auth/github/login','/api/auth/callback','/api/auth/logout','/api/auth/logout-all','/api/me','/api/save','/api/wallet'])
+const paths=new Set(['/api/auth/login','/api/auth/providers','/api/auth/google/login','/api/auth/google/callback','/api/auth/google/link','/api/auth/github/login','/api/auth/callback','/api/auth/logout','/api/auth/logout-all','/api/me','/api/save','/api/preferences','/api/wallet'])
 export function foundationPath(path:string){return paths.has(path)}
 export async function foundation(request:Request,env:FoundationEnv){
  if(env.BACKEND_ENABLED!=='true')throw new HttpError(503,'Cloud accounts are not enabled on this host')
  const origin=env.APP_ORIGIN
  if(!origin||new URL(origin).origin!==origin||!origin.startsWith('https://')||new URL(request.url).origin!==origin)throw new HttpError(503,'Cloud accounts require the configured HTTPS game origin')
  const url=new URL(request.url),path=url.pathname
- const method=path==='/api/save'?['GET','PUT']:path==='/api/auth/logout'||path==='/api/auth/logout-all'||path==='/api/auth/google/link'?['POST']:['GET']
+ const method=(path==='/api/save'||path==='/api/preferences')?['GET','PUT']:path==='/api/auth/logout'||path==='/api/auth/logout-all'||path==='/api/auth/google/link'?['POST']:['GET']
  if(!method.includes(request.method))throw new HttpError(405,'Method not allowed')
  if(request.method!=='GET')sameOrigin(request,origin)
  if(path==='/api/auth/providers')return Response.json({google:!!(env.GOOGLE_CLIENT_ID&&env.GOOGLE_CLIENT_SECRET),github:!!(env.GITHUB_CLIENT_ID&&env.GITHUB_CLIENT_SECRET),onlineOnly:true})
@@ -36,6 +36,7 @@ export async function foundation(request:Request,env:FoundationEnv){
   if(!wallet)throw new HttpError(503,'Wallet unavailable')
   return Response.json({playerId:player,currency:'HG',unit:'minor',...wallet})
  }
+ if(path==='/api/save')throw new HttpError(410,'Campaign saves are retired. Reload the online game.')
  if(request.method==='GET')return Response.json(await readSave(env.DB,player))
  return Response.json(await writeSave(env.DB,player,await readJson(request)))
 }
