@@ -46,7 +46,7 @@ const assert=require('node:assert/strict');
   await page.screenshot({path:'.test-artifacts/google-signin-mobile.png'});
   await page.locator('#btn-new').click();await page.waitForURL('**/api/auth/google/login');
   state.signedIn=true;await page.goto(url);await page.waitForFunction(()=>window.hoverghini?.online.ready&&window.hoverghini?.street.ready);
-  assert.ok(await page.locator('#driver-profile').isVisible());
+  await page.locator('#driver-profile').waitFor({state:'visible'});
   await page.locator('#driver-name').fill('Night Driver');await page.locator('#btn-new').click();
   await page.waitForFunction(()=>window.hoverghini.online.displayName==='Night Driver');assert.equal(state.name,'Night Driver');
   // Deliberately unavailable maps must not turn into a playable offline grid.
@@ -70,7 +70,7 @@ const assert=require('node:assert/strict');
   assert.equal(await page.evaluate(()=>JSON.parse(localStorage.getItem('hoverghini.save.v1')).money),9999999);
   await page.reload();await page.waitForFunction(()=>window.hoverghini?.online.ready&&window.hoverghini?.street.ready);
   assert.equal(await page.evaluate(()=>window.hoverghini.save.paint),'factory','Appearance preferences cannot grant equipment');
-  assert.ok(await page.locator('#btn-continue').isVisible());
+  await page.locator('#btn-continue').waitFor({state:'visible'});
   for(const [name,width,height] of [['mobile',390,844],['desktop',1440,900]]){
    await page.setViewportSize({width,height});await page.screenshot({path:`.test-artifacts/online-account-${name}.png`});
    const bounds=await page.locator('#btn-new').boundingBox();assert.ok(bounds.y>=0&&bounds.y+bounds.height<=height,'account controls fit viewport');
