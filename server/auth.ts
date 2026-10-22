@@ -1,18 +1,17 @@
 import {challenge,cookie,hash,HttpError,sessionCookie,setCookie,stateCookie,token} from './security'
-export interface AuthEnv {DB:D1Database;APP_ORIGIN:string;GITHUB_CLIENT_ID:string;GITHUB_CLIENT_SECRET:string}
+export interface AuthEnv {DB:D1Database;APP_ORIGIN:string;GITHUB_CLIENT_ID?:string;GITHUB_CLIENT_SECRET?:string;GOOGLE_CLIENT_ID?:string;GOOGLE_CLIENT_SECRET?:string}
 const lifetime=60*60*24*30
 /** A provider subject, never a login name or unverified email, owns a persistent UUID. */
-export async function issueSession(db:D1Database,subject:string){
+export async function issueSession(db:D1Database,subject:string,provider:'github'|'google'='github'){
  const playerId=crypto.randomUUID(),secret=token(),now=Date.now()
  const result=await db.batch([
-  db.prepare(`INSERT INTO players(id,created_at) SELECT ?,? WHERE NOT EXISTS(SELECT 1 FROM identities WHERE provider='github' AND subject=?)`).bind(playerId,now,subject),
-  db.prepare(`INSERT INTO identities(provider,subject,player_id) VALUES('github',?,?) ON CONFLICT(provider,subject) DO NOTHING`).bind(subject,playerId),
-  db.prepare(`INSERT INTO wallets(player_id) SELECT player_id FROM identities WHERE provider='github' AND subject=? ON CONFLICT(player_id) DO NOTHING`).bind(subject),
-  db.prepare(`INSERT INTO legacy_saves(player_id,updated_at) SELECT player_id,? FROM identities WHERE provider='github' AND subject=? ON CONFLICT(player_id) DO NOTHING`).bind(now,subject),
-  db.prepare(`INSERT INTO sessions(token_hash,player_id,expires_at) SELECT ?,player_id,? FROM identities WHERE provider='github' AND subject=?`).bind(await hash(secret),now+lifetime*1000,subject),
-  db.prepare(`SELECT player_id FROM identities WHERE provider='github' AND subject=?`).bind(subject)
+  db.prepare(`INSERT INTO players(id,created_at) SELECT ?,? WHERE NOT EXISTS(SELECT 1 FROM identities WHERE provider=? AND subject=?)`).bind(playerId,now,provider,subject),
+  db.prepare(`INSERT INTO identities(provider,subject,player_id) VALUES(?,?,?) ON CONFLICT(provider,subject) DO NOTHING`).bind(provider,subject,playerId),
+  db.prepare(`INSERT INTO wallets(player_id) SELECT player_id FROM identities WHERE provider=? AND subject=? ON CONFLICT(player_id) DO NOTHING`).bind(provider,subject),
+  db.prepare(`INSERT INTO sessions(token_hash,player_id,expires_at) SELECT ?,player_id,? FROM identities WHERE provider=? AND subject=?`).bind(await hash(secret),now+lifetime*1000,provider,subject),
+  db.prepare(`SELECT player_id FROM identities WHERE provider=? AND subject=?`).bind(provider,subject)
  ])
- return {secret,playerId:(result[5].results[0] as {player_id:string}).player_id}
+ return {secret,playerId:(result[result.length-1].results[0] as {player_id:string}).player_id}
 }
 export async function authenticate(request:Request,db:D1Database){
  const secret=cookie(request,sessionCookie)
@@ -24,7 +23,7 @@ export async function authenticate(request:Request,db:D1Database){
 export async function authRoute(request:Request,env:AuthEnv,upstream:typeof fetch=fetch){
  if(!env.GITHUB_CLIENT_ID||!env.GITHUB_CLIENT_SECRET)throw new HttpError(503,'Sign-in is not configured')
  const url=new URL(request.url),callback=`${env.APP_ORIGIN}/api/auth/callback`
- if(url.pathname==='/api/auth/login'){
+ if(url.pathname==='/api/auth/github/login'){
   const state=token(),verifier=token()
   await env.DB.prepare('INSERT INTO oauth_attempts VALUES(?,?,?)').bind(await hash(state),verifier,Date.now()+600000).run()
   const target=new URL('https://github.com/login/oauth/authorize')

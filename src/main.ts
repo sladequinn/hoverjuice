@@ -84,7 +84,7 @@ const touch = { up: false, down: false, left: false, right: false, boost: false,
 const stick = { x: 0, y: 0, active: false }
 
 window.addEventListener('keydown', (e) => {
-  if ((e.target as HTMLElement).tagName === 'INPUT') return
+  if ((e.target as HTMLElement).tagName === 'INPUT'||!game.playable) return
   const k = e.key.toLowerCase()
   keys.add(k)
   if (e.repeat) return
@@ -105,10 +105,7 @@ window.addEventListener('keydown', (e) => {
     if (k === 'f') game.refuel()
     if (k === 't') game.tow()
     if (k === 'v') game.cycleCamera()
-    if (k === 'q') game.overclock()
     if (k === 'r') game.openDealer()
-    if (k === 'b') game.stash()
-    if (k === 'u') game.stash(true)
   }
   if ([' ', 'arrowup', 'arrowdown'].includes(k)) e.preventDefault()
 })
@@ -131,12 +128,12 @@ document.querySelectorAll<HTMLElement>('[data-touch]').forEach((el) => {
 })
 document.querySelectorAll<HTMLElement>('[data-tap]').forEach((el) =>
   el.addEventListener('click', () => {
+    if(!game.playable)return
     const a = el.dataset.tap!
     if (a === 'mode') game.toggleMode()
     else if (a === 'prompt') game.promptAction()
     else if (a === 'cam') game.cycleCamera()
     else if (a === 'map') game.toggleMap()
-    else if (a === 'overclock') game.overclock()
     else game.openModal(a)
   }),
 )
@@ -228,20 +225,85 @@ const alley=new AlleyPreview()
 let menuFrame=0
 renderTitle = () => { if(title.classList.contains('show')){alley.resize(innerWidth,innerHeight);alley.render(renderer,performance.now()/1000)} }
 renderTitle()
-const cont = $('btn-continue')
-if (game.hasSave) {
-  cont.style.display = ''
-  cont.textContent = `Continue in ${game.save.city!.name}`
-  cont.addEventListener('click', () => {
-    title.classList.remove('show')
-    const c = game.save.city!
-    void game.warp(c.name, c.lat, c.lon)
-  })
+const cont = $<HTMLButtonElement>('btn-continue')
+const enter = $<HTMLButtonElement>('btn-new')
+const accountStatus=$('account-status')
+let booted=false,booting=false
+let googleAvailable=false
+function accountUI(){
+  if(game.online.ready&&!booted){game.applyAccountSave();booted=true}
+  const ready=game.online.ready&&game.street.ready
+  enter.textContent=ready?(game.hasSave?'Choose another city':'Enter the city ↗'):game.online.ready?'Loading inventory…':'Continue with Google'
+  enter.disabled=booting||(game.online.ready&&!game.street.ready)||(!game.online.ready&&!googleAvailable)
+  cont.style.display=ready&&game.hasSave?'':'none'
+  cont.textContent=`Continue in ${game.save.city?.name??'the city'}`
+  accountStatus.textContent=game.online.ready&&!game.street.ready?game.street.status:game.online.status
+  $('driver-profile').hidden=!ready||!!game.online.displayName
+  $('account-retry').hidden=ready||game.online.signedOut||game.online.conflict
+  $('account-latest').hidden=!game.online.conflict
+  const blocked=!!game.world&&!game.loading&&!game.playable
+  $('online-blocker').hidden=!blocked
+  $('online-message').textContent=!ready?game.online.status:game.multiplayer?.status??'Connecting to the city…'
+  $('online-sign-in').hidden=!game.online.signedOut
+  $('online-reload').hidden=!game.online.conflict&&!game.multiplayer?.status.includes('ANOTHER TAB')
 }
-$('btn-cloud').addEventListener('click', () => {title.classList.remove('show');game.openModal('cloud')})
-$('btn-new').addEventListener('click', () => {
-  title.classList.remove('show')
-  game.openModal('couch')
+async function bootAccount(){
+  if(booting)return
+  booting=true;accountUI()
+  try{
+    const r=await fetch('/api/auth/providers',{cache:'no-store',signal:AbortSignal.timeout(8000)})
+    if(r.ok)googleAvailable=(await r.json()).google===true
+    await game.online.start()
+    if(game.online.ready&&!booted){game.applyAccountSave();booted=true}
+    if(game.online.ready)await game.street.refresh()
+    if(!game.online.ready&&game.online.signedOut&&!googleAvailable)game.online.status='Google sign-in is being configured. Please try again shortly.'
+  }catch{game.online.offline()}
+  finally{booting=false;accountUI()}
+}
+async function saveDriverName(){
+  if(game.online.displayName)return true
+  const name=($('driver-name') as HTMLInputElement).value.trim()
+  if(!/^[a-zA-Z0-9 ._-]{2,20}$/.test(name)){accountStatus.textContent='Choose a driver name: 2–20 letters, numbers, spaces, dots, underscores or hyphens.';return false}
+  try{
+    const response=await fetch('/api/multiplayer/profile',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name}),signal:AbortSignal.timeout(8000)})
+    if(!response.ok)throw Error('Could not save your driver name. Please retry.')
+    game.online.displayName=name;accountUI();return true
+  }catch(error){accountStatus.textContent=(error as Error).message;return false}
+}
+cont.addEventListener('click',async()=>{
+  if(!game.online.ready||!await saveDriverName())return
+  title.classList.remove('show');const c=game.save.city!;void game.warp(c.name,c.lat,c.lon)
+})
+$('btn-cloud').addEventListener('click',()=>{title.classList.remove('show');game.openModal('cloud')})
+enter.addEventListener('click',async()=>{
+  if(!game.online.ready){if(googleAvailable)location.assign('/api/auth/google/login');return}
+  if(!await saveDriverName())return
+  title.classList.remove('show');game.openModal(game.hasSave?'warp':'couch')
+})
+$('account-retry').addEventListener('click',()=>void bootAccount())
+$('online-sign-in').addEventListener('click',()=>location.assign('/api/auth/google/login'))
+$('online-retry').addEventListener('click',async()=>{await game.online.heartbeat();await game.street.refresh();game.multiplayer?.reconnect();accountUI()})
+function loadLatest(){
+  if(!confirm('Load the latest account save? Unsynced changes on this device will be archived for recovery.'))return
+  if(game.cloud.playerId){const key=`hoverghini.preferences.pending.${game.cloud.playerId}`,pending=localStorage.getItem(key);localStorage.setItem(key+'.conflict.'+Date.now(),JSON.stringify({pending:pending?JSON.parse(pending):null,preferences:game.save}));localStorage.removeItem(key)}
+  location.reload()
+}
+$('online-reload').addEventListener('click',loadLatest)
+$('account-latest').addEventListener('click',loadLatest)
+window.addEventListener('offline',()=>{game.online.offline();accountUI()})
+window.addEventListener('online',()=>{void game.online.heartbeat().then(accountUI)})
+window.addEventListener('beforeunload',e=>{if(game.online.dirty){e.preventDefault();e.returnValue=''}})
+document.addEventListener('visibilitychange',()=>{if(document.hidden&&game.online.ready){game.persist();void game.online.flush()}else if(!document.hidden)void game.online.heartbeat()})
+setInterval(()=>{if(!document.hidden){if(!booted)void bootAccount();else void game.online.heartbeat().then(accountUI)}},10000)
+setInterval(accountUI,1000)
+void bootAccount().then(()=>{
+  const friendCode=new URLSearchParams(location.search).get('join')??sessionStorage.getItem('hoverghini.join')
+  if(friendCode)sessionStorage.setItem('hoverghini.join',friendCode)
+  if(!game.online.ready||!game.online.displayName)return
+  if(friendCode){void game.openFriendInvite(friendCode);return}
+  const invite=crewInvite(location.hash)
+  const city=CITIES.find(c=>c.name.toLowerCase().replace(/ /g,'-')===invite.city.toLowerCase())
+  if(city){title.classList.remove('show');void game.warp(city.name,city.lat,city.lon)}
 })
 
 // ---------- camera ----------
@@ -319,7 +381,7 @@ function updateCamera(dt: number) {
 function frame() {
   const now = performance.now()
   if(title.classList.contains('show')&&!document.hidden&&!game.loading&&now-menuFrame>1000/30){alley.render(renderer,now/1000);menuFrame=now}
-  if(!title.classList.contains('show'))alley.dispose()
+  if(!title.classList.contains('show')&&game.world)alley.dispose()
   if (document.hidden || game.loading || title.classList.contains('show')) { last = now; requestAnimationFrame(frame); return }
   const frameMs = now - last
   const dt = Math.min(frameMs / 1000, 0.05)
@@ -347,10 +409,3 @@ function frame() {
   requestAnimationFrame(frame)
 }
 requestAnimationFrame(frame)
-
-const invite=crewInvite(location.hash)
-const invitedCity=CITIES.find(c=>c.name.toLowerCase().replace(/ /g,'-')===invite.city.toLowerCase())
-if(invitedCity){title.classList.remove('show');void game.warp(invitedCity.name,invitedCity.lat,invitedCity.lon)}
-
-const friendCode=new URLSearchParams(location.search).get('join')??sessionStorage.getItem('hoverghini.join')
-if(friendCode)void game.openFriendInvite(friendCode)

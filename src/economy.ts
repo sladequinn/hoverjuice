@@ -21,10 +21,11 @@ export class Economy {
   if(!this.active&&me.active){this.active=me.active;this.status='Saved freight found. Resume online to restore its controls.'}
   if(this.active&&!me.active&&this.active.status==='active'){this.active=null;this.predicted=null}
   if(this.district){const board=await this.api('board?district='+encodeURIComponent(this.district));this.markets=board.markets;this.shipments=board.shipments;this.fund=board.fund.available}
-  if(!this.pending&&!me.active)this.status='Live market board · sealed consignments, no personal cargo trading'
+  if(!this.pending&&!me.active)this.status='Live freight board · choose a route'
  }catch(e){this.status=(e as Error).message}finally{this.polling=false;this.changed()}}
  private async action(fn:()=>Promise<void>){if(this.busy)return;this.busy=true;try{await fn()}catch(e){this.status=(e as Error).message}finally{this.busy=false;this.changed()}}
  async getQuote(destination:string,commodity:string,competitive:boolean){await this.action(async()=>{this.quote=await this.api('quote',{origin:this.district,destination,commodity,competitive});this.status='Quote ready. Follow the depot waypoint, then load the sealed cargo.'})}
+ async courierQuote(destination:string,mission:string){await this.action(async()=>{this.quote=await this.api('courier/quote',{origin:this.district,destination,mission});this.status='Job reserved for quoting. Drive to the pickup depot, then load the package.'})}
  async start(){await this.action(async()=>{if(!this.quote||this.pending)throw Error('Get a quote or recover your pending load first');const me=await this.api('me');if(me.player!==this.player)throw Error('Account changed; refresh first');const b={playerId:this.player,quoteId:this.quote.id,requestId:crypto.randomUUID()};this.storage.setItem('hoverghini.freight.pending:'+this.player,JSON.stringify(b));this.pending=true;await this.submit(b)})}
  private async submit(b:any){try{this.attach(await this.api('start',b));this.storage.removeItem('hoverghini.freight.pending:'+this.player);this.pending=false;this.quote=null}catch(e){if([400,409].includes((e as any).status)){this.storage.removeItem('hoverghini.freight.pending:'+this.player);this.pending=false}throw e}}
  async retry(){await this.action(async()=>{const me=await this.api('me');if(me.player!==this.player)throw Error('Sign in to the original account to recover this load');const b=this.storage.getItem('hoverghini.freight.pending:'+this.player);if(b)await this.submit(JSON.parse(b))})}

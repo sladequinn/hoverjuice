@@ -16,7 +16,7 @@
     <div id="hud" data-mode="mag">
       <div class="hud-tl panel">
         <div class="row"><img id="mask-portrait" width="44" height="44" alt="Equipped mask" /><div class="brand">HOVERGHINI</div></div><div id="network-status" class="muted small">LOCAL SAVE</div>
-        <div id="money" class="money">$0</div>
+        <div id="money" class="money">Connecting…</div>
         <div id="territory-status" class="territory-status"></div>
         <div id="income" class="muted small income"></div>
         <div class="city"><span id="city-name"></span><span id="city-tag" class="tag"></span></div>
@@ -59,7 +59,6 @@
 
             <button data-touch="rise" class="chip test-flight-only">RISE</button>
             <button data-touch="sink" class="chip test-flight-only">DESCEND</button>
-            <button id="touch-burn" data-tap="overclock" class="chip" hidden>BURN</button>
             <button id="touch-mode" data-tap="mode" class="chip lock-btn" aria-pressed="false">MAG-LOCK</button>
             <button data-touch="boost" class="chip boost-btn"><span>BOOST</span></button>
             <button data-touch="down" class="brk" aria-label="Brake">BRAKE</button>
@@ -81,7 +80,7 @@
         <button id="map-plus" aria-label="Zoom map in">+</button>
       </div>
       <div id="map-selection" class="panel map-selection" hidden></div>
-      <div class="map-attribution">Map data © <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap contributors</a> · <a href="./terrain-credits.html" target="_blank" rel="noopener">Terrain credits</a></div><details class="map-legend panel"><summary>Map key</summary><div class="legend-items"><span>▲ You</span><span style="color:#df8dcc">D Dealer</span><span style="color:#78c6ff">C Contract</span><span style="color:#ffba4b">P Pickup · X Drop-off</span><span style="color:#fff280">W Waypoint</span><span style="color:#94e4b2">H Home</span><span style="color:#00d8e8">F Fuel</span><span>Teal buildings: homes for sale</span><span style="color:#45c4cb">SHINOBI</span><span style="color:#dce0da">LIARS</span><span style="color:#d7a35f">HYENAS</span><span style="color:#c879af">JESTERS</span></div></details>
+      <div class="map-attribution">Map data © <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap contributors</a> · <a href="./terrain-credits.html" target="_blank" rel="noopener">Terrain credits</a></div><details class="map-legend panel"><summary>Map key</summary><div class="legend-items"><span>▲ You</span><span style="color:#df8dcc">D Dealer</span><span style="color:#73ffcb">D Freight / crew gate</span><span>◆ Property title</span><span style="color:#fff280">W Waypoint</span><span style="color:#94e4b2">H Home</span><span style="color:#00d8e8">F Fuel</span><span>Tap buildings to inspect titles</span><span style="color:#45c4cb">SHINOBI</span><span style="color:#dce0da">LIARS</span><span style="color:#d7a35f">HYENAS</span><span style="color:#c879af">JESTERS</span></div></details>
     </div>
 
     <div id="title" class="title show">
@@ -90,12 +89,16 @@
         <p class="kicker">THE STREETS ARE REAL. THE RULES ARE OPTIONAL.</p>
         <h1>HOVER<span>GHINI</span></h1>
         <p class="title-statement">OWN THE NIGHT.</p>
-        <p class="lede">Start on a board. Run the city. Take the keys.</p>
+        <p class="lede">Choose your ride. Run freight. Own a piece of the city.</p>
 
         <div class="title-actions">
           <button id="btn-continue" class="btn buy big" style="display: none"></button>
-          <button id="btn-cloud" class="btn ghost">Account & cloud saves</button>
-          <button id="btn-new" class="btn big">Enter the city ↗</button>
+          <p id="account-status" role="status">Connecting to your account…</p>
+          <label id="driver-profile" hidden>Choose your driver name<input id="driver-name" maxlength="20" autocomplete="nickname" placeholder="Driver name"></label>
+          <button id="btn-cloud" class="btn ghost">Your account</button>
+          <button id="account-latest" class="btn ghost" hidden>Load latest account save</button>
+          <button id="account-retry" class="btn ghost" hidden>Retry connection</button>
+          <button id="btn-new" class="btn big" disabled>Continue with Google</button>
         </div>
 
       </div>
@@ -116,12 +119,18 @@
       <div class="loading-readout"><span id="loading-status" role="status" aria-live="polite"></span><strong id="loading-percent">0%</strong></div>
       <div class="loading-time" id="loading-time"></div>
       <div class="loading-actions">
-        <button id="btn-load-sim" class="btn ghost">Use simulation grid</button>
+        <button id="btn-load-sim" hidden disabled></button>
         <button id="btn-load-cancel" class="btn ghost danger">Cancel</button>
       </div>
       <div class="muted small"><a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">Map data © OpenStreetMap contributors</a> · <a href="./terrain-credits.html" target="_blank" rel="noopener">Terrain credits</a></div>
     </div>
 
     <script type="module" src="/src/main.ts"></script>
+  <section id="online-blocker" hidden aria-label="Connection interrupted" role="dialog" aria-modal="true">
+      <div><h2>City connection paused</h2><p id="online-message" role="status">Reconnecting…</p>
+      <button id="online-retry" class="btn">Retry connection</button>
+      <button id="online-sign-in" class="btn" hidden>Continue with Google</button>
+      <button id="online-reload" class="btn ghost" hidden>Load latest account save</button></div>
+    </section>
   </body>
 </html>

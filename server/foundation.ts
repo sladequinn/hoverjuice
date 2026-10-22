@@ -1,21 +1,23 @@
+import {googleAuth} from './google-auth'
 import {authenticate,authRoute,type AuthEnv} from './auth'
 import {cookie,hash,HttpError,limit,readJson,sameOrigin,sessionCookie,setCookie} from './security'
 import {readSave,writeSave} from './saves'
 export interface FoundationEnv extends AuthEnv {BACKEND_ENABLED?:string}
-const paths=new Set(['/api/auth/login','/api/auth/callback','/api/auth/logout','/api/auth/logout-all','/api/me','/api/save','/api/wallet'])
+const paths=new Set(['/api/auth/login','/api/auth/providers','/api/auth/google/login','/api/auth/google/callback','/api/auth/google/link','/api/auth/github/login','/api/auth/callback','/api/auth/logout','/api/auth/logout-all','/api/me','/api/save','/api/preferences','/api/wallet'])
 export function foundationPath(path:string){return paths.has(path)}
 export async function foundation(request:Request,env:FoundationEnv){
  if(env.BACKEND_ENABLED!=='true')throw new HttpError(503,'Cloud accounts are not enabled on this host')
  const origin=env.APP_ORIGIN
  if(!origin||new URL(origin).origin!==origin||!origin.startsWith('https://')||new URL(request.url).origin!==origin)throw new HttpError(503,'Cloud accounts require the configured HTTPS game origin')
  const url=new URL(request.url),path=url.pathname
- const method=path==='/api/save'?['GET','PUT']:path==='/api/auth/logout'||path==='/api/auth/logout-all'?['POST']:['GET']
+ const method=(path==='/api/save'||path==='/api/preferences')?['GET','PUT']:path==='/api/auth/logout'||path==='/api/auth/logout-all'||path==='/api/auth/google/link'?['POST']:['GET']
  if(!method.includes(request.method))throw new HttpError(405,'Method not allowed')
  if(request.method!=='GET')sameOrigin(request,origin)
- if(path==='/api/auth/login'||path==='/api/auth/callback'){
+ if(path==='/api/auth/providers')return Response.json({google:!!(env.GOOGLE_CLIENT_ID&&env.GOOGLE_CLIENT_SECRET),github:!!(env.GITHUB_CLIENT_ID&&env.GITHUB_CLIENT_SECRET),onlineOnly:true})
+ if(path==='/api/auth/login'||path==='/api/auth/callback'||path==='/api/auth/github/login'||path.startsWith('/api/auth/google/')){
   // Cloudflare supplies this header. Local tests share a bounded fallback bucket.
   await limit(env.DB,`auth:${await hash(request.headers.get('CF-Connecting-IP')??'local')}`,20)
-  return authRoute(request,env)
+  return path==='/api/auth/callback'||path==='/api/auth/github/login'?authRoute(request,env):googleAuth(request,env)
  }
  const player=await authenticate(request,env.DB)
  await limit(env.DB,`player:${player}`,120)
@@ -24,17 +26,22 @@ export async function foundation(request:Request,env:FoundationEnv){
   else await env.DB.prepare('DELETE FROM sessions WHERE token_hash=?').bind(await hash(cookie(request,sessionCookie))).run()
   return Response.json({ok:true},{headers:{'Set-Cookie':setCookie(sessionCookie,'',0)}})
  }
- if(path==='/api/me')return Response.json({playerId:player,saveMode:'legacy-local',walletMode:'server-authoritative'})
+ if(path==='/api/me'){
+  const profile=await env.DB.prepare('SELECT display_name FROM players WHERE id=?').bind(player).first<{display_name:string}>()
+  const identities=await env.DB.prepare('SELECT provider FROM identities WHERE player_id=?').bind(player).all<{provider:string}>()
+  return Response.json({playerId:player,displayName:profile?.display_name??'',providers:identities.results.map(i=>i.provider),saveMode:'account-autosave',walletMode:'server-authoritative'})
+ }
  if(path==='/api/wallet'){
   const wallet=await env.DB.prepare('SELECT balance,version FROM wallets WHERE player_id=?').bind(player).first()
   if(!wallet)throw new HttpError(503,'Wallet unavailable')
   return Response.json({playerId:player,currency:'HG',unit:'minor',...wallet})
  }
+ if(path==='/api/save')throw new HttpError(410,'Campaign saves are retired. Reload the online game.')
  if(request.method==='GET')return Response.json(await readSave(env.DB,player))
  return Response.json(await writeSave(env.DB,player,await readJson(request)))
 }
 export async function cleanup(db:D1Database){
  const now=Date.now()
  // Bounded deletes avoid long-running scheduled transactions. Receipts/ledger retained.
- await db.batch(['sessions','oauth_attempts','request_limits','multiplayer_invites','property_quotes'].map(table=>db.prepare(`DELETE FROM ${table} WHERE rowid IN (SELECT rowid FROM ${table} WHERE expires_at<=? LIMIT 5000)`).bind(now)))
+ await db.batch(['sessions','oauth_attempts','google_oauth_attempts','request_limits','multiplayer_invites','property_quotes'].map(table=>db.prepare(`DELETE FROM ${table} WHERE rowid IN (SELECT rowid FROM ${table} WHERE expires_at<=? LIMIT 5000)`).bind(now)))
 }

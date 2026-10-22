@@ -24,6 +24,8 @@ jobs:
       CF_DATABASE_ID: ${{ vars.CF_DATABASE_ID }}
       CF_DATABASE_NAME: ${{ vars.CF_DATABASE_NAME }}
       APP_ORIGIN: ${{ vars.APP_ORIGIN }}
+      GOOGLE_CLIENT_ID: ${{ vars.GOOGLE_CLIENT_ID }}
+      GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
       OAUTH_CLIENT_ID: ${{ vars.OAUTH_CLIENT_ID }}
       ECONOMY_ENABLED: ${{ vars.ECONOMY_ENABLED }}
       CREWS_ENABLED: ${{ vars.CREWS_ENABLED }}
@@ -37,13 +39,17 @@ jobs:
         with:
           node-version: 24
           cache: npm
+      - run: node scripts/configure-cloud.mjs
+      - name: Verify Google secret
+        run: test -n "$GOOGLE_CLIENT_SECRET" || { echo "Add GOOGLE_CLIENT_SECRET to the selected GitHub environment secrets"; exit 1; }
       - run: npm ci
       - run: npm test
       - run: npm run check:server
       - run: npm run build
       - run: npx playwright install --with-deps chromium
       - run: npm run test:browser
-      - run: node scripts/configure-cloud.mjs
       - run: npx wrangler deploy --config wrangler.toml --dry-run
       - run: npm run migrate:remote
       - run: npx wrangler deploy --config wrangler.toml
+      - name: Configure Google sign-in secret
+        run: printf '%s' "$GOOGLE_CLIENT_SECRET" | npx wrangler secret put GOOGLE_CLIENT_SECRET --config wrangler.toml

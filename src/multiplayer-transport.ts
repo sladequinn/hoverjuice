@@ -30,11 +30,11 @@ export class RealtimeConnection {
   this.inFlight=true
   try{
    const response=await this.deps.fetch('/api/multiplayer/status',{credentials:'same-origin',signal:AbortSignal.timeout(8000)})
-   if(response.status===404){this.deps.status('LOCAL PLAY');return}
+   if(response.status===404){this.deps.status('ONLINE SERVICE UNAVAILABLE');return}
    if(!response.ok)throw Error('Service unavailable')
-   if(!response.headers.get('Content-Type')?.includes('application/json')){this.deps.status('LOCAL PLAY');return}
+   if(!response.headers.get('Content-Type')?.includes('application/json')){this.deps.status('ONLINE SERVICE UNAVAILABLE');return}
    const config=await response.json()
-   if(!config?.enabled){this.deps.status('LOCAL PLAY');return}
+   if(!config?.enabled){this.deps.status('ONLINE SERVICE UNAVAILABLE');return}
    const me=await this.deps.fetch('/api/me',{credentials:'same-origin',signal:AbortSignal.timeout(8000)})
    if(me.status===401){this.deps.status('SIGN IN TO CRUISE');return}
    if(!me.ok)throw Error('Offline')
@@ -77,7 +77,7 @@ export class RealtimeConnection {
   this.send({...this.latest,seq:this.seq++})
  }
  send(data:unknown){if(this.ws?.readyState!==1||this.ws.bufferedAmount>16384)return false;const text=JSON.stringify(data);this.bytesSent+=text.length;this.ws.send(text);return true}
- pause(){this.stopped=true;this.connected=false;if(this.reconnect)clearTimeout(this.reconnect);this.reconnect=null;if(this.timer)clearInterval(this.timer);this.timer=null;const ws=this.ws;this.ws=null;ws?.close(1000,'Paused');this.deps.status('LOCAL PLAY')}
+ pause(){this.stopped=true;this.connected=false;if(this.reconnect)clearTimeout(this.reconnect);this.reconnect=null;if(this.timer)clearInterval(this.timer);this.timer=null;const ws=this.ws;this.ws=null;ws?.close(1000,'Paused');this.deps.status('ONLINE SERVICE UNAVAILABLE')}
  dispose(){this.disposed=true;this.pause()}
  get generation(){return this.epoch}
 }

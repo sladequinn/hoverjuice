@@ -15,3 +15,9 @@ jobs:
       - run: npm run check:cloud
       - run: npx playwright install --with-deps chromium
       - run: npm run test:browser
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: online-browser-screenshots
+          path: .test-artifacts/*.png
+          if-no-files-found: ignore

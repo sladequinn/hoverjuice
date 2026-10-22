@@ -1,3 +1,6 @@
+import {streetMe,streetBoard} from './street'
+import {courierQuote} from './courier'
+import {MISSIONS,exchange} from '../shared/street'
 import {freightPosition} from '../shared/economy'
 import {authenticate,type AuthEnv} from './auth'
 import {HttpError,limit,readJson,sameOrigin} from './security'
@@ -12,6 +15,19 @@ export async function economyHttp(request:Request,env:EconomyHttpEnv){
  if(url.origin!==env.APP_ORIGIN||!env.APP_ORIGIN.startsWith('https://'))throw new HttpError(403,'Wrong origin')
  if(request.method!=='GET')sameOrigin(request,env.APP_ORIGIN)
  const player=await authenticate(request,env.DB);await limit(env.DB,'economy:'+player,90)
+ if(path==='/api/economy/street/me'&&request.method==='GET')return Response.json(await streetMe(env.DB,player))
+ if(path==='/api/economy/street/board'&&request.method==='GET'){
+  const district=url.searchParams.get('district')??'';const rows=await streetBoard(env.DB,district)
+  return Response.json({district,exchange:exchange(district),rows})
+ }
+ if(path==='/api/economy/courier/board'&&request.method==='GET')return Response.json({missions:MISSIONS})
+ if(path==='/api/economy/courier/quote'&&request.method==='POST'){
+  await limit(env.DB,'freight-quote:'+player,6);return Response.json(await courierQuote(env,player,await readJson(request)))
+ }
+ if(['/api/economy/street/quote','/api/economy/street/trade','/api/economy/street/command'].includes(path)&&request.method==='POST'){
+  await limit(env.DB,'street-action:'+player,30)
+  return env.PLAYERS.get(env.PLAYERS.idFromName(player)).fetch('https://player/street-'+path.split('/').at(-1),{method:'POST',body:JSON.stringify({player,body:await readJson(request)})})
+ }
  if(path==='/api/economy/board'&&request.method==='GET'){
   const district=url.searchParams.get('district')!;try{districtBounds(district)}catch{throw new HttpError(400,'Invalid district')}
   const markets=await marketBoard(env.DB,district),member=await env.DB.prepare('SELECT crew_id FROM crew_members WHERE player_id=?').bind(player).first<any>()

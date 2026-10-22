@@ -533,3 +533,16 @@ body.is-touch #combat-status{font-size:9px;line-height:10px}
  .loading-stages{font-size:9px}.loading-readout{font-size:14px}
 }
 @media(prefers-reduced-motion:reduce){#loading-fill{transition:none}#loading-fill:after{animation:none}}
+
+/* Online account admission and connection recovery. */
+#online-blocker:not([hidden]){position:fixed;inset:0;z-index:10000;display:grid;place-items:center;background:rgba(4,9,18,.94);padding:24px}
+#online-blocker>div{max-width:440px;text-align:center}
+#online-blocker .btn{margin:8px}
+#driver-profile{display:grid;gap:8px;font-size:13px;text-align:left}
+#driver-profile[hidden],#online-blocker[hidden],button[hidden]{display:none!important}
+#driver-name{width:100%;padding:12px;border:1px solid #48636a;background:#0b1520;color:#fff;border-radius:8px}
+#account-status{font-size:12px;color:#b4ccd0;max-width:340px;margin:6px auto;min-height:18px}
+.title-actions{flex-direction:column;align-items:stretch;max-width:390px}
+#account-status{margin:0;max-width:none;text-align:left}
+#btn-cloud{order:4}#account-retry,#account-latest{order:3}
+@media(max-width:760px){.title-statement{padding-top:clamp(70px,17vh,160px)}#driver-profile{width:100%}}

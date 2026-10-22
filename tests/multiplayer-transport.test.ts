@@ -6,7 +6,7 @@ import {CELL_PLAYERS,CELLS_WATCHERS} from '../shared/multiplayer'
 const pose={type:'move' as const,v:1 as const,lat:0,lon:0,y:0,clearance:1,yaw:0,vx:0,vz:0,chassis:'board',mask:'balaclava',paint:'factory',boost:false}
 class Socket {readyState=0;bufferedAmount=0;sent:string[]=[];onopen:any;onmessage:any;onclose:any;onerror:any;send(data:string){this.sent.push(data)}close(){this.readyState=3}open(){this.readyState=1;this.onopen()}receive(data:any){this.onmessage({data:JSON.stringify(data)})}}
 function setup(enabled=true,authenticated=true){const sockets:Socket[]=[],status:string[]=[];let calls=0;const c=new RealtimeConnection(pose,{origin:'https://game.test',fetch:async()=>{calls++;return calls%2===1?Response.json({enabled}):new Response('{}',{status:authenticated?200:401})},socket:()=>{const s=new Socket();sockets.push(s);return s as any},status:s=>status.push(s),message:()=>{}});return {c,sockets,status,get calls(){return calls}}}
-test('disabled service and signed-out player leave local play available without sockets',async()=>{for(const enabled of [false,true]){const a=setup(enabled,false);await a.c.start();assert.equal(a.sockets.length,0);assert.match(a.status.at(-1)!,enabled?/SIGN IN/:/LOCAL/);a.c.dispose()}})
+test('disabled service and signed-out player cannot connect without an enabled service and account',async()=>{for(const enabled of [false,true]){const a=setup(enabled,false);await a.c.start();assert.equal(a.sockets.length,0);assert.match(a.status.at(-1)!,enabled?/SIGN IN/:/UNAVAILABLE/);a.c.dispose()}})
 test('one connecting socket; bounded mobile bandwidth and backpressure without blocking sample updates',async()=>{
  const a=setup();await a.c.start();await a.c.start();assert.equal(a.sockets.length,1);const ws=a.sockets[0];ws.open();assert.doesNotThrow(()=>ws.receive(null));a.c.sample(pose)
  ;(a.c as any).tick();for(let i=0;i<20;i++)(a.c as any).tick();assert.equal(ws.sent.length,1);assert.ok(a.c.bytesSent<350)
@@ -32,9 +32,9 @@ test('cell admission enforces publisher and watcher limits and rejects old epoch
  for(let i=0;i<CELLS_WATCHERS;i++)assert.equal((await request('/watch',{id:String(i),epoch:2,lat:50,lon:50})).status,200)
  assert.equal((await request('/watch',{id:'overflow',epoch:2,lat:50,lon:50})).status,429)
 })
-test('static hosts stay local without retry; service outages back off',async()=>{
+test('static hosts report unavailable without retry; service outages back off',async()=>{
  for(const status of [404,503,200]){
   const messages:string[]=[],c=new RealtimeConnection(pose,{origin:'https://game.test',fetch:async()=>new Response('<html>game</html>',{status,headers:{'Content-Type':'text/html'}}),socket:()=>{throw Error('Should not connect')},status:m=>messages.push(m),message:()=>{}})
-  await c.start();assert.equal(Boolean((c as any).reconnect),status===503);assert.match(messages.at(-1)!,status===503?/RECONNECTING/:/LOCAL/);c.dispose()
+  await c.start();assert.equal(Boolean((c as any).reconnect),status===503);assert.match(messages.at(-1)!,status===503?/RECONNECTING/:/UNAVAILABLE/);c.dispose()
  }
 })
