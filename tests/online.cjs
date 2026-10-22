@@ -22,6 +22,7 @@ const assert=require('node:assert/strict');
    if(!state.signedIn)return reply({error:'Sign in required'},401);
    if(path==='/api/me')return reply({playerId:'test-player',displayName:state.name,providers:['google']});
    if(path==='/api/wallet')return reply({playerId:'test-player',balance:0});
+   if(path==='/api/economy/street/me')return reply({player:'test-player',revision:0,state:{vehicles:['board'],masks:['balaclava'],current:'board',mask:'balaclava',builds:{},cargo:{},vault:{},travel:null},wallet:{balance:0}});
    if(path==='/api/multiplayer/profile'){state.name=request.postDataJSON().name;return reply({name:state.name})}
    if(path==='/api/preferences'){
     if(request.method()==='PUT'){
@@ -44,7 +45,7 @@ const assert=require('node:assert/strict');
   mkdirSync('.test-artifacts',{recursive:true});
   await page.screenshot({path:'.test-artifacts/google-signin-mobile.png'});
   await page.locator('#btn-new').click();await page.waitForURL('**/api/auth/google/login');
-  state.signedIn=true;await page.goto(url);await page.waitForFunction(()=>window.hoverghini?.online.ready);
+  state.signedIn=true;await page.goto(url);await page.waitForFunction(()=>window.hoverghini?.online.ready&&window.hoverghini?.street.ready);
   assert.ok(await page.locator('#driver-profile').isVisible());
   await page.locator('#driver-name').fill('Night Driver');await page.locator('#btn-new').click();
   await page.waitForFunction(()=>window.hoverghini.online.displayName==='Night Driver');assert.equal(state.name,'Night Driver');
@@ -56,18 +57,19 @@ const assert=require('node:assert/strict');
   const economyUI=await page.evaluate(()=>{
    const g=window.hoverghini;
    for(const action of ['cheat','buy-landmark','buy-home','buy-good','sell-good','upgrade','test-hoverghini','challenge','stash','withdraw','accept','tutorial-sale'])g.onAction(action,'hoverghini');
-   const html=['menu','garage','help','tutorial','properties'].map(view=>g.renderView(view)).join('');
+   const html=['menu','garage','market','contracts','help','tutorial','properties'].map(view=>g.renderView(view)).join('');
    return {keys:Object.keys(g.save).sort(),html};
   });
   assert.deepEqual(economyUI.keys,['allegiance','cam','city','current','mask','paint','safehouse']);
   assert.doesNotMatch(economyUI.html,/data-act="(?:cheat|buy-home|buy-landmark|buy-vehicle|upgrade|buy-good|sell-good|stash|withdraw|challenge)"/);
   assert.match(economyUI.html,/No starting cash is required/);
+  assert.match(economyUI.html,/Night Market/);assert.match(economyUI.html,/Cyan-ade/);assert.match(economyUI.html,/Buy vehicle/);assert.match(economyUI.html,/Organ express/);assert.match(economyUI.html,/upgrade\|drive/);
   // Account progress automatically persists without writing the retired local-save key.
   await page.evaluate(async()=>{const g=window.hoverghini;g.save.paint='steel';g.save.city={name:'Kitchener',lat:43.45,lon:-80.49};g.persist();await g.online.flush()});
   assert.equal(state.payload.paint,'steel');assert.equal(state.revision,1);
   assert.equal(await page.evaluate(()=>JSON.parse(localStorage.getItem('hoverghini.save.v1')).money),9999999);
-  await page.reload();await page.waitForFunction(()=>window.hoverghini?.online.ready);
-  assert.equal(await page.evaluate(()=>window.hoverghini.save.paint),'steel');
+  await page.reload();await page.waitForFunction(()=>window.hoverghini?.online.ready&&window.hoverghini?.street.ready);
+  assert.equal(await page.evaluate(()=>window.hoverghini.save.paint),'factory','Appearance preferences cannot grant equipment');
   assert.ok(await page.locator('#btn-continue').isVisible());
   for(const [name,width,height] of [['mobile',390,844],['desktop',1440,900]]){
    await page.setViewportSize({width,height});await page.screenshot({path:`.test-artifacts/online-account-${name}.png`});

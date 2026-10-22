@@ -1,9 +1,11 @@
+import {streetAccount,streetQuote,streetTrade,streetCommand} from './street'
+import {buildFor} from '../src/customization'
 import {admitFreight} from './economy'
 import {freightPosition,type FreightView} from '../shared/economy'
 import {limit} from './security'
 import {cellFor,watchingCells,distance,saneMove,validMove,validCourse,validId,MAX_PEERS,WATCH_METRES,type Geo,type Presence} from '../shared/multiplayer'
 import type {CrewsEnv} from './crews-http'
-interface Attachment {id:string;name:string;epoch:number;session:string;anchor:Geo;last:Presence|null;checked:number;window:number;count:number;bad:number;cells:string[];watchAt:number;watchPos:Geo;raceId?:string;raceTick:number;budget:number;budgetAt:number;commandAt:number;ackAt:number;peerLimit:number;contestTick?:number;crewTag?:string}
+interface Attachment {gear?:{chassis:string;mask:string;paint:string};id:string;name:string;epoch:number;session:string;anchor:Geo;last:Presence|null;checked:number;window:number;count:number;bad:number;cells:string[];watchAt:number;watchPos:Geo;raceId?:string;raceTick:number;budget:number;budgetAt:number;commandAt:number;ackAt:number;peerLimit:number;contestTick?:number;crewTag?:string}
 export class PlayerSession {
  private freightId:string|undefined
  private freightState:FreightView|undefined
@@ -30,11 +32,22 @@ export class PlayerSession {
    this.ctx.acceptWebSocket(ws)
    const anchor={lat:Number(url.searchParams.get('lat')),lon:Number(url.searchParams.get('lon'))}
    const a:Attachment={id,name,epoch:this.epoch,session,anchor,last:null,checked:0,window:Date.now(),count:0,bad:0,cells:[],watchAt:0,watchPos:anchor,raceId:await this.ctx.storage.get<string>('raceId'),raceTick:0,budget:80,budgetAt:Date.now(),commandAt:0,ackAt:0,peerLimit:request.headers.get('X-Peers')==='12'?12:MAX_PEERS}
+   if(this.env.ECONOMY_ENABLED==='true'){const {state}=await streetAccount(this.env.DB,id);a.gear={chassis:state.current,mask:state.mask,paint:buildFor(state.builds,state.current).paint??'factory'}}
    ws.serializeAttachment(a)
    this.send(ws,{type:'welcome',id,name,epoch:this.epoch,maxPeers:a.peerLimit,at:Date.now()})
    return new Response(null,{status:101,webSocket:client})
   })
   const ws=this.active(),a=ws?.deserializeAttachment() as Attachment|undefined
+  if(['/street-quote','/street-trade','/street-command'].includes(url.pathname))return this.ctx.blockConcurrencyWhile(async()=>{
+   try{
+    const b=await request.json() as any,current=this.active(),a=current?.deserializeAttachment() as Attachment|undefined
+    if(this.env.ECONOMY_ENABLED!=='true'||!a?.last||a.id!==b.player||a.last.at+8000<Date.now())return Response.json({error:'Connect to the city before trading or using the garage'},{status:409})
+    if(Math.hypot(a.last.vx,a.last.vz)>3||a.last.clearance>8)return Response.json({error:'Park near street level first'},{status:409})
+    const result=url.pathname==='/street-quote'?await streetQuote(this.env.DB,a.id,b.body,a.last):url.pathname==='/street-trade'?await streetTrade(this.env.DB,a.id,b.body,a.last):await streetCommand(this.env.DB,a.id,b.body,a.last)
+    if('state' in result){const state=result.state;a.gear={chassis:state.current,mask:state.mask,paint:buildFor(state.builds,state.current).paint??'factory'};current!.serializeAttachment(a)}
+    return Response.json(result)
+   }catch(e){return Response.json({error:(e as Error).message},{status:(e as any).status??503})}
+  })
   if(url.pathname.startsWith('/freight-')){
    const b=await request.json() as any,current=this.active(),attachment=current?.deserializeAttachment() as Attachment|undefined
    const prior=url.pathname==='/freight-start'&&typeof b.body?.requestId==='string'?await this.env.DB.prepare('SELECT id FROM shipments WHERE player_id=? AND request_id=? AND quote_id=?').bind(b.player,b.body.requestId,b.body.quoteId??'').first():null
@@ -127,6 +140,7 @@ export class PlayerSession {
    a.commandAt=now
    await this.race(ws,a,body);if(a.epoch===this.epoch)ws.serializeAttachment(a);return
   }
+  if(a.gear&&validMove(body))body={...body,...a.gear}
   const budget=Math.min(80,a.budget+(now-a.budgetAt)*.22)
   if(!validMove(body)||!saneMove(body,a.last,a.anchor,now)||(a.last&&distance(body,a.last)>budget)){
    a.bad++;ws.serializeAttachment(a);this.send(ws,{type:'rejected',message:'Movement rejected; rejoin after city travel'})

@@ -1,3 +1,5 @@
+import {Street} from './street'
+import {GOODS,MASK_CATALOG,MISSIONS,cargoCount,capacity,vehiclePrice,performancePrice,exchange,streetOrderPrice} from '../shared/street'
 import {Economy} from './economy'
 import {COMMODITIES} from '../shared/economy'
 import {Crews} from './crews'
@@ -11,7 +13,7 @@ import {routeGuide} from './route-guide'
 import {TrafficSound} from './traffic-sound'
 import {Radio} from './radio'
 import {STATIONS} from './radio-config'
-import { PAINTS } from './customization'
+import { PAINTS, UPGRADES, buildFor, tunedVehicle } from './customization'
 import {GANG_INFO} from './gangs'
 import {GANGS,type Gang} from './filter'
 import {NavigationMap,type MapView,type MapMarker} from './navigation-map'
@@ -78,7 +80,8 @@ export class Game {
   online = new OnlineSession(this.cloud)
   multiplayer: Multiplayer | null = null
   crewGate=new THREE.Mesh(new THREE.TorusGeometry(14,.5,6,32),new THREE.MeshBasicMaterial({color:0x73ffcb}))
-  economy=new Economy(localStorage,()=>{if($('modal').dataset.view==='economy'&&!(document.activeElement instanceof HTMLInputElement))this.openModal('economy')})
+  street=new Street(localStorage,()=>{this.applyGear();const v=$('modal').dataset.view??'';if(['market','garage','masks','stash'].includes(v)&&!(document.activeElement instanceof HTMLInputElement))this.openModal(v)})
+  economy=new Economy(localStorage,()=>{if(['economy','contracts'].includes($('modal').dataset.view??'')&&!(document.activeElement instanceof HTMLInputElement))this.openModal($('modal').dataset.view??'economy')})
   crews=new Crews(localStorage,()=>{if($('modal').dataset.view==='crews'&&!(document.activeElement instanceof HTMLInputElement))this.openModal('crews')})
   properties=new GlobalProperties(localStorage,()=>{const view=$('modal').dataset.view;if(view==='property'||view==='properties')this.openModal(view)})
   radio=new Radio(()=>({heat:this.run.heat,speed:this.player.groundSpeed*3.6,gang:this.world?.gangAt(this.actor.x,this.actor.z)??this.gang}))
@@ -172,12 +175,13 @@ export class Game {
   applyAccountSave() {
     const parsed=this.cloud.snapshot?.payload
     this.save=parsed?{...defaultSave(),...parsed} as SaveData:defaultSave()
-    this.save.mask=validMask(this.save.mask)
+    this.save.current='board';this.save.mask='balaclava';this.save.paint='factory'
+    void this.street.refresh()
     this.player.setSpec(this.selectedSpec());this.player.setMask(this.save.mask)
     this.juice=this.player.spec.tank
   }
 
-  get playable(){return this.online.ready&&(!this.world||!!this.multiplayer?.connection.connected)}
+  get playable(){return this.online.ready&&this.street.ready&&(!this.world||!!this.multiplayer?.connection.connected)}
 
   toast(msg: string, kind: 'good' | 'bad' | 'info' = 'info') {
     const t = $('toast')
@@ -189,7 +193,8 @@ export class Game {
   // ---------- cities ----------
 
   async warp(name: string, lat: number, lon: number, newGame = false, friendSpawn = false) {
-    if (this.loading || !this.online.ready) return
+    if (this.loading || !this.online.ready || !this.street.ready) return
+    if(this.world&&cargoCount(this.street.state)>0){this.toast('Sell or stash your cargo before changing cities. Drive to nearby markets to haul it.','info');return}
     this.settleFuel(false)
     this.loading = true
     this.paused = true
@@ -236,7 +241,7 @@ export class Game {
     if(!this.online.ready){clearInterval(tick);overlay.classList.remove('show');this.loading=false;return}
     if(newGame){
       this.save=defaultSave();this.run=new RunState()
-      this.player.setSpec(vehicleById('board'));this.player.setMask('balaclava')
+      this.applyGear()
       this.juice=this.player.spec.tank
     }
     this.spray.clear()
@@ -520,14 +525,18 @@ export class Game {
     }
   }
 
-  equipMask(id: string) {
-    if (!MASKS.some(m=>m.id===id)) return
-    this.save.mask = id
-    this.player.setMask(id)
-    this.persist()
-    this.maskThumbs()
-    $<HTMLImageElement>('mask-portrait').src=this.thumbs.get(id)!
-    this.openModal('masks')
+  equipMask(id:string){void this.street.command('equip-mask',id)}
+
+  private appliedGear=''
+  private applyGear(){
+    if(!this.street.ready)return
+    const s=this.street.state,key=JSON.stringify([s.current,s.mask,s.builds])
+    this.save.current=s.current;this.save.mask=s.mask;this.save.paint=buildFor(s.builds,s.current).paint??'factory'
+    if(key===this.appliedGear)return
+    this.appliedGear=key
+    const fuel=this.juice
+    this.player.setSpec(this.selectedSpec());this.player.setMask(s.mask);this.juice=Math.min(fuel,this.player.spec.tank)
+    if(this.thumbs.size)$<HTMLImageElement>('mask-portrait').src=this.thumbs.get(s.mask)!
   }
 
   private maskThumbs() {
@@ -592,30 +601,9 @@ export class Game {
 
   // ---------- garage & real estate ----------
 
-  selectVehicle(id: string, showGarage=true) {
-    if (!VEHICLES.some(v=>v.id===id)) return
-    this.save.current=id
-    const v = this.selectedSpec()
-    const ratio = this.juice / this.player.spec.tank
-    this.player.setSpec(v)
-    this.juice = v.tank * ratio
-    this.save.current = id
-    if (this.player.mode === 'free' && this.player.targetAlt > v.maxAlt) this.player.targetAlt = v.maxAlt
-    this.persist()
-    if(showGarage)this.openModal('garage')
-  }
-
-  private selectedSpec(){
-    const base=vehicleById(this.save.current),color=PAINTS.find(p=>p.id===this.save.paint)?.color
-    return {...base,...(color===undefined?{}:{body:color})}
-  }
-
-  paintVehicle(paint:string){
-    if(paint!=='factory'&&!PAINTS.some(p=>p.id===paint))return
-    this.save.paint=paint
-    this.player.setSpec(this.selectedSpec())
-    this.persist();this.openModal('garage')
-  }
+  selectVehicle(id:string){void this.street.command('equip-vehicle',id)}
+  private selectedSpec(){return tunedVehicle(this.street.state.current,this.street.state.builds)}
+  paintVehicle(paint:string){void this.street.command('paint',paint)}
 
   locate(id: string) {
     const w = this.world
@@ -632,14 +620,14 @@ export class Game {
 
   openModal(view: string) {
     if(view==='holdings')void this.properties.loadPortfolio()
-    view=({contracts:'economy',market:'economy',holdings:'properties'} as Record<string,string>)[view]??view
-    if(view==='economy')void this.economy.activate()
+    view=({holdings:'properties'} as Record<string,string>)[view]??view
+    if(view==='economy'||view==='contracts')void this.economy.activate()
 
     if (!this.world && view !== 'warp' && view !== 'couch' && view !== 'cloud' && view !== 'multiplayer' && view !== 'property' && view !== 'properties' && view !== 'crews' && view !== 'economy') return
     const m = $('modal')
     m.dataset.view = view
     const body = $('modal-body')
-    const tabs: [string, string][] = [['economy','Freight'],['garage','Garage'],['warp','City'],['menu','More']]
+    const tabs: [string, string][] = [['contracts','Jobs'],['market','Market'],['garage','Garage'],['menu','More']]
     const activeTab=tabs.some(([id])=>id===view)?view:'menu'
     const tabBar = this.world && view !== 'win' && view !== 'couch'
       ? `<nav class="tabs" aria-label="Game sections">${tabs.map(([id, label]) => `<button class="tab ${id === activeTab ? 'on' : ''}" data-act="view" data-arg="${id}">${label}</button>`).join('')}<button class="tab-close" data-act="close" aria-label="Close">✕</button></nav>`
@@ -741,6 +729,15 @@ export class Game {
   private onAction(act: string, arg: string) {
     if(!this.playable&&!act.startsWith('cloud-')&&act!=='view'&&act!=='close')return
     switch (act) {
+      case 'street-refresh': void this.street.refresh();break
+      case 'street-retry': void this.street.retry();break
+      case 'street-quote':{const [side,good,quantity]=arg.split('|');void this.street.getQuote(good,Number(quantity),side as 'buy'|'sell');break}
+      case 'street-trade': void this.street.trade();break
+      case 'street-command':{const [action,item='']=arg.split('|');void this.street.command(action,item);break}
+      case 'street-scout':void this.street.scout();break
+      case 'street-route':{try{const t=exchange(arg);if(this.world){this.waypoint={x:wrapLon(t.lon-this.world.city.lon)*111320*Math.cos(this.world.city.lat*Math.PI/180),z:(this.world.city.lat-t.lat)*110540,label:'Night Market · '+arg};this.routeTimer=0;this.closeModal()}}catch{}break}
+      case 'street-waypoint':{const t=this.street.exchange;if(t&&this.world){this.waypoint={x:wrapLon(t.lon-this.world.city.lon)*111320*Math.cos(this.world.city.lat*Math.PI/180),z:(this.world.city.lat-t.lat)*110540,label:'Night Market exchange'};this.routeTimer=0;this.closeModal()}break}
+      case 'courier-quote':{const [destination,mission]=arg.split('|');void this.economy.courierQuote(destination,mission);break}
       case 'freight-refresh': void this.economy.refresh();break
       case 'freight-quote': {const [destination,commodity]=arg.split('|');void this.economy.getQuote(destination,commodity,($('freight-competitive') as HTMLInputElement)?.checked??false);break}
       case 'freight-start': void this.economy.start().then(()=>{if(this.economy.driving)this.closeModal()});break
@@ -763,8 +760,8 @@ export class Game {
       case 'global-inspect': {const [lat,lon]=arg.split('|').map(Number);this.toggleMap(false);this.openModal('property');void this.properties.inspect({lat,lon});break}
       case 'global-item': this.toggleMap(false);this.openModal('property');void this.properties.select(arg);break
       case 'global-quote': void this.properties.requote();break
-      case 'global-buy': if(confirm('Purchase this global title using your global wallet? This purchase is permanent; resale is not enabled.'))void this.properties.buy().then(()=>this.economy.refresh());break
-      case 'global-retry': void this.properties.retry().then(()=>this.economy.refresh());break
+      case 'global-buy': if(confirm('Purchase this global title using your global wallet? This purchase is permanent; resale is not enabled.'))void this.properties.buy().then(()=>this.street.refresh());break
+      case 'global-retry': void this.properties.retry().then(()=>this.street.refresh());break
       case 'global-refresh': void this.properties.activate().then(()=>this.properties.loadPortfolio());break
       case 'global-more': void this.properties.loadPortfolio(true);break
       case 'global-portfolio': this.openModal('properties');void this.properties.loadPortfolio();break
@@ -833,9 +830,24 @@ export class Game {
   private renderView(view: string): string {
     const s = this.save
     switch (view) {
+      case 'contracts':{
+        const e=this.economy,destinations=[...new Set(e.markets.map(m=>m.district))].filter(d=>d!==e.district),q=e.quote,v=e.active
+        return `<h2>Courier dispatch</h2><p role="status">${esc(e.status)}</p><p>${hg(this.street.balance)} · No upfront fee. Collect at the pickup depot and complete the route before the deadline.</p><div class="grid">${MISSIONS.map(m=>`<div class="card"><h3>${m.name}</h3><p>${m.client} · ${m.description}</p>${destinations.map(d=>`<button class="btn" data-act="courier-quote" data-arg="${d}|${m.id}" ${e.busy||v?.status==='active'?'disabled':''}>Quote delivery to ${esc(d)}</button>`).join('')}</div>`).join('')}</div>${!destinations.length?'<button class="btn" data-act="freight-refresh">Load nearby jobs</button>':''}
+        ${q?`<h3>${esc(q.label??'Freight job')}</h3><p>${hg(q.net)} payout · ${(q.route.total/1000).toFixed(1)} km${q.duration?` · ${Math.ceil(q.duration/60000)} minute deadline`:''}</p><button class="btn" data-act="freight-waypoint">Guide to pickup</button><button class="btn buy" data-act="freight-start" ${e.busy||e.pending?'disabled':''}>Collect package</button>`:''}
+        ${v?`<h3>Current delivery</h3><p>${esc(v.status)} · ${hg(v.net)} payout · ${Math.max(0,Math.ceil((v.expires_at-Date.now())/1000))} seconds remaining</p><button class="btn" data-act="freight-waypoint">Next gate</button><button class="btn" data-act="freight-resume">Resume delivery</button><button class="btn danger" data-act="freight-cancel">Abandon</button>`:''}${e.pending?'<button class="btn" data-act="freight-retry">Recover package pickup</button>':''}<button class="btn ghost" data-act="view" data-arg="economy">Freight & crew convoys</button>`
+      }
+      case 'market':{
+        const t=this.street,q=t.quote,used=cargoCount(t.state),room=capacity(t.state)-used,disabled=t.busy||t.pending?'disabled':''
+        return `<h2>Night Market</h2><p role="status">${esc(t.status)}</p><p>${hg(t.balance)} · Cargo ${used}/${capacity(t.state)} · ${esc(t.district)}</p><p>Buy low, haul to another district, sell high. Stock and hourly supply shocks move prices. Quotes include the price impact of the full order. Park within 180 m of the exchange to trade.</p><div class="row"><button class="btn" data-act="street-waypoint">Guide to exchange</button><button class="btn" data-act="street-refresh">Refresh prices</button><button class="btn" data-act="street-scout">Compare nearby markets</button><button class="btn" data-act="view" data-arg="stash">Property stash</button></div>
+        <div class="grid">${GOODS.map(g=>{const m=t.rows.find(m=>m.good===g.id),owned=t.state.cargo[g.id]??0,max=m?Array.from({length:Math.min(room,m.stock)},(_,i)=>i+1).filter(n=>streetOrderPrice(t.district,g.id,m.stock,'buy',n,m.at??Date.now())*n<=t.balance).at(-1)??0:0;return `<div class="card"><h3>${g.name}</h3><p>${owned} held · ${m?.stock??0} in stock · ${esc(m?.event??'Loading prices')}</p><p>Buy ${m?hg(m.ask):'…'} / sell ${m?hg(m.bid):'…'} per ${g.unit}</p><div class="row"><button class="btn" data-act="street-quote" data-arg="buy|${g.id}|1" ${!max?'disabled':disabled}>Buy 1</button><button class="btn" data-act="street-quote" data-arg="buy|${g.id}|${max}" ${!max?'disabled':disabled}>Buy max (${max})</button><button class="btn" data-act="street-quote" data-arg="sell|${g.id}|1" ${!owned?'disabled':disabled}>Sell 1</button><button class="btn" data-act="street-quote" data-arg="sell|${g.id}|${owned}" ${!owned?'disabled':disabled}>Sell all</button></div></div>`}).join('')}</div>
+        ${t.scouts.length?`<h3>Nearby sell prices</h3><p>Compare these bids with the purchase price here. Prices and stock can change during the drive.</p><div class="grid">${t.scouts.map(d=>`<div class="card"><h3>${esc(d.district)}</h3>${GOODS.map(g=>`<p>${g.name}: ${hg(d.rows.find(m=>m.good===g.id)?.bid??0)}</p>`).join('')}<button class="btn" data-act="street-route" data-arg="${esc(d.district)}">Route to this exchange</button></div>`).join('')}</div>`:''}
+        ${q?`<div class="card"><h3>Confirm ${esc(q.side)}</h3><p>${q.quantity} ${esc(GOODS.find(g=>g.id===q.good)?.name??q.good)} · ${hg(q.total)} total · quote valid for 30 seconds</p><button class="btn buy" data-act="street-trade" ${disabled}>Confirm trade</button></div>`:''}${t.pending?'<button class="btn" data-act="street-retry">Recover pending transaction</button>':''}`
+      }
+      case 'stash':return `<h2>Property stash</h2><p>${esc(this.street.status)}</p><p>Park within 120 m of an owned property to bank cargo. Your HG stays in your account wallet.</p><div class="row"><button class="btn" data-act="street-command" data-arg="stash|">Stash carried cargo</button><button class="btn" data-act="street-command" data-arg="withdraw|">Fill hold from stash</button></div>${GOODS.map(g=>`<p>${g.name}: ${this.street.state.cargo[g.id]??0} carried · ${this.street.state.vault[g.id]??0} banked</p>`).join('')}<button class="btn" data-act="global-portfolio">Your properties</button>`
+
       case 'economy': {
         const e=this.economy,q=e.quote,v=e.active,disabled=e.busy||e.pending?'disabled':'',destinations=[...new Set(e.markets.map(m=>m.district))].filter(d=>d!==e.district)
-        return `<h2>Global freight markets</h2><p role="status">${esc(e.status)}</p><p>Global wallet <strong>${hg(e.balance)}</strong> · Freight reserve ${hg(e.fund)}</p><div class="row"><button class="btn" data-act="freight-refresh">Refresh board</button><button class="btn ghost" data-act="view" data-arg="cloud">Sign in</button></div>${e.pending?'<button class="btn" data-act="freight-retry">Recover pending cargo load</button>':''}
+        return `<h2>Global freight markets</h2><p role="status">${esc(e.status)}</p><p>Wallet <strong>${hg(this.street.balance)}</strong> · Freight reserve ${hg(e.fund)}</p><div class="row"><button class="btn" data-act="freight-refresh">Refresh board</button><button class="btn ghost" data-act="view" data-arg="cloud">Sign in</button></div>${e.pending?'<button class="btn" data-act="freight-retry">Recover pending cargo load</button>':''}
         <p class="muted">Sealed consignments of fictional commodities. Prices reflect regional stock and shortages. Shipments pay from a finite reserve, up to six per day. No upfront cash is needed; fees are deducted from the payout.</p><label><input id="freight-competitive" type="checkbox"> Crew convoy: allow rival interception (optional)</label>
         <div class="grid">${COMMODITIES.map(c=>{const local=e.markets.find(m=>m.district===e.district&&m.commodity===c.id);return `<div class="card"><h3>${esc(c.name)}</h3><p>Here: ${local?hg(local.price):'Enter a real city'} / unit · ${local?.stock??0} stock${local?.pressure?` · SHORTAGE ${local.pressure}`:''}</p>${destinations.map(d=>{const m=e.markets.find(m=>m.district===d&&m.commodity===c.id)!;return `<p>${esc(d)}<br>${hg(m.price)} · ${m.price>m.previous_price?'↑':m.price<m.previous_price?'↓':'→'} · stock ${m.stock} · incoming ${m.incoming??0}${m.pressure?' · shortage '+m.pressure:''}<br><button class="btn ghost" data-act="freight-quote" data-arg="${esc(d)}|${c.id}" ${disabled}>Plan delivery</button></p>`}).join('')}</div>`}).join('')}</div>
         ${q?`<h3>Quoted freight</h3><p>${q.quantity} sealed units · payout ${hg(q.net)} after ${hg(q.fee)} service sink<br>${Math.round(q.route.total)} m · ${q.competitive?'Rival interception enabled':'Protected delivery'}<br>${Object.entries(q.benefits).filter(([,v])=>v).map(([k])=>esc(k)).join(' · ')||'Standard courier capacity'}</p><p class="muted">Go to the source waypoint within 60 seconds, or refresh the quote. Freight assist follows the server road route; use GO/BRAKE and steer into the indicated lane. Slow below 8 m/s to pass a lane gate safely. Three fast missed gates destroy cargo.</p><div class="row"><button class="btn" data-act="freight-waypoint">Guide to depot</button><button class="btn" data-act="freight-start" ${disabled}>Load cargo & drive</button></div>`:''}
@@ -870,18 +882,21 @@ export class Game {
       }
       case 'cloud':
         return `<h2>Your account</h2>${!this.world?'<button class="btn ghost" data-act="cloud-title">Back to title</button>':''}<p role="status">${esc(this.online.status)}</p><p>${esc(this.cloud.status)}</p>
-          ${this.cloud.playerId?`<p>Driver ${esc(this.online.displayName||this.cloud.playerId.slice(0,8))}<br>Wallet: ${hg(this.economy.enabled?this.economy.balance:this.cloud.balance)}</p><p>Progress saves automatically to this account.</p><div class="row">${!this.online.providers.includes('google')?'<button class="btn" data-act="cloud-link">Link Google to this account</button>':''}<button class="btn ghost" data-act="cloud-logout">Sign out</button><button class="btn ghost" data-act="cloud-logout-all">Sign out all devices</button></div>`:`<button class="btn" data-act="cloud-login">Continue with Google</button><details><summary>Existing GitHub player?</summary><p>Sign in once with GitHub, then link Google here to keep your player and holdings.</p><button class="btn ghost" data-act="cloud-github">Recover GitHub account</button></details>`}`
+          ${this.cloud.playerId?`<p>Driver ${esc(this.online.displayName||this.cloud.playerId.slice(0,8))}<br>Wallet: ${hg(this.street.ready?this.street.balance:this.cloud.balance)}</p><p>Progress saves automatically to this account.</p><div class="row">${!this.online.providers.includes('google')?'<button class="btn" data-act="cloud-link">Link Google to this account</button>':''}<button class="btn ghost" data-act="cloud-logout">Sign out</button><button class="btn ghost" data-act="cloud-logout-all">Sign out all devices</button></div>`:`<button class="btn" data-act="cloud-login">Continue with Google</button><details><summary>Existing GitHub player?</summary><p>Sign in once with GitHub, then link Google here to keep your player and holdings.</p><button class="btn ghost" data-act="cloud-github">Recover GitHub account</button></details>`}`
       case 'radio':
         return `<h2>Radio</h2><p class="muted">Gang frequencies, municipal dispatch, and late-night talk.</p><div class="radio-stations">${STATIONS.map(station=>`<button class="btn ${this.radio.station===station.id?'buy':''}" data-act="radio-station" data-arg="${station.id}" aria-pressed="${this.radio.station===station.id}"><strong>${station.name}</strong><small>${station.host}</small></button>`).join('')}</div><p id="radio-status" class="radio-status" aria-live="polite">${esc(this.radio.status)}</p><div class="row"><button class="btn" data-act="radio-play">Play / pause</button><button class="btn" data-act="radio-next">Next</button><button class="btn ghost" data-act="radio-station" data-arg="off">Off</button></div><button class="btn ghost" data-act="radio-refresh">Refresh stations</button><label class="radio-volume">Volume <input id="radio-volume" type="range" min="0" max="100" value="${Math.round(this.radio.volume*100)}" /></label><p class="muted small">Music and talk use the configured station playlists. Scanner chatter follows local Heat. Radio pauses when this tab is hidden.</p>`
       case 'menu':
-        return `<h2>Off the clock</h2><p>${esc(s.city?.name??'City')}</p><div class="menu-links">${[['economy','Freight jobs'],['crews','Crews & districts'],['properties','Property portfolio'],['multiplayer','Cruise with friends'],['cloud','Your account'],['radio','Radio'],['masks','Masks'],['tutorial','Getting started'],['help','Controls']].map(([id,label])=>`<button class="btn ghost" data-act="view" data-arg="${id}">${label}</button>`).join('')}</div>`
+        return `<h2>Off the clock</h2><p>${esc(s.city?.name??'City')}</p><div class="menu-links">${[['contracts','Courier jobs'],['market','Night Market'],['stash','Property stash'],['economy','Freight convoys'],['crews','Crews & districts'],['properties','Property portfolio'],['multiplayer','Cruise with friends'],['cloud','Your account'],['radio','Radio'],['masks','Masks'],['tutorial','Getting started'],['help','Controls']].map(([id,label])=>`<button class="btn ghost" data-act="view" data-arg="${id}">${label}</button>`).join('')}</div>`
       case 'tutorial':
-        return `<h2>Your first freight run</h2><p>Open Freight, choose a destination and commodity, and request a quote. Follow the depot waypoint, then start the shipment near its source depot. Drive through the lane gates to earn HG.</p><p>No starting cash is required. The fee comes out of the payout. Shipments, payouts, wallet funds and property titles are recorded by the server.</p><button class="btn" data-act="view" data-arg="economy">Open freight</button>`
-      case 'garage':
-        return `<h2>Garage</h2><p>Choose a ride. Vehicles and paint are available to everyone; freight uses server-controlled driving and payouts.</p><div class="grid">${VEHICLES.map(v=>`<div class="card"><h3>${esc(v.name)}</h3><p>${esc(v.tagline)}</p><button class="btn" data-act="select-vehicle" data-arg="${v.id}" ${s.current===v.id?'disabled':''}>${s.current===v.id?'Riding':'Ride this'}</button></div>`).join('')}</div><h3>Paint</h3><div class="row"><button class="btn" data-act="paint" data-arg="factory">Factory</button>${PAINTS.map(p=>`<button class="btn" data-act="paint" data-arg="${p.id}">${p.name}</button>`).join('')}</div>`
-      case 'masks':
-        this.maskThumbs()
-        return `<h2>Masks</h2><p>Choose your look.</p><div class="grid masks">${MASKS.map(m=>`<div class="card"><img src="${this.thumbs.get(m.id)}" alt="${esc(m.name)}" width="96" height="96"><h3>${esc(m.name)}</h3><button class="btn" data-act="equip-mask" data-arg="${m.id}" ${s.mask===m.id?'disabled':''}>${s.mask===m.id?'Wearing':'Wear'}</button></div>`).join('')}</div>`
+        return `<h2>Your first freight run</h2><p>Open Jobs and choose a courier mission and destination. Follow the depot waypoint, then start the shipment near its source depot. Drive through the lane gates to earn HG.</p><p>No starting cash is required. The fee comes out of the payout. Shipments, payouts, wallet funds and property titles are recorded by the server.</p><button class="btn" data-act="view" data-arg="contracts">Open jobs</button>`
+      case 'garage':{
+        const t=this.street,state=t.state,b=buildFor(state.builds,state.current),disabled=t.busy||t.pending?'disabled':''
+        return `<h2>Garage</h2><p>${hg(t.balance)} · ${esc(t.status)}</p><div class="grid">${VEHICLES.map(v=>`<div class="card"><h3>${esc(v.name)}</h3><p>${esc(v.tagline)}</p><p>${hg(vehiclePrice(v.id))}</p><button class="btn" data-act="street-command" data-arg="${state.vehicles.includes(v.id)?'equip-vehicle':'buy-vehicle'}|${v.id}" ${state.current===v.id||(!state.vehicles.includes(v.id)&&t.balance<vehiclePrice(v.id))?'disabled':disabled}>${state.current===v.id?'Riding':state.vehicles.includes(v.id)?'Ride this':'Buy vehicle'}</button></div>`).join('')}</div><h3>Performance upgrades</h3>${UPGRADES.map(u=>`<div class="card"><h3>${u.name} · ${b[u.id]}/3</h3><p>${u.description}</p><button class="btn" data-act="street-command" data-arg="upgrade|${u.id}" ${b[u.id]>=3||t.balance<performancePrice(state,u.id)?'disabled':disabled}>${b[u.id]>=3?'Maxed':hg(performancePrice(state,u.id))}</button></div>`).join('')}<h3>Paint</h3><div class="row"><button class="btn" data-act="paint" data-arg="factory">Factory</button>${PAINTS.map(p=>`<button class="btn" data-act="paint" data-arg="${p.id}">${p.name}</button>`).join('')}</div>${t.pending?'<button class="btn" data-act="street-retry">Recover purchase</button>':''}`
+      }
+      case 'masks':{
+        this.maskThumbs();const t=this.street
+        return `<h2>Masks</h2><p>${hg(t.balance)} · ${esc(t.status)}</p><div class="grid masks">${MASKS.map(m=>{const owned=t.state.masks.includes(m.id),price=MASK_CATALOG.find(v=>v.id===m.id)!.price;return `<div class="card"><img src="${this.thumbs.get(m.id)}" alt="${esc(m.name)}" width="96" height="96"><h3>${esc(m.name)}</h3><p>${esc(m.blurb)}</p><button class="btn" data-act="street-command" data-arg="${owned?'equip-mask':'buy-mask'}|${m.id}" ${t.busy||t.pending||t.state.mask===m.id||(!owned&&t.balance<price)?'disabled':''}>${t.state.mask===m.id?'Wearing':owned?'Wear':hg(price)}</button></div>`}).join('')}</div>`
+      }
       case 'couch':
         return `<h2>Where’s your couch?</h2>
           <p class="muted">Every empire starts somewhere. Pick an address for your starting location. You’ll spawn on the nearest connected street.</p>
@@ -897,7 +912,7 @@ export class Game {
           <h3 class="sub">Deployment zones</h3>
           <div class="cities">${CITIES.map((c) => `<button class="city-btn" data-act="warp" data-arg="${c.lat}|${c.lon}|${c.name}"><strong>${c.name}</strong><span>${c.area}</span></button>`).join('')}</div>`
       case 'help':
-        return `<h2>Driver controls</h2><p>W/S thrust and brake · A/D steer · E Mag-Lock · Shift boost · Space hop · V camera.</p><p>J or N freight · G garage · K masks · P properties · M city · F free refuel · T free tow.</p><p>Touch: use the stick, GO / BRAKE, MAG-LOCK and BOOST. Tap a fuel prompt to refuel.</p><p>HG is earned through server-settled freight and spent on global property. Casual races have no currency rewards.</p><button class="btn" data-act="traffic-sound">Traffic sound: ${this.trafficSound.enabled?'ON':'OFF'}</button>`
+        return `<h2>Driver controls</h2><p>W/S thrust and brake · A/D steer · E Mag-Lock · Shift boost · Space hop · V camera.</p><p>J courier jobs · N Night Market · G garage · K masks · P properties · M city · F free refuel · T free tow.</p><p>Touch: use the stick, GO / BRAKE, MAG-LOCK and BOOST. Tap a fuel prompt to refuel.</p><p>Earn HG delivering packages and trading cargo. Buy vehicles, upgrades, masks and property. Casual races have no currency rewards.</p><button class="btn" data-act="traffic-sound">Traffic sound: ${this.trafficSound.enabled?'ON':'OFF'}</button>`
     }
     return ''
   }
@@ -949,6 +964,7 @@ export class Game {
   private mapMarkers():MapMarker[]{
     const w=this.world!,out:MapMarker[]=[]
     for(const s of this.economy.shipments)if(s.position)out.push({id:'convoy:'+s.id,x:wrapLon(s.position.lon-w.city.lon)*111320*Math.cos(w.city.lat*Math.PI/180),z:(w.city.lat-s.position.lat)*110540,label:'Rival freight convoy',symbol:'F',color:'#ff8fb4'})
+    const exchange=this.street.exchange;if(exchange)out.push({id:'street-exchange',x:wrapLon(exchange.lon-w.city.lon)*111320*Math.cos(w.city.lat*Math.PI/180),z:(w.city.lat-exchange.lat)*110540,label:'Night Market exchange',symbol:'$',color:'#df8dcc'})
     const freightTarget=this.economy.target;if(freightTarget)out.push({id:'freight-gate',x:wrapLon(freightTarget.lon-w.city.lon)*111320*Math.cos(w.city.lat*Math.PI/180),z:(w.city.lat-freightTarget.lat)*110540,label:'Freight depot / lane gate',symbol:'D',color:'#73ffcb'})
     const district=this.crews.district,contest=district?.contest,target=this.crews.target
     const mark=(p:{lat:number;lon:number},id:string,label:string,symbol:string,color:string)=>out.push({id,x:wrapLon(p.lon-w.city.lon)*111320*Math.cos(w.city.lat*Math.PI/180),z:(w.city.lat-p.lat)*110540,label,symbol,color})
@@ -1021,7 +1037,7 @@ export class Game {
       }
       const p=this.player
       const tunnel=w.isTunnel(p.pos.x,p.pos.z,p.pos.y)
-      if(!this.economy.driving)this.run.update(dt,0,tunnel,w.gangAt(p.pos.x,p.pos.z)!==this.gang,this.save.mask==='balaclava')
+      if(!this.economy.driving)this.run.update(dt,cargoCount(this.street.state),tunnel,w.gangAt(p.pos.x,p.pos.z)!==this.gang,this.save.mask==='balaclava')
       p.overclocking=this.run.overclock>0; p.limping=this.run.limp>=0
       if(!this.economy.driving)this.player.update(dt, input, w, this.juice > 0)
       this.collisionCooldown=Math.max(0,this.collisionCooldown-dt)
@@ -1055,7 +1071,7 @@ export class Game {
         void this.streamMap()
       }
     }
-    if(!w.city.procedural){const geo=worldToLatLon(w.city,this.player.pos.x,this.player.pos.z);this.properties.setLocation(geo);this.crews.setLocation(geo);this.economy.setLocation(geo)}
+    if(!w.city.procedural){const geo=worldToLatLon(w.city,this.player.pos.x,this.player.pos.z);this.properties.setLocation(geo);this.crews.setLocation(geo);this.economy.setLocation(geo);this.street.tick(this.economy.district)}
     const freight=this.economy.step(this.paused?-1:input.throttle,this.paused?0:input.steer,this.multiplayer?(v)=>{this.multiplayer?.connection.send(v)}:null)
     if(freight&&!w.city.procedural){const p=this.player;p.pos.x=wrapLon(freight.lon-w.city.lon)*111320*Math.cos(w.city.lat*Math.PI/180);p.pos.z=(w.city.lat-freight.lat)*110540;p.pos.y=w.groundHeightAt(p.pos.x,p.pos.z,p.pos.y)+1;p.heading=freight.yaw;p.speed=freight.speed;p.vel.set(Math.sin(p.heading)*p.speed,Math.cos(p.heading)*p.speed);p.mesh.position.copy(p.pos);p.mesh.rotation.set(0,p.heading,0)}
     const crewTarget=this.economy.target??this.crews.target
@@ -1106,8 +1122,8 @@ export class Game {
     $('territory-status').style.color=GANG_INFO[turf].color
     if(this.territoryLast!==turf){if(this.territoryLast)this.toast(`${turf} territory · ${GANG_INFO[turf].leader}`,'info');this.territoryLast=turf}
     $('tutorial-tip').hidden=true
-    $('money').textContent = this.economy.enabled ? hg(this.economy.balance) : 'Wallet unavailable'
-    $('income').textContent = 'SERVER WALLET · HG'
+    $('money').textContent = this.street.ready ? hg(this.street.balance) : 'Wallet unavailable'
+    $('income').textContent = `CARGO ${cargoCount(this.street.state)}/${capacity(this.street.state)}`
     $('vehicle-name').textContent = `${p.spec.name} · ${this.gang}`
     const delivery=this.crews.district?.contest,driver=delivery?.runs.find(r=>r.player===this.crews.player)
     $('network-status').textContent=this.economy.progress || (delivery&&!delivery.finished&&driver?`CREW DELIVERY ${driver.next}/${delivery.course.length} · ${driver.best!==null?'COMPLETE':Date.now()<delivery.startsAt?'WARMUP':driver.invalid||'FOLLOW GREEN GATES'}`:'') || this.multiplayer?.raceStatus || this.multiplayer?.status || 'CONNECTING'

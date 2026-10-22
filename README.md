@@ -6,9 +6,10 @@ The game requires an account and live server connection. Disconnections pause pl
 
 ## Progression
 
-- Earn HG by completing server-simulated freight shipments. New players need no starting cash: fees come out of the payout.
+- Earn HG through courier missions and server-simulated freight. Parcel, express and precursor jobs require no starting cash: fees come out of the payout.
+- Buy and sell the six Night Market goods across districts. Compare prices, watch supply shocks and haul inventory for profit.
 - Spend that server wallet on canonical global property titles. Create crews, establish headquarters and compete for districts.
-- Choose vehicles, masks and paint freely. Refueling and recovery are free. Casual races have no currency rewards.
+- Buy vehicles, performance upgrades and masks with HG. Bigger cargo holds unlock bigger trades. Owned properties provide cargo stashes. Refueling and recovery remain free. Casual races have no currency rewards.
 - Account autosaves contain only navigation and appearance preferences. Cash, ownership, inventory and rewards cannot be uploaded. Old campaign snapshots remain archived and are not imported.
 
 ## Run and verify
@@ -31,18 +32,18 @@ npm run test:browser
 | W / S, A / D | Thrust / brake, steer |
 | E, Shift, Space | Mag-Lock, boost, rail hop |
 | V | Chase / overhead camera |
-| J / N | Freight board |
+| J / N | Courier dispatch / Night Market |
 | G / K / P / M / H | Garage / masks / properties / city / help |
 | F / T | Free refuel at a pump / free tow |
-| R | Freight board |
+| R | Night Market |
 
 Touch controls offer a steering stick, GO / BRAKE, MAG-LOCK and BOOST. The map supports dragging, zooming and building inspection.
 
 ## Deployment
 
-Follow [Google sign-in and online migration](docs/google-online.md), including OAuth credentials and migration `0007_preferences.sql`. Use the same HTTPS Cloudflare origin for the client and API. GitHub Pages cannot host the account, multiplayer or economy APIs.
+Follow [Google sign-in and online migration](docs/google-online.md), including OAuth credentials and migration `0008_street_progression.sql`. Use the same HTTPS Cloudflare origin for the client and API. GitHub Pages cannot host the account, multiplayer or economy APIs.
 
-See [global freight](docs/global-economy.md), [property registry](docs/global-properties.md), [crews](docs/crews-territories.md) and [multiplayer](docs/multiplayer.md) for server configuration. These features need their deployment flags enabled. Configure an appropriate HTTPS property/map source for the intended audience.
+See [shared progression and trading](docs/street-progression.md), [global freight](docs/global-economy.md), [property registry](docs/global-properties.md), [crews](docs/crews-territories.md) and [multiplayer](docs/multiplayer.md) for server configuration. These features need their deployment flags enabled. Configure an appropriate HTTPS property/map source for the intended audience.
 
 Map data © [OpenStreetMap contributors](https://www.openstreetmap.org/copyright), ODbL. Vector tiles supplied by [OpenFreeMap](https://openfreemap.org/).
 

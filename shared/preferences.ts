@@ -1,7 +1,7 @@
 import {VEHICLES} from '../src/data'
 import {PAINTS} from '../src/customization'
 export type Place={name:string;lat:number;lon:number}
-/** Only freely selectable presentation and navigation preferences. No economic state. */
+/** Navigation preferences and non-authoritative appearance hints. Equipment comes from street_accounts. */
 export type Preferences={current:string;mask:string;paint:string;allegiance:'SHINOBI'|'LIARS'|'HYENAS'|'JESTERS';city:Place|null;safehouse:Place|null;cam:'chase'|'top'}
 const object=(v:unknown):v is Record<string,unknown>=>!!v&&typeof v==='object'&&!Array.isArray(v)
 const place=(v:unknown)=>v===null||object(v)&&Object.keys(v).sort().join(',')==='lat,lon,name'&&typeof v.name==='string'&&v.name.length<=512&&!/[<>\u0000-\u001f]/.test(v.name)&&typeof v.lat==='number'&&Number.isFinite(v.lat)&&Math.abs(v.lat)<=90&&typeof v.lon==='number'&&Number.isFinite(v.lon)&&Math.abs(v.lon)<=180

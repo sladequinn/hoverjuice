@@ -231,13 +231,13 @@ const accountStatus=$('account-status')
 let booted=false,booting=false
 let googleAvailable=false
 function accountUI(){
-  const ready=game.online.ready
-  if(ready&&!booted){game.applyAccountSave();booted=true}
-  enter.textContent=ready?(game.hasSave?'Choose another city':'Enter the city ↗'):'Continue with Google'
-  enter.disabled=booting||(!ready&&!googleAvailable)
+  if(game.online.ready&&!booted){game.applyAccountSave();booted=true}
+  const ready=game.online.ready&&game.street.ready
+  enter.textContent=ready?(game.hasSave?'Choose another city':'Enter the city ↗'):game.online.ready?'Loading inventory…':'Continue with Google'
+  enter.disabled=booting||(game.online.ready&&!game.street.ready)||(!game.online.ready&&!googleAvailable)
   cont.style.display=ready&&game.hasSave?'':'none'
   cont.textContent=`Continue in ${game.save.city?.name??'the city'}`
-  accountStatus.textContent=game.online.status
+  accountStatus.textContent=game.online.ready&&!game.street.ready?game.street.status:game.online.status
   $('driver-profile').hidden=!ready||!!game.online.displayName
   $('account-retry').hidden=ready||game.online.signedOut||game.online.conflict
   $('account-latest').hidden=!game.online.conflict
@@ -255,6 +255,7 @@ async function bootAccount(){
     if(r.ok)googleAvailable=(await r.json()).google===true
     await game.online.start()
     if(game.online.ready&&!booted){game.applyAccountSave();booted=true}
+    if(game.online.ready)await game.street.refresh()
     if(!game.online.ready&&game.online.signedOut&&!googleAvailable)game.online.status='Google sign-in is being configured. Please try again shortly.'
   }catch{game.online.offline()}
   finally{booting=false;accountUI()}
@@ -281,7 +282,7 @@ enter.addEventListener('click',async()=>{
 })
 $('account-retry').addEventListener('click',()=>void bootAccount())
 $('online-sign-in').addEventListener('click',()=>location.assign('/api/auth/google/login'))
-$('online-retry').addEventListener('click',async()=>{await game.online.heartbeat();game.multiplayer?.reconnect();accountUI()})
+$('online-retry').addEventListener('click',async()=>{await game.online.heartbeat();await game.street.refresh();game.multiplayer?.reconnect();accountUI()})
 function loadLatest(){
   if(!confirm('Load the latest account save? Unsynced changes on this device will be archived for recovery.'))return
   if(game.cloud.playerId){const key=`hoverghini.preferences.pending.${game.cloud.playerId}`,pending=localStorage.getItem(key);localStorage.setItem(key+'.conflict.'+Date.now(),JSON.stringify({pending:pending?JSON.parse(pending):null,preferences:game.save}));localStorage.removeItem(key)}
