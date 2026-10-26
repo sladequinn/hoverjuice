@@ -64,3 +64,20 @@ test('a player behind or on the sidewalk does not hold nearby traffic stopped',(
  for(let i=0;i<120;i++)traffic.update(1/60,player,0)
  assert.ok(car.distance>105);traffic.dispose()
 })
+test('bumping a traffic car shunts it laterally out of the way and vaulting over it awards an air vault without collision',()=>{
+ const {traffic,state}=setup();const car=state.agents[0];state.agents=[car];Object.assign(car,{a:0,b:1,distance:50,speed:10,kind:0,seed:1,cooldown:0})
+ traffic.update(0,far)
+ // Air-vaulting 1.5m above the car triggers vaults without impact damage
+ const vaultPos=car.pos.clone();vaultPos.y+=1.5
+ const vaultEvents=traffic.update(1/60,vaultPos,32)
+ assert.equal(vaultEvents.vaults,1);assert.equal(vaultEvents.impact,0);assert.equal(vaultEvents.nearMisses,1)
+ // Reset cooldown and ram at street level: car is shunted laterally with damage flash
+ car.cooldown=0
+ const ramEvents=traffic.update(1/60,car.pos.clone(),32)
+ assert.equal(ramEvents.shunts,1);assert.ok(ramEvents.impact>0)
+ traffic.update(1/60,far)
+ assert.ok(Math.hypot(car.shuntX,car.shuntZ)>0.1,'Shunted traffic car moves out of the player path')
+ assert.ok(car.damage>0,'Shunted traffic car records visual damage')
+ traffic.dispose()
+})
+

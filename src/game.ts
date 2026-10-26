@@ -130,6 +130,9 @@ export class Game {
   private sprintSamples: { x: number; y: number; z: number; h: number }[] = []
   private sprintBest = new Map<string, { time: number; samples: { x: number; y: number; z: number; h: number }[] }>()
   private sprintGhost: THREE.Mesh | null = null
+  private hudEvent: '' | 'shunt' | 'vault' | 'damage' = ''
+  private hudEventLabel = ''
+  private hudEventTimer = 0
 
   constructor(scene: THREE.Scene) {
     this.scene = scene
@@ -962,7 +965,7 @@ export class Game {
           <h3 class="sub">Deployment zones</h3>
           <div class="cities">${CITIES.map((c) => `<button class="city-btn" data-act="warp" data-arg="${c.lat}|${c.lon}|${c.name}"><strong>${c.name}</strong><span>${c.area}</span></button>`).join('')}</div>`
       case 'help':
-        return `<h2>Driver controls</h2><p>W/S thrust and brake · A/D steer · E Mag-Lock · Shift boost · Space hop · V camera.</p><p>J courier jobs · N Night Market · G garage · K masks · P properties · M city · F free refuel · T free tow.</p><p>Touch: use the stick, GO / BRAKE, MAG-LOCK and BOOST. Tap a fuel prompt to refuel.</p><p>Earn HG delivering packages and trading cargo. Buy vehicles, upgrades, masks and property. Casual races have no currency rewards.</p><button class="btn" data-act="traffic-sound">Traffic sound: ${this.trafficSound.enabled?'ON':'OFF'}</button>`
+        return `<h2>Driver controls</h2><p>W/S thrust and brake · A/D steer &amp; lane dart · E Mag-Lock · Shift boost · Space hop &amp; hold to repulsor-glide over traffic · V camera.</p><p>J courier jobs · N Night Market · G garage · K masks · P properties · M city · F free refuel · T free tow.</p><p>Touch: use the stick, GO / BRAKE, HOP (hold to glide), MAG-LOCK and BOOST. Shunt traffic out of your path or vault over cars to chain FLOW.</p><p>Earn HG delivering packages and trading cargo. Buy vehicles, upgrades, masks and property. Casual races have no currency rewards.</p><button class="btn" data-act="traffic-sound">Traffic sound: ${this.trafficSound.enabled?'ON':'OFF'}</button>`
     }
     return ''
   }
@@ -1092,9 +1095,22 @@ export class Game {
       if(!this.economy.driving)this.player.update(dt, input, w, this.juice > 0)
       this.collisionCooldown=Math.max(0,this.collisionCooldown-dt)
       this.scrapeCooldown=Math.max(0,this.scrapeCooldown-dt)
-      if(p.impact>3 && !this.collisionCooldown) { this.run.damage(Math.min(45,p.impact*0.65),this.save.mask==='oni'); this.collisionCooldown=0.6 }
+      this.hudEventTimer=Math.max(0,this.hudEventTimer-dt)
+      if(this.hudEventTimer<=0){this.hudEvent='';this.hudEventLabel=''}
+      if(p.impact>3 && !this.collisionCooldown) {
+        this.run.damage(Math.min(35,p.impact*0.5),this.save.mask==='oni')
+        this.collisionCooldown=0.6
+        this.particles.emitBurst(p.pos.x,p.pos.y+0.3,p.pos.z,22,true)
+        this.hudEvent='damage'
+        this.hudEventLabel='HULL IMPACT'
+        this.hudEventTimer=1.1
+      }
       if(p.apex) this.run.chain()
-      if(p.curbScrape && this.scrapeCooldown<=0) { this.run.chain(); this.scrapeCooldown=1.2 }
+      if(p.curbScrape && this.scrapeCooldown<=0) {
+        this.run.chain()
+        this.scrapeCooldown=1.2
+        this.particles.emitBurst(p.pos.x,p.pos.y-0.2,p.pos.z,10,true)
+      }
       if(this.run.limp===0) this.bust()
       const garage=w.city.nodes[this.garageNode]
       if(p.groundSpeed<3 && (Math.hypot(p.pos.x-garage.x,p.pos.z-garage.z)<12)) { this.run.heat=0; if(this.run.limp>=0)this.run.repair() }
@@ -1148,11 +1164,29 @@ export class Game {
     this.updateGlitcherCones()
     if(!this.paused&&traffic&&!this.economy.driving){
       if(traffic.horn)this.trafficSound.honk(traffic.horn.distance,traffic.horn.side,traffic.horn.freight)
-      if(traffic.impact>0){this.run.damage(Math.min(30,traffic.impact*0.5),this.save.mask==='oni');if(this.player.mode==='mag' && traffic.impact>22)this.player.unsnap()}
+      if(traffic.vaults&&traffic.vaults>0){
+        if(traffic.impactPos)this.particles.emitBurst(traffic.impactPos.x,traffic.impactPos.y,traffic.impactPos.z,18,false)
+        this.hudEvent='vault'
+        this.hudEventLabel='AIR VAULT'
+        this.hudEventTimer=1.2
+      }
+      if(traffic.shunts&&traffic.shunts>0){
+        this.player.applyShunt(traffic.impactSide??1,Math.min(1.5,Math.max(0.5,traffic.impact/22)))
+        if(traffic.impactPos)this.particles.emitBurst(traffic.impactPos.x,traffic.impactPos.y,traffic.impactPos.z,28,true)
+        const ramShield = this.player.boosting || this.player.overclocking
+        this.run.damage(Math.min(ramShield ? 6 : 14, traffic.impact * (ramShield ? 0.12 : 0.25)), this.save.mask === 'oni')
+        if (ramShield || this.player.groundSpeed > 18) this.run.chain()
+        this.hudEvent='shunt'
+        this.hudEventLabel='TRAFFIC SHUNT'
+        this.hudEventTimer=1.1
+      } else if(traffic.impact>0){
+        this.run.damage(Math.min(20,traffic.impact*0.35),this.save.mask==='oni')
+      }
       for(let i=0;i<traffic.nearMisses;i++)this.run.chain()
       if(traffic.boxed&&this.run.limp<0){this.run.limp=15;this.toast('BOXED IN · 15 seconds reserve power','bad')}
     }
     if(!this.paused){
+      this.player.updateDamageVisuals(this.run.hull,dt,Math.max(this.player.impact,traffic?.impact??0))
       this.spray.emit(this.player,dt,this.actor,this.player.heading,this.player.groundSpeed,
         this.player.mesh.userData.halfW,this.player.mesh.userData.halfL,
         w.groundHeightAt(this.actor.x,this.actor.z,this.actor.y),this.player.boosting)
@@ -1272,9 +1306,12 @@ export class Game {
     $('network-status').textContent=this.economy.progress || (delivery&&!delivery.finished&&driver?`CREW DELIVERY ${driver.next}/${delivery.course.length} · ${driver.best!==null?'COMPLETE':Date.now()<delivery.startsAt?'WARMUP':driver.invalid||'FOLLOW GREEN GATES'}`:'') || this.multiplayer?.raceStatus || this.multiplayer?.status || 'CONNECTING'
     const tunnel=this.world!.isTunnel(p.pos.x,p.pos.z,p.pos.y)
     $('minimap').style.visibility=tunnel?'hidden':'visible'
-    $('alt').textContent=tunnel?'GPS LOST':`${Math.round(p.pos.y)} m${p.testFlight?' · TEST FLIGHT':''}`
+    $('alt').textContent=tunnel?'GPS LOST':`${Math.round(p.pos.y)} m${p.testFlight?' · TEST FLIGHT':p.gliding?' · GLIDE':''}`
     document.body.classList.toggle('test-flight',p.testFlight && p.mode==='free')
-    $('combat-status').textContent = `HULL ${Math.ceil(this.run.hull)}%${this.run.heat>0?' · HEAT '+this.run.heat.toFixed(1):''}${this.run.flow>1?' · FLOW '+this.run.flow.toFixed(1)+'×':''}${this.run.limp>=0?' · LIMP '+Math.ceil(this.run.limp)+'s':''}`
+    const cs = $('combat-status')
+    cs.textContent = `HULL ${Math.ceil(this.run.hull)}%${this.hudEventLabel?' · '+this.hudEventLabel:''}${this.run.heat>0?' · HEAT '+this.run.heat.toFixed(1):''}${this.run.flow>1?' · FLOW '+this.run.flow.toFixed(1)+'×':''}${this.run.limp>=0?' · LIMP '+Math.ceil(this.run.limp)+'s':''}`
+    cs.className = `combat-status${this.run.hull < 35 ? ' crit' : this.run.hull < 70 ? ' warn' : ''}`
+    $('hud').dataset.event = this.hudEvent
     $('speed').textContent = String(Math.round(p.groundSpeed * 3.6))
     const mode = $('mode')
     setHtml(mode, p.mode === 'mag' ? 'MAG-LOCK' : 'FREE HOVER')

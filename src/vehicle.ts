@@ -91,21 +91,24 @@ export function buildVehicleMesh(spec: VehicleSpec, maskId = 'balaclava') {
       halfW=1.12;halfL=2.25;break
     }
     case 'truck': {
-      add(new RoundedBoxGeometry(2.38, 1.48, 2.25, 1, 0.14), body, 0, 0.92, 2.38)
-      add(wedge(2.26, 0.42, 1.35, 0.55), body, 0, 1.58, 2.55)
-      add(new RoundedBoxGeometry(2.14, 0.64, 0.16, 1, 0.04), glass, 0, 1.36, 3.48)
-      add(new RoundedBoxGeometry(2.56, 2.48, 5.15, 1, 0.12), dark, 0, 1.44, -1.38)
-      add(new RoundedBoxGeometry(2.42, 0.26, 4.95, 1, 0.06), body, 0, 0.34, -0.35)
+      add(new RoundedBoxGeometry(2.12, 0.54, 4.75, 1, 0.12), body, 0, 0.32, 0)
+      add(wedge(1.98, 0.38, 1.85, 0.52), body, 0, 0.68, 1.32)
+      const truckCabin = new THREE.BoxGeometry(1.78, 0.54, 1.95)
+      const tcp = truckCabin.attributes.position
+      for (let i = 0; i < tcp.count; i++) if (tcp.getY(i) > 0) { tcp.setX(i, tcp.getX(i) * 0.82); tcp.setZ(i, tcp.getZ(i) * 0.62 + 0.08) }
+      truckCabin.computeVertexNormals()
+      add(truckCabin, glass, 0, 0.96, 0.35)
+      add(new THREE.BoxGeometry(1.42, 0.06, 1.15), body, 0, 1.24, 0.38)
+      add(new RoundedBoxGeometry(1.94, 0.36, 1.95, 1, 0.08), dark, 0, 0.66, -1.32)
       for (const side of [-1, 1]) {
-        add(new RoundedBoxGeometry(0.24, 0.48, 6.8, 1, 0.08), dark, side * 1.24, 0.36, 0.2)
-        add(new THREE.CylinderGeometry(0.24, 0.24, 0.56, 12), dark, side * 0.96, 0.24, -3.85).rotation.x = Math.PI / 2
-        add(new THREE.BoxGeometry(0.54, 0.09, 0.06), new THREE.MeshBasicMaterial({ color: 0xe7cf9b }), side * 0.82, 0.68, 3.52)
+        add(new RoundedBoxGeometry(0.26, 0.42, 3.85, 1, 0.08), dark, side * 1.04, 0.26, -0.1)
+        add(new THREE.CylinderGeometry(0.22, 0.22, 0.52, 12), dark, side * 0.84, 0.2, -2.18).rotation.x = Math.PI / 2
+        add(new THREE.BoxGeometry(0.48, 0.08, 0.06), new THREE.MeshBasicMaterial({ color: 0xe7cf9b }), side * 0.72, 0.58, 2.38)
+        add(new THREE.BoxGeometry(0.08, 0.14, 1.85), body, side * 0.96, 0.82, -1.32)
       }
-      add(new THREE.BoxGeometry(2.62, 0.1, 5.2), glow, 0, 2.22, -1.38)
-      add(new THREE.BoxGeometry(2.62, 0.1, 5.2), glow, 0, 0.58, -1.38)
-      add(new THREE.BoxGeometry(2.46, 0.09, 0.1), glow, 0, 0.48, 3.52)
-      add(new THREE.BoxGeometry(2.2, 0.08, 0.08), new THREE.MeshBasicMaterial({ color: 0xd85131 }), 0, 0.62, -3.98)
-      halfW = 1.3; halfL = 4
+      add(new THREE.BoxGeometry(2.18, 0.06, 4.45), glow, 0, 0.12, 0)
+      add(new THREE.BoxGeometry(1.88, 0.07, 0.06), new THREE.MeshBasicMaterial({ color: 0xd85131 }), 0, 0.58, -2.38)
+      halfW = 1.12; halfL = 2.42
       break
     }
     case 'luxury': {
@@ -173,11 +176,74 @@ export function buildVehicleMesh(spec: VehicleSpec, maskId = 'balaclava') {
   flame.name = 'flame'
   flame.visible = false
   g.add(flame)
+
+  // Procedural 3D visual damage markers (scorch seams, arcing repulsor nodes, and shunt shield cage).
+  const dmgGroup = new THREE.Group()
+  dmgGroup.name = 'damage-markers'
+  dmgGroup.visible = false
+  const scorchMat = new THREE.MeshBasicMaterial({ color: 0xff5a1f, wireframe: true, transparent: true, opacity: 0.75, blending: THREE.AdditiveBlending, depthWrite: false })
+  const scorchL = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.28, halfL * 1.15), scorchMat)
+  scorchL.position.set(-halfW * 0.96, 0.36, 0.1)
+  scorchL.name = 'damage-scorch-l'
+  const scorchR = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.28, halfL * 1.15), scorchMat)
+  scorchR.position.set(halfW * 0.96, 0.36, -0.1)
+  scorchR.name = 'damage-scorch-r'
+  const arcMat = new THREE.MeshBasicMaterial({ color: 0x00f0ff, wireframe: true, transparent: true, opacity: 0.9, blending: THREE.AdditiveBlending, depthWrite: false })
+  const arcFront = new THREE.Mesh(new THREE.OctahedronGeometry(0.32, 0), arcMat)
+  arcFront.position.set(halfW * 0.55, 0.48, halfL * 0.72)
+  arcFront.name = 'damage-arc-front'
+  const arcRear = new THREE.Mesh(new THREE.OctahedronGeometry(0.36, 0), scorchMat)
+  arcRear.position.set(-halfW * 0.55, 0.42, -halfL * 0.78)
+  arcRear.name = 'damage-arc-rear'
+  const shieldMat = new THREE.MeshBasicMaterial({ color: 0x00f0ff, wireframe: true, transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false })
+  const shield = new THREE.Mesh(new THREE.BoxGeometry(halfW * 2.18, 0.75, halfL * 2.08), shieldMat)
+  shield.position.set(0, 0.44, 0)
+  shield.name = 'damage-shield'
+  dmgGroup.add(scorchL, scorchR, arcFront, arcRear, shield)
+  g.add(dmgGroup)
+
   g.scale.setScalar(VEHICLE_SCALE)
   g.userData.halfL = halfL * VEHICLE_SCALE
   g.userData.halfW = halfW * VEHICLE_SCALE
 
   return g
+}
+
+/** Builds an instanced-ready vertex-colored BufferGeometry from the existing vehicle inventory. */
+export function buildTrafficFleetGeometry(fleetIndex: number, specs: readonly VehicleSpec[]): THREE.BufferGeometry {
+  const targetKinds: VehicleSpec['kind'][] = ['compact', 'luxury', 'super']
+  const wantedKind = targetKinds[fleetIndex % targetKinds.length]
+  const baseSpec = specs.find((s) => s.kind === wantedKind) ?? specs[Math.min(fleetIndex + 1, specs.length - 1)] ?? specs[0]
+  const group = buildVehicleMesh({ ...baseSpec, body: 0xffffff, glow: 0x00f0ff })
+  const parts: THREE.BufferGeometry[] = []
+  for (const child of group.children) {
+    if (!(child instanceof THREE.Mesh)) continue
+    if (child.name === 'pad' || child.name === 'contact-shadow' || child.name === 'flame') continue
+    const geo = (child.geometry.index ? child.geometry.toNonIndexed() : child.geometry.clone())
+    geo.translate(0, -0.35, 0)
+    const mat = child.material as THREE.MeshStandardMaterial | THREE.MeshBasicMaterial
+    const c = new THREE.Color(mat.color ? mat.color.getHex() : 0xffffff)
+    const count = geo.attributes.position.count
+    const colors = new Float32Array(count * 3)
+    for (let i = 0; i < colors.length; i += 3) {
+      colors[i] = c.r
+      colors[i + 1] = c.g
+      colors[i + 2] = c.b
+    }
+    geo.setAttribute('color', new THREE.BufferAttribute(colors, 3))
+    parts.push(geo)
+  }
+  const merged = mergeGeometries(parts)!
+  group.traverse((obj) => {
+    if (obj instanceof THREE.Mesh) {
+      obj.geometry.dispose()
+      const m = obj.material
+      if (Array.isArray(m)) m.forEach((x) => x.dispose())
+      else m.dispose()
+    }
+  })
+  parts.forEach((p) => p.dispose())
+  return merged
 }
 
 const wrap = (a: number) => Math.atan2(Math.sin(a), Math.cos(a))
@@ -198,6 +264,7 @@ export class Player {
   targetAlt = HOVER
   bank = 0
   boosting = false
+  gliding = false
   bump = 0
   lastBurn = 0
   laneIndex = 1
@@ -215,12 +282,73 @@ export class Player {
   private swayV = 0
   private hopY = 0
   private hopV = 0
+  private glideFuel = 1.6
   private reverseLatch = false
+  private brakeHold = 0
+  private shuntRoll = 0
+  private shuntPitch = 0
+  private shieldFlash = 0
+  private damageTime = 0
 
   constructor(spec: VehicleSpec, mask: string) {
     this.spec = spec
     this.mask = mask
     this.mesh = buildVehicleMesh(spec, mask)
+  }
+
+  get airborne() {
+    return this.hopY > 0.65
+  }
+
+  applyShunt(side: number, intensity = 1) {
+    const dir = side || (Math.random() > 0.5 ? 1 : -1)
+    this.shuntRoll = Math.max(-0.55, Math.min(0.55, this.shuntRoll + dir * 0.34 * intensity))
+    this.shuntPitch = Math.max(-0.22, Math.min(0.22, 0.12 * intensity))
+    this.shieldFlash = Math.min(1, 0.65 + 0.35 * intensity)
+    this.bump = Math.min(1, this.bump + 0.35 * intensity)
+  }
+
+  updateDamageVisuals(hull: number, dt: number, impactPulse = 0) {
+    this.damageTime += dt
+    if (impactPulse > 0) this.shieldFlash = Math.min(1, Math.max(this.shieldFlash, 0.45 + impactPulse * 0.02))
+    this.shieldFlash = Math.max(0, this.shieldFlash - dt * 2.4)
+    const dmgGroup = this.mesh.getObjectByName('damage-markers') as THREE.Group | undefined
+    if (!dmgGroup) return
+    const dmgRatio = Math.max(0, Math.min(1, (100 - hull) / 100))
+    const showAny = dmgRatio > 0.12 || this.shieldFlash > 0.02
+    dmgGroup.visible = showAny
+    if (!showAny) return
+
+    const flicker = 0.55 + 0.45 * Math.sin(this.damageTime * 28) * Math.cos(this.damageTime * 17)
+    const scorchL = dmgGroup.getObjectByName('damage-scorch-l') as THREE.Mesh | undefined
+    const scorchR = dmgGroup.getObjectByName('damage-scorch-r') as THREE.Mesh | undefined
+    const arcFront = dmgGroup.getObjectByName('damage-arc-front') as THREE.Mesh | undefined
+    const arcRear = dmgGroup.getObjectByName('damage-arc-rear') as THREE.Mesh | undefined
+    const shield = dmgGroup.getObjectByName('damage-shield') as THREE.Mesh | undefined
+
+    if (scorchL && scorchR) {
+      scorchL.visible = dmgRatio > 0.15
+      scorchR.visible = dmgRatio > 0.3
+      const mat = scorchL.material as THREE.MeshBasicMaterial
+      mat.opacity = Math.min(0.92, dmgRatio * 0.95 * flicker + this.shieldFlash * 0.4)
+    }
+    if (arcFront) {
+      arcFront.visible = dmgRatio > 0.25 || this.shieldFlash > 0.1
+      arcFront.rotation.x += dt * 11
+      arcFront.rotation.y -= dt * 14
+      arcFront.scale.setScalar(0.65 + (dmgRatio * 0.65 + this.shieldFlash * 0.5) * flicker)
+    }
+    if (arcRear) {
+      arcRear.visible = dmgRatio > 0.45 || this.shieldFlash > 0.25
+      arcRear.rotation.z += dt * 15
+      arcRear.scale.setScalar(0.6 + dmgRatio * 0.75 * flicker)
+    }
+    if (shield) {
+      shield.visible = this.shieldFlash > 0.02
+      const sm = shield.material as THREE.MeshBasicMaterial
+      sm.color.setHex(hull < 40 ? 0xff5a1f : 0x00f0ff)
+      sm.opacity = this.shieldFlash * 0.58 * (0.7 + 0.3 * Math.sin(this.damageTime * 36))
+    }
   }
 
   setSpec(spec: VehicleSpec) {
@@ -270,6 +398,10 @@ export class Player {
     this.speed = 0
     this.turnRequest = this.turnMemory = this.steerLatch = 0
     this.sway = this.swayV = 0
+    this.hopY = this.hopV = 0
+    this.gliding = false
+    this.brakeHold = 0
+    this.reverseLatch = false
     this.laneIndex = 1
     this.vel.set(0, 0)
     this.mode = 'mag'
@@ -280,7 +412,7 @@ export class Player {
   }
 
   /** Snap onto the closest conduit segment. Returns false if none is close enough. */
-  snap(world: World, range = 45) {
+  snap(world: World, range = 65) {
     if (world.isWater(this.pos.x,this.pos.z) && world.groundHeightAt(this.pos.x,this.pos.z,this.pos.y) < world.terrainHeightAt(this.pos.x,this.pos.z)-1) return false
     const nodes = world.city.nodes
     let best = -1, bestB = -1, bd = range, bt = 0
@@ -296,17 +428,18 @@ export class Player {
         const t = Math.max(0, Math.min(1, ((px - a.x) * dx + (pz - a.z) * dz) / l2))
         const d = Math.hypot(a.x + dx * t - px, a.z + dz * t - pz)
         const height = (a.y ?? 0) * (1-t) + (b.y ?? 0) * t
-        if (Math.abs(height + HOVER - this.pos.y) < 3 && d < bd) { bd = d; best = i; bestB = j; bt = t }
+        if (Math.abs(height + HOVER - this.pos.y) < 16 && d < bd) { bd = d; best = i; bestB = j; bt = t }
       }
     }
     if (best < 0) return false
     const a = nodes[best], b = nodes[bestB]
     const dir = Math.atan2(b.x - a.x, b.z - a.z)
     const len = Math.hypot(b.x - a.x, b.z - a.z)
-    const fwd = Math.abs(wrap(dir - this.heading)) < Math.PI / 2
+    const moveHeading = this.vel.length() > 3 ? Math.atan2(this.vel.x, this.vel.y) : this.heading
+    const fwd = Math.abs(wrap(dir - moveHeading)) <= Math.PI / 2
     if (fwd) { this.edgeA = best; this.edgeB = bestB; this.edgeS = bt * len }
     else { this.edgeA = bestB; this.edgeB = best; this.edgeS = (1 - bt) * len }
-    this.speed = Math.max(0, this.vel.length() * Math.cos(wrap(dir - this.heading)) * (fwd ? 1 : -1))
+    this.speed = Math.max(0, this.vel.length() * Math.max(0.35, Math.abs(Math.cos(wrap(dir - moveHeading)))))
     const cx = a.x + (b.x - a.x) * bt, cz = a.z + (b.z - a.z) * bt
     const h = fwd ? dir : dir + Math.PI
     const side = (this.pos.x - cx) * Math.cos(h) - (this.pos.z - cz) * Math.sin(h)
@@ -315,6 +448,8 @@ export class Player {
     this.swayV = 0
     this.mode = 'mag'
     this.turnRequest=this.turnMemory=this.steerLatch=0
+    this.brakeHold = 0
+    this.reverseLatch = false
     return true
   }
 
@@ -329,6 +464,7 @@ export class Player {
     this.vel.y -= Math.sin(this.heading) * this.swayV
     this.targetAlt = Math.max(this.pos.y, HOVER)
     this.hopY = this.hopV = 0
+    this.gliding = false
     return sling
   }
 
@@ -342,8 +478,10 @@ export class Player {
     for (const c of opts) {
       const n = nodes[c]
       const rel = wrap(Math.atan2(n.x - b.x, n.z - b.z) - inAng)
-      const requested = Math.abs(steer)>0.3 && Math.sign(rel)===Math.sign(steer) && Math.abs(rel)>0.35 && Math.abs(rel)<2.65
-      const score = requested ? 4 - Math.abs(Math.abs(rel)-Math.PI/2) : -Math.abs(rel)
+      const requested = Math.abs(steer) > 0.16 && Math.sign(rel) === Math.sign(steer) && Math.abs(rel) > 0.2 && Math.abs(rel) < 2.85
+      // Penalize accidental acute hairpins (> 150 deg) when cruising straight unless no other forward option exists.
+      const straightScore = Math.abs(rel) > 2.62 ? -6 - Math.abs(rel) : -Math.abs(rel)
+      const score = requested ? 4 - Math.abs(Math.abs(rel) - Math.PI / 2) : straightScore
       if (score > bestScore) { bestScore = score; best = c }
     }
     return best
@@ -360,11 +498,32 @@ export class Player {
       if(next===edgeA)return {dir:2,junction:false}
       const c=nodes[next]
       const rel=wrap(Math.atan2(c.x-b.x,c.z-b.z)-Math.atan2(b.x-a.x,b.z-a.z))
-      if(b.adj.length>2 || Math.abs(rel)>0.45)return {dir:rel>0.45?1:rel< -0.45?-1:0,junction:true}
+      if(b.adj.length>2 || Math.abs(rel)>0.38)return {dir:rel>0.2?1:rel< -0.2?-1:0,junction:true}
       if(distance>140)break
       edgeA=edgeB;edgeB=next
     }
     return {dir:0,junction:false}
+  }
+
+  private stepHopAndGlide(dt: number, input: Input, hasJuice: boolean) {
+    this.gliding = false
+    if (input.up && this.hopY <= 0.12 && hasJuice) {
+      this.hopV = 11.2
+      this.glideFuel = 1.65
+    }
+    if (input.up && this.hopY > 0.25 && this.hopV <= 0.5 && this.glideFuel > 0 && hasJuice) {
+      this.gliding = true
+      this.glideFuel = Math.max(0, this.glideFuel - dt)
+      this.hopV = Math.max(-2.6, this.hopV - 8.5 * dt)
+    } else {
+      this.hopV -= 25 * dt
+    }
+    if (input.down && this.hopY > 0) this.hopV -= 24 * dt
+    this.hopY = Math.max(0, this.hopY + this.hopV * dt)
+    if (this.hopY === 0) {
+      this.hopV = Math.max(0, this.hopV)
+      this.glideFuel = 1.65
+    }
   }
 
   update(dt: number, input: Input, world: World, hasJuice: boolean) {
@@ -377,7 +536,7 @@ export class Player {
 
     if (this.mode === 'mag') {
       const oldA=this.edgeA, oldB=this.edgeB, oldS=this.edgeS, oldX=this.pos.x, oldZ=this.pos.z
-      const steer = Math.abs(input.steer)>(this.steerLatch ? 0.22 : 0.32) ? Math.sign(input.steer) : 0
+      const steer = Math.abs(input.steer)>(this.steerLatch ? 0.14 : 0.2) ? Math.sign(input.steer) : 0
       this.turnMemory=Math.max(0,this.turnMemory-dt)
       if(steer){this.turnRequest=steer;this.turnMemory=6}
       else if(!this.turnMemory)this.turnRequest=0
@@ -386,20 +545,31 @@ export class Player {
       const top = this.overclocking ? OVERCLOCK_SPEED : s.maxSpeed * 1.1 * cap * (boost ? s.boost : 1)
       this.speed += input.throttle * s.accel * 1.1 * power * (boost ? s.boost * 1.4 : 1) * dt
       burn += input.throttle * (boost ? 2.2 : 0.7)
-      if (input.brake === 0) this.reverseLatch = false
+      if (input.brake === 0) {
+        this.reverseLatch = false
+        this.brakeHold = 0
+      }
       if (input.brake > 0 && !this.reverseLatch) {
-        if (this.speed > 0.6) this.speed -= s.accel * 1.8 * dt
-        else {
-          this.reverseLatch = true
-          const t = this.edgeA
-          this.edgeA = this.edgeB
-          this.edgeB = t
-          const na = world.city.nodes[this.edgeA], nb = world.city.nodes[this.edgeB]
-          this.edgeS = Math.hypot(nb.x - na.x, nb.z - na.z) - this.edgeS
+        if (this.speed > 0.6) {
+          this.speed = Math.max(0, this.speed - s.accel * 2.1 * dt)
+          this.brakeHold = 0
+        } else {
           this.speed = 0
-          this.sway = -this.sway
-          this.laneIndex=2-this.laneIndex
-          this.swayV = 0
+          this.brakeHold += dt
+          // Require holding brake at a stop for 0.45s (with no throttle) before executing a 180 flip.
+          if (this.brakeHold >= 0.45 && input.throttle === 0) {
+            this.reverseLatch = true
+            this.brakeHold = 0
+            const t = this.edgeA
+            this.edgeA = this.edgeB
+            this.edgeB = t
+            const na = world.city.nodes[this.edgeA], nb = world.city.nodes[this.edgeB]
+            this.edgeS = Math.hypot(nb.x - na.x, nb.z - na.z) - this.edgeS
+            this.speed = 0
+            this.sway = -this.sway
+            this.laneIndex = 2 - this.laneIndex
+            this.swayV = 0
+          }
         }
       }
       this.speed *= Math.pow(0.8, dt)
@@ -419,14 +589,14 @@ export class Player {
         const turn = Math.abs(signedTurn)
         if(turn>0.35) {
           if(this.speed>24)this.apex=true
-          // Magnetic corner assist sheds speed rather than ejecting the player.
-          const cornerSpeed=next===this.edgeA?8:Math.max(16,38/Math.sqrt(turn))
+          // Magnetic corner assist sheds speed smoothly rather than ejecting the player.
+          const cornerSpeed=next===this.edgeA?10:Math.max(16,38/Math.sqrt(turn))
           const before=this.speed
           this.speed=Math.min(this.speed,cornerSpeed)
           remaining*=this.speed/Math.max(before,0.001)
         }
         // A junction on the wrong side must not swallow the queued turn.
-        if(b.adj.length>2 && turn>0.35 && Math.sign(signedTurn)===this.turnRequest){this.turnRequest=0;this.turnMemory=0}
+        if(b.adj.length>2 && turn>0.2 && Math.sign(signedTurn)===this.turnRequest){this.turnRequest=0;this.turnMemory=0}
         this.edgeA = this.edgeB
         this.edgeB = next
         this.edgeS = 0
@@ -437,14 +607,18 @@ export class Player {
       const t = this.edgeS / len
       const target = Math.atan2(b.x - a.x, b.z - a.z)
       const diff = wrap(target - this.heading)
-      this.heading += diff * Math.min(1, dt * 7)
+      this.heading += diff * Math.min(1, dt * 10)
 
-      if(steer && steer!==this.steerLatch) this.laneIndex=Math.max(0,Math.min(2,this.laneIndex-steer))
+      if(steer && steer!==this.steerLatch) {
+        const prevLane = this.laneIndex
+        this.laneIndex=Math.max(0,Math.min(2,this.laneIndex-steer))
+        if (this.laneIndex !== prevLane) this.shuntRoll += steer * 0.18
+      }
       this.steerLatch=steer
       const oldSway=this.sway
       const chassisHalfWidth=this.mesh.userData.halfW as number
       const laneWidth=laneOffset(Math.min(a.width??5,b.width??5),chassisHalfWidth)
-      this.sway += (((1-this.laneIndex)*laneWidth)-this.sway)*(1-Math.exp(-18*dt))
+      this.sway += (((1-this.laneIndex)*laneWidth)-this.sway)*(1-Math.exp(-24*dt))
       this.swayV=(this.sway-oldSway)/Math.max(dt,0.001)
       if ((this.laneIndex === 0 || this.laneIndex === 2) && laneWidth > 0.25 && this.speed > 26 && Math.abs(Math.abs(this.sway) - laneWidth) < 0.18) {
         this.curbScrape = true
@@ -452,16 +626,13 @@ export class Player {
       const lx = Math.cos(target), lz = -Math.sin(target)
       this.pos.x = a.x + (b.x - a.x) * t + lx * this.sway
       this.pos.z = a.z + (b.z - a.z) * t + lz * this.sway
-      this.bank += (Math.max(-0.7, Math.min(0.7, -diff * 1.2 - this.swayV * 0.06)) - this.bank) * Math.min(1, dt * 8)
+      this.bank += (Math.max(-0.7, Math.min(0.7, -diff * 1.2 - this.swayV * 0.06)) - this.bank) * Math.min(1, dt * 9)
 
-      if (input.up && this.hopY <= 0.01 && hasJuice) this.hopV = 8
-      this.hopV -= 26 * dt
-      this.hopY = Math.max(0, this.hopY + this.hopV * dt)
-      if (this.hopY === 0) this.hopV = Math.max(0, this.hopV)
+      this.stepHopAndGlide(dt, input, hasJuice)
       const railY=(a.y??0)*(1-t)+(b.y??0)*t
       const surfaceY=world.surfaceHeightAt(this.pos.x,this.pos.z,railY)
       const hoverY = surfaceY + (hasJuice ? HOVER : 0.55) + this.hopY + Math.sin(performance.now() / 300) * 0.05
-      this.pos.y = Math.max(surfaceY+.65,this.pos.y + (hoverY - this.pos.y) * Math.min(1, dt * (this.hopY > 0 ? 20 : 4)))
+      this.pos.y = Math.max(surfaceY+.65,this.pos.y + (hoverY - this.pos.y) * Math.min(1, dt * (this.hopY > 0 ? 22 : 6)))
       this.vel.set(Math.sin(this.heading) * this.speed, Math.cos(this.heading) * this.speed)
       if(world.hitBuilding(this.pos.x,this.pos.z,this.pos.y-0.5)>=0) {
         const cx=a.x+(b.x-a.x)*t, cz=a.z+(b.z-a.z)*t
@@ -472,7 +643,6 @@ export class Player {
           this.edgeA=oldA;this.edgeB=oldB;this.edgeS=oldS;this.pos.x=oldX;this.pos.z=oldZ
         }
       }
-      if(world.isWater(this.pos.x,this.pos.z) && world.groundHeightAt(this.pos.x,this.pos.z,this.pos.y)<world.terrainHeightAt(this.pos.x,this.pos.z)-1 && this.pos.y<world.terrainHeightAt(this.pos.x,this.pos.z)+3) this.unsnap()
     } else {
       const spd = this.vel.length()
       const turnScale = 0.55 + 0.45 * Math.min(1, spd / 10)
@@ -498,8 +668,12 @@ export class Player {
 
       const ground=world.groundHeightAt(this.pos.x,this.pos.z,this.pos.y)+HOVER
       if(this.testFlight && hasJuice) {
+        this.hopY = 0; this.hopV = 0; this.gliding = false
         this.targetAlt=Math.max(ground,Math.min(ground+250,this.targetAlt+((input.up?1:0)-(input.down?1:0))*22*dt))
-      } else this.targetAlt=ground
+      } else {
+        this.stepHopAndGlide(dt, input, hasJuice)
+        this.targetAlt=ground + this.hopY
+      }
       const nx = this.pos.x + this.vel.x * dt
       const nz = this.pos.z + this.vel.y * dt
       const hit = world.hitBuilding(nx, nz, this.pos.y - 0.5)
@@ -525,30 +699,34 @@ export class Player {
         }
       }
       const floor = world.groundHeightAt(this.pos.x, this.pos.z, this.pos.y) + HOVER
-      const desired=this.testFlight?Math.max(floor,this.targetAlt):floor
+      const desired=this.testFlight?Math.max(floor,this.targetAlt):floor + this.hopY
       let y = desired + Math.sin(performance.now() / 300) * 0.06
       if(y<this.pos.y && world.hitBuilding(this.pos.x,this.pos.z,y-0.5)>=0)y=this.pos.y
-      this.pos.y = Math.max(floor-.06,this.pos.y + (y - this.pos.y) * Math.min(1, dt * 3))
+      this.pos.y = Math.max(floor-.06,this.pos.y + (y - this.pos.y) * Math.min(1, dt * (this.hopY > 0 ? 18 : 3)))
       this.speed = this.vel.length()
       this.nextNode = -1
     }
 
     this.bump = Math.max(0, this.bump - dt * 2)
-    this.lastBurn = burn
+    this.shuntRoll *= Math.exp(-9 * dt)
+    this.shuntPitch *= Math.exp(-8 * dt)
+    this.lastBurn = burn + (this.gliding ? 0.35 : 0)
     this.mesh.position.copy(this.pos)
     this.mesh.rotation.set(0, this.heading, 0)
-    this.mesh.rotateZ(this.bank)
-    this.mesh.rotateX(-Math.min(0.12, input.throttle * 0.08) + (this.bump > 0 ? Math.sin(performance.now() / 30) * this.bump * 0.1 : 0))
+    this.mesh.rotateZ(this.bank + this.shuntRoll)
+    const hopPitch = this.hopY > 0.1 ? Math.max(-0.18, Math.min(0.24, this.hopV * 0.022 + (this.gliding ? 0.1 : 0))) : 0
+    this.mesh.rotateX(-Math.min(0.12, input.throttle * 0.08) - hopPitch + this.shuntPitch + (this.bump > 0 ? Math.sin(performance.now() / 30) * this.bump * 0.1 : 0))
     const flame = this.mesh.getObjectByName('flame')
     if (flame) {
-      flame.visible = this.boosting
-      flame.scale.setScalar(0.8 + Math.random() * 0.5)
+      flame.visible = this.boosting || this.gliding
+      flame.scale.setScalar((this.gliding ? 0.65 : 0.8) + Math.random() * 0.5)
     }
     const pad = this.mesh.getObjectByName('pad') as THREE.Mesh | undefined
     if (pad) {
       pad.position.y = (world.surfaceHeightAt(this.pos.x,this.pos.z,this.pos.y-1.3)-this.pos.y + 0.1) / VEHICLE_SCALE
       const shadow=this.mesh.getObjectByName('contact-shadow');if(shadow)shadow.position.y=pad.position.y-0.01
-      ;(pad.material as THREE.MeshBasicMaterial).opacity = (hasJuice ? 0.055 + Math.random() * 0.015 : 0.04) * (this.spec.kind === 'board' ? 0.25 : 1)
+      ;(pad.material as THREE.MeshBasicMaterial).opacity = (hasJuice ? (this.gliding ? 0.14 : 0.055) + Math.random() * 0.015 : 0.04) * (this.spec.kind === 'board' ? 0.25 : 1)
     }
   }
 }
+

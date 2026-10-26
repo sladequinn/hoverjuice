@@ -1,28 +1,29 @@
-import {VEHICLE_SCALE} from './data'
+import {VEHICLE_SCALE,VEHICLES} from './data'
 import {PAINTS} from './customization'
 import {GANG_INFO} from './gangs'
 import type {Gang} from './filter'
 import * as THREE from 'three'
-import {mergeGeometries} from 'three/examples/jsm/utils/BufferGeometryUtils.js'
+import {buildTrafficFleetGeometry} from './vehicle'
 import type { World } from './world'
 import type { HoverjuiceSpray } from './hoverjuice'
 interface Site {id:string;node:number;next:number;x:number;y:number;z:number;heading:number;gang?:Gang;occupant:number|null}
-interface Agent {a:number;b:number;distance:number;speed:number;seed:number;kind:number;pos:THREE.Vector3;near:boolean;cooldown:number;horn:number;heading:number;leader:Agent|null;site:Site|null;phase:'drive'|'enter'|'park'|'exit';progress:number;wait:number;visits:number;turns:number;from:THREE.Vector3}
-export interface TrafficEvents {nearMisses:number;impact:number;boxed:boolean;horn?:{distance:number;side:number;freight:boolean}}
-export interface ActivityDealer {id:string;node:number;x:number;z:number;gang:Gang}
-function fleetGeometry(kind:number){
- const parts:THREE.BufferGeometry[]=[]
- const box=(w:number,h:number,l:number,x:number,y:number,z:number,color:number)=>{
-  const g=new THREE.BoxGeometry(w,h,l).toNonIndexed();g.translate(x,y,z)
-  const c=new THREE.Color(color),colors=new Float32Array(g.attributes.position.count*3)
-  for(let i=0;i<colors.length;i+=3){colors[i]=c.r;colors[i+1]=c.g;colors[i+2]=c.b}
-  g.setAttribute('color',new THREE.BufferAttribute(colors,3));parts.push(g)
- }
- box(2.1,.65,4.6,0,0,0,0xffffff)
- box(kind===1?1.85:1.6,kind===1?.85:.5,kind===1?2.7:2.25,0,.55,kind===1?-.6:-.2,kind===1?0xaeb9bd:0x30434e)
- for(const side of [-1,1]){box(.5,.12,.08,side*.68,.12,2.32,0xfff2cb);box(.55,.1,.08,side*.65,.1,-2.32,0xff5a31);box(.18,.18,2.8,side*1.06,-.15,-.1,0x354c58)}
- const merged=mergeGeometries(parts)!;parts.forEach(p=>p.dispose());return merged
+interface Agent {
+ a:number;b:number;distance:number;speed:number;seed:number;kind:number;pos:THREE.Vector3;near:boolean;cooldown:number;horn:number;heading:number
+ leader:Agent|null;site:Site|null;phase:'drive'|'enter'|'park'|'exit';progress:number;wait:number;visits:number;turns:number;from:THREE.Vector3
+ shuntX:number;shuntY:number;shuntZ:number;shuntVX:number;shuntVY:number;shuntVZ:number;shuntYaw:number;shuntYawV:number;shuntRoll:number;damage:number;flash:number
 }
+export interface TrafficEvents {
+ nearMisses:number
+ impact:number
+ boxed:boolean
+ shunts?:number
+ vaults?:number
+ impactSide?:number
+ impactPos?:THREE.Vector3
+ horn?:{distance:number;side:number;freight:boolean}
+}
+export interface ActivityDealer {id:string;node:number;x:number;z:number;gang:Gang}
+
 /** Bounded vehicle pool with road queues, local trips and reservable venue parking. */
 export class TrafficSystem {
  group=new THREE.Group()
@@ -31,8 +32,12 @@ export class TrafficSystem {
  private fleets:THREE.InstancedMesh[]=[]
  private matrix=new THREE.Matrix4()
  private rotation=new THREE.Quaternion()
+ private euler=new THREE.Euler(0,0,0,'YXZ')
+ private renderPos=new THREE.Vector3()
  private scale=new THREE.Vector3()
  private tint=new THREE.Color()
+ private flashColor=new THREE.Color(0xff6a1a)
+ private scorchColor=new THREE.Color(0x28201e)
  private nearby:number[]=[]
  private sites:Site[]=[]
  private recycleClock=0
@@ -40,11 +45,14 @@ export class TrafficSystem {
  private queues=new Map<string,Agent[]>()
  private junctions=new Map<number,{seed:number;until:number}>()
  private waiting=new Map<number,Map<number,number>>()
- private up=new THREE.Vector3(0,1,0)
  constructor(world:World){
   this.world=world
   for(let kind=0;kind<3;kind++){
-   const mesh=new THREE.InstancedMesh(fleetGeometry(kind),new THREE.MeshStandardMaterial({color:0xffffff,vertexColors:true,roughness:.65,metalness:.18}),64)
+   const mesh=new THREE.InstancedMesh(
+    buildTrafficFleetGeometry(kind,VEHICLES),
+    new THREE.MeshStandardMaterial({color:0xffffff,vertexColors:true,roughness:.46,metalness:.24}),
+    64,
+   )
    mesh.count=0;mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);mesh.frustumCulled=false
    this.fleets.push(mesh);this.group.add(mesh)
   }
@@ -56,7 +64,12 @@ export class TrafficSystem {
   const desired=Math.min(192,Math.max(72,Math.floor(nodes.length/35)))
   while(this.agents.length<desired){
    const seed=this.agents.length+1,a=candidates[(seed*7919)%candidates.length].i,b=nodes[a].adj[0]
-   this.agents.push({a,b,distance:Math.hypot(nodes[b].x-nodes[a].x,nodes[b].z-nodes[a].z)*((seed*.61803398875)%1),speed:12,seed,kind:seed%3,pos:new THREE.Vector3(nodes[a].x,(nodes[a].y??0)+1.3,nodes[a].z),near:false,cooldown:0,horn:0,heading:0,leader:null,site:null,phase:'drive',progress:0,wait:0,visits:0,turns:0,from:new THREE.Vector3()})
+   this.agents.push({
+    a,b,distance:Math.hypot(nodes[b].x-nodes[a].x,nodes[b].z-nodes[a].z)*((seed*.61803398875)%1),speed:12,seed,kind:seed%3,
+    pos:new THREE.Vector3(nodes[a].x,(nodes[a].y??0)+1.3,nodes[a].z),near:false,cooldown:0,horn:0,heading:0,leader:null,site:null,
+    phase:'drive',progress:0,wait:0,visits:0,turns:0,from:new THREE.Vector3(),
+    shuntX:0,shuntY:0,shuntZ:0,shuntVX:0,shuntVY:0,shuntVZ:0,shuntYaw:0,shuntYawV:0,shuntRoll:0,damage:0,flash:0,
+   })
   }
  }
  /** Keep existing reservations while streamed dealers and fuel sites change. */
@@ -111,7 +124,7 @@ export class TrafficSystem {
  }
  update(dt:number,player:THREE.Vector3,playerSpeed=0,heat=0,spray?:HoverjuiceSpray):TrafficEvents {
   dt=Math.min(.1,Math.max(0,dt));this.time+=dt
-  const events:TrafficEvents={nearMisses:0,impact:0,boxed:false},nodes=this.world.city.nodes,counts=[0,0,0]
+  const events:TrafficEvents={nearMisses:0,impact:0,boxed:false,shunts:0,vaults:0},nodes=this.world.city.nodes,counts=[0,0,0]
   let closeHostiles=0
   this.recycleClock-=dt
   if(dt>0&&this.recycleClock<=0){
@@ -120,7 +133,9 @@ export class TrafficSystem {
    let budget=3
    for(const car of this.agents){
     if(nearby.length&&budget>0&&car.pos.distanceToSquared(player)>650**2){
-     this.release(car);const pick=nearby[(car.seed*7919)%nearby.length];car.a=pick;car.b=nodes[pick].adj[(car.seed+car.visits)%nodes[pick].adj.length];car.distance=0;car.near=false;car.cooldown=1;car.speed=10;budget--
+     this.release(car);const pick=nearby[(car.seed*7919)%nearby.length];car.a=pick;car.b=nodes[pick].adj[(car.seed+car.visits)%nodes[pick].adj.length];car.distance=0;car.near=false;car.cooldown=1;car.speed=10
+     car.shuntX=car.shuntY=car.shuntZ=car.shuntVX=car.shuntVY=car.shuntVZ=car.shuntYaw=car.shuntYawV=car.shuntRoll=car.damage=car.flash=0
+     budget--
     }
     if(car.phase==='drive'&&car.seed%3!==1)this.assignTrip(car)
    }
@@ -130,7 +145,21 @@ export class TrafficSystem {
   for(const car of this.agents){car.leader=null;if(car.phase!=='drive')continue;const key=`${car.a}:${car.b}`,queue=this.queues.get(key)??[];queue.push(car);this.queues.set(key,queue)}
   for(const queue of this.queues.values()){queue.sort((a,b)=>b.distance-a.distance);for(let i=1;i<queue.length;i++)queue[i].leader=queue[i-1]}
   for(const car of this.agents){
-   car.cooldown=Math.max(0,car.cooldown-dt);car.horn=Math.max(0,car.horn-dt)
+   car.cooldown=Math.max(0,car.cooldown-dt);car.horn=Math.max(0,car.horn-dt);car.flash=Math.max(0,car.flash-dt*2.5)
+   if(dt>0&&(Math.abs(car.shuntX)+Math.abs(car.shuntY)+Math.abs(car.shuntZ)+Math.abs(car.shuntVX)+Math.abs(car.shuntVY)+Math.abs(car.shuntVZ)+Math.abs(car.shuntYaw)+Math.abs(car.shuntRoll)>1e-3)){
+    car.shuntX+=car.shuntVX*dt
+    car.shuntY+=car.shuntVY*dt
+    car.shuntZ+=car.shuntVZ*dt
+    if(car.shuntY>0||car.shuntVY>0){
+     car.shuntVY-=22*dt
+     if(car.shuntY<0){car.shuntY=0;car.shuntVY=Math.abs(car.shuntVY)*0.28;if(car.shuntVY<0.8)car.shuntVY=0}
+    }
+    const damp=Math.exp(-4.2*dt)
+    car.shuntVX*=damp;car.shuntVZ*=damp
+    car.shuntX*=Math.exp(-2.2*dt);car.shuntZ*=Math.exp(-2.2*dt)
+    car.shuntYaw+=car.shuntYawV*dt;car.shuntYawV*=Math.exp(-5.5*dt);car.shuntYaw*=Math.exp(-3.5*dt)
+    car.shuntRoll*=Math.exp(-5*dt)
+   }
    const d=player.distanceTo(car.pos),hostile=car.kind===2&&heat>.75
    if(hostile&&car.phase==='drive'&&car.site)this.release(car)
    if(car.phase!=='drive'&&car.site){
@@ -140,7 +169,7 @@ export class TrafficSystem {
      if(car.wait<=0){car.phase='exit';car.progress=0;car.from.copy(car.pos)}
     }else{
      const node=nodes[site.node],next=nodes[site.next],len=Math.hypot(next.x-node.x,next.z-node.z)||1
-     const mergeAt=Math.min(len-1,6),lane=Math.max(0,Math.min(1.2,Math.min(node.width??5,next.width??5)/2-1.32*VEHICLE_SCALE-.2)),mergeX=node.x+(next.x-node.x)*mergeAt/len+Math.cos(site.heading)*lane,mergeZ=node.z+(next.z-node.z)*mergeAt/len-Math.sin(site.heading)*lane
+     const mergeAt=Math.min(len-1,6),lane=Math.max(0,Math.min(1.2,Math.min(node.width??5,next.width??5)/2-1.1*VEHICLE_SCALE-.2)),mergeX=node.x+(next.x-node.x)*mergeAt/len+Math.cos(site.heading)*lane,mergeZ=node.z+(next.z-node.z)*mergeAt/len-Math.sin(site.heading)*lane
      const blocked=car.phase==='exit'&&(this.agents.some(other=>other!==car&&other.phase==='drive'&&Math.hypot(other.pos.x-mergeX,other.pos.z-mergeZ)<7)||Math.hypot(player.x-mergeX,player.z-mergeZ)<7)
      if(!blocked)car.progress=Math.min(1,car.progress+dt/(car.phase==='enter'?2.5:3))
      const t=car.progress*car.progress*(3-2*car.progress),targetX=car.phase==='enter'?site.x:mergeX,targetZ=car.phase==='enter'?site.z:mergeZ
@@ -201,26 +230,60 @@ export class TrafficSystem {
      a=nodes[car.a];b=nodes[car.b];len=Math.hypot(b.x-a.x,b.z-a.z)||1
     }
     const t=Math.min(1,car.distance/len),heading=Math.atan2(b.x-a.x,b.z-a.z)
-    const clearance=Math.max(0,Math.min(a.width??5,b.width??5)/2-(car.kind===1?1.32:car.kind===0?.74:1.05)*VEHICLE_SCALE-.2)
+    const clearance=Math.max(0,Math.min(a.width??5,b.width??5)/2-1.08*VEHICLE_SCALE-.2)
     let lane=Math.min(1.2,clearance)
-    if(d<16&&playerSpeed>25&&!hostile){lane=Math.min(clearance,lane+.35);if(car.horn===0&&dt>0){events.horn??={distance:d,side:Math.sign(car.pos.x-player.x),freight:car.kind===1};car.horn=4}}
+    if(d<20&&playerSpeed>20&&!hostile){lane=Math.min(clearance,lane+.48);if(d<16&&playerSpeed>25&&car.horn===0&&dt>0){events.horn??={distance:d,side:Math.sign(car.pos.x-player.x),freight:car.kind===1};car.horn=4}}
     if(hostile&&d<15){lane=0;closeHostiles++}
     car.pos.set(a.x+(b.x-a.x)*t+Math.cos(heading)*lane,(a.y??0)*(1-t)+(b.y??0)*t+1.3,a.z+(b.z-a.z)*t-Math.sin(heading)*lane)
     if(dt===0)car.heading=heading;else car.heading+=Math.atan2(Math.sin(heading-car.heading),Math.cos(heading-car.heading))*Math.min(1,dt*8)
    }
+   const wx=car.pos.x+car.shuntX,wy=car.pos.y+car.shuntY,wz=car.pos.z+car.shuntZ
    if(dt>0){
-    const nowDistance=player.distanceTo(car.pos),hit=nowDistance<(car.kind===1?3.1:2.1)*VEHICLE_SCALE
-    if(hit&&car.cooldown===0){events.impact=Math.max(events.impact,Math.max(4,Math.abs(playerSpeed-car.speed)));car.cooldown=1}
-    if(nowDistance<6&&!hit&&car.phase==='drive')car.near=true
-    if(nowDistance>9&&car.near){if(playerSpeed>25&&car.cooldown===0)events.nearMisses++;car.near=false}
+    const horizDist=Math.hypot(player.x-wx,player.z-wz)
+    const vertDiff=player.y-wy
+    const hitRadius=(car.kind===1?2.8:2.1)*VEHICLE_SCALE
+    const vaulted=horizDist<hitRadius*1.35&&vertDiff>0.62&&vertDiff<4.5
+    const hit=!vaulted&&horizDist<hitRadius&&Math.abs(vertDiff)<=0.62
+    if(vaulted&&car.cooldown===0){
+     events.vaults=(events.vaults??0)+1
+     events.nearMisses++
+     events.impactPos=new THREE.Vector3(wx,wy+0.5,wz)
+     car.cooldown=0.85
+    }else if(hit&&car.cooldown===0){
+     const relSpeed=Math.max(4,Math.abs(playerSpeed-car.speed))
+     events.impact=Math.max(events.impact,relSpeed)
+     events.shunts=(events.shunts??0)+1
+     const dx=wx-player.x,dz=wz-player.z,dist=Math.hypot(dx,dz)||1
+     const nx=dx/dist,nz=dz/dist
+     const rightX=Math.cos(car.heading),rightZ=-Math.sin(car.heading)
+     const sideSign=Math.sign(dx*rightX+dz*rightZ)||(car.seed%2?1:-1)
+     const push=Math.min(28,Math.max(11,playerSpeed*0.65+8))
+     car.shuntVX=nx*push*0.55+rightX*sideSign*push*0.75
+     car.shuntVZ=nz*push*0.55+rightZ*sideSign*push*0.75
+     car.shuntVY=2.6+Math.min(3.4,playerSpeed*0.06)
+     car.shuntYawV=sideSign*(4.2+Math.min(4.8,playerSpeed*0.08))
+     car.shuntRoll=sideSign*0.52
+     car.damage=Math.min(1,car.damage+0.45)
+     car.flash=0.38
+     car.cooldown=0.85
+     events.impactSide=sideSign
+     events.impactPos=new THREE.Vector3((player.x+wx)*0.5,wy+0.35,(player.z+wz)*0.5)
+    }
+    if(horizDist<6&&!hit&&!vaulted&&car.phase==='drive')car.near=true
+    if(horizDist>9&&car.near){if(playerSpeed>25&&car.cooldown===0)events.nearMisses++;car.near=false}
    }
-   this.rotation.setFromAxisAngle(this.up,car.heading)
-   const scale=car.kind===1?this.scale.set(1.25,1.5,1.8):car.kind===0?this.scale.set(.8,.8,.85):this.scale.set(1,1,1)
-   this.matrix.compose(car.pos,this.rotation,scale.multiplyScalar(VEHICLE_SCALE))
+   this.euler.set(0,car.heading+car.shuntYaw,car.shuntRoll,'YXZ')
+   this.rotation.setFromEuler(this.euler)
+   this.renderPos.set(wx,wy,wz)
+   this.scale.setScalar(VEHICLE_SCALE)
+   this.matrix.compose(this.renderPos,this.rotation,this.scale)
    const slot=counts[car.kind]++;this.fleets[car.kind].setMatrixAt(slot,this.matrix)
    const gang=car.site?.gang
-   this.tint.set(gang?GANG_INFO[gang].color:PAINTS[car.seed%PAINTS.length].color);this.fleets[car.kind].setColorAt(slot,this.tint)
-   if(d<65)spray?.emit(car,dt,car.pos,car.heading,car.speed,1.05*scale.x,2.3*scale.z,car.pos.y-1.3,false,car.phase==='park'?.12:.35)
+   this.tint.set(gang?GANG_INFO[gang].color:PAINTS[car.seed%PAINTS.length].color)
+   if(car.damage>0)this.tint.lerp(this.scorchColor,car.damage*0.55)
+   if(car.flash>0)this.tint.lerp(this.flashColor,Math.min(1,car.flash*2.2))
+   this.fleets[car.kind].setColorAt(slot,this.tint)
+   if(d<65)spray?.emit(car,dt,this.renderPos,car.heading,car.speed,1.05,2.3,car.pos.y-1.3,false,car.phase==='park'?.12:.35)
   }
   for(let i=0;i<3;i++){this.fleets[i].count=counts[i];this.fleets[i].instanceMatrix.needsUpdate=true;if(this.fleets[i].instanceColor)this.fleets[i].instanceColor!.needsUpdate=true}
   events.boxed=closeHostiles>=3&&playerSpeed<2
@@ -231,7 +294,8 @@ export class TrafficSystem {
    .filter(c=>c.phase==='drive'&&c.pos.distanceToSquared(player)<180**2)
    .sort((a,b)=>a.pos.distanceToSquared(player)-b.pos.distanceToSquared(player))
    .slice(0,limit)
-   .map(c=>({x:c.pos.x,y:c.pos.y,z:c.pos.z,heading:c.heading,hostile:c.kind===2&&heat>.75}))
+   .map(c=>({x:c.pos.x+c.shuntX,y:c.pos.y+c.shuntY,z:c.pos.z+c.shuntZ,heading:c.heading+c.shuntYaw,hostile:c.kind===2&&heat>.75}))
  }
  dispose(){for(const mesh of this.fleets){mesh.geometry.dispose();(mesh.material as THREE.Material).dispose()}this.agents=[];this.sites=[];this.queues.clear();this.junctions.clear();this.waiting.clear()}
 }
+

@@ -774,6 +774,30 @@ body.is-touch #combat-status{font-size:9px;line-height:10px}
   text-shadow: 0 0 8px rgba(0, 240, 255, 0.32);
 }
 
+.combat-status {
+  transition: color 0.15s, text-shadow 0.15s;
+}
+.combat-status.warn {
+  color: var(--holo-amber);
+  text-shadow: -1px 0 rgba(255, 59, 92, 0.6), 1px 0 rgba(255, 157, 0, 0.7);
+}
+.combat-status.crit {
+  color: var(--holo-red);
+  text-shadow: -2px 0 rgba(255, 59, 92, 0.85), 2px 0 rgba(0, 240, 255, 0.75);
+}
+#hud[data-event="shunt"] .hud-bl {
+  border-color: var(--holo-amber);
+  box-shadow: 0 0 26px rgba(255, 157, 0, 0.38), inset 0 0 18px rgba(255, 157, 0, 0.22);
+}
+#hud[data-event="vault"] .hud-bl {
+  border-color: var(--holo-cyan);
+  box-shadow: 0 0 28px rgba(0, 240, 255, 0.44), inset 0 0 18px rgba(0, 240, 255, 0.24);
+}
+#hud[data-event="damage"] .hud-bl {
+  border-color: var(--holo-red);
+  box-shadow: 0 0 28px rgba(255, 59, 92, 0.48), inset 0 0 20px rgba(255, 59, 92, 0.26);
+}
+
 @media (prefers-reduced-motion: reduce) {
   .panel,
   .modal-card,
@@ -783,4 +807,5 @@ body.is-touch #combat-status{font-size:9px;line-height:10px}
     animation: none;
   }
 }
+
 

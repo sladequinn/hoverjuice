@@ -275,3 +275,29 @@ test('distant building batches cull visually while preserving hitBuilding collis
  world.dispose()
 })
 
+test('braking in Mag-Lock stops cleanly without a sudden 180, and holding brake at standstill reverses intentionally',()=>{
+ const w=junctionFixture(),p=new Player(vehicleById('hovercedes'),'balaclava')
+ p.placeAtNode(w,0);p.speed=8
+ const startA=p.edgeA,startB=p.edgeB
+ // Braking down to a stop over 20 frames (0.33s) must not flip edgeA/edgeB
+ for(let i=0;i<20;i++)p.update(1/60,{...neutral,brake:1},w,true)
+ assert.equal(p.speed,0);assert.equal(p.edgeA,startA);assert.equal(p.edgeB,startB)
+ // Continuing to hold brake at a stop past 0.45s triggers the intentional reverse flip
+ for(let i=0;i<35;i++)p.update(1/60,{...neutral,brake:1},w,true)
+ assert.equal(p.edgeA,startB);assert.equal(p.edgeB,startA)
+})
+
+test('repulsor jump and hold-to-glide vault high enough to clear traffic and visual damage markers activate on hull wear',()=>{
+ const w=fixture(),p=new Player(vehicleById('hoverarrari'),'balaclava')
+ p.placeAtNode(w,0);p.speed=25
+ for(let i=0;i<18;i++)p.update(1/60,{...neutral,throttle:1,up:true},w,true)
+ assert.equal(p.airborne,true,'Vehicle reaches vault altitude')
+ for(let i=0;i<25;i++)p.update(1/60,{...neutral,throttle:1,up:true},w,true)
+ assert.equal(p.gliding,true,'Holding hop on descent engages repulsor glide')
+ const dmg=p.mesh.getObjectByName('damage-markers')!
+ assert.equal(dmg.visible,false)
+ p.updateDamageVisuals(45,1/60,12)
+ assert.equal(dmg.visible,true,'Damage markers appear when hull is damaged')
+})
+
+
