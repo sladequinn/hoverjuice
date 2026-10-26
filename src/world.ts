@@ -156,9 +156,40 @@ export class World {
     }
     for (const site of sites.slice(0, 8)) {
       const holo = makeMask(maskId)
+      holo.traverse(obj => {
+        if (obj instanceof THREE.Mesh) {
+          const holoMat = new THREE.MeshBasicMaterial({
+            color: 0x00f0ff,
+            transparent: true,
+            opacity: 0.58,
+            wireframe: false,
+            depthWrite: false,
+            blending: THREE.AdditiveBlending,
+          })
+          holoMat.userData.uTime = { value: 0 }
+          holoMat.onBeforeCompile = (shader) => {
+            shader.uniforms.uTime = holoMat.userData.uTime
+            shader.vertexShader = `varying vec3 vHoloLocal;\n` + shader.vertexShader.replace(
+              '#include <begin_vertex>',
+              '#include <begin_vertex>\nvHoloLocal = position;',
+            )
+            shader.fragmentShader = `uniform float uTime;\nvarying vec3 vHoloLocal;\n` + shader.fragmentShader.replace(
+              '#include <dithering_fragment>',
+              `
+              float scan = 0.55 + 0.45 * sin(vHoloLocal.y * 55.0 - uTime * 14.0);
+              float drop = step(0.16, fract(sin(floor(vHoloLocal.y * 9.0 - uTime * 4.0) * 43758.5453)));
+              gl_FragColor.a *= scan * (0.4 + 0.6 * drop);
+              #include <dithering_fragment>
+              `,
+            )
+          }
+          obj.material = holoMat
+        }
+      })
       holo.position.set(site.x, site.y + 8, site.z)
       holo.scale.setScalar(9)
       holo.userData.spin = true
+      holo.userData.baseY = site.y + 8
       this.ownedGroup.add(holo)
     }
   }

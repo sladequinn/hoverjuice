@@ -22,7 +22,7 @@ export async function streetBoard(db:D1Database,district:string,now=Date.now()){
  }))
 }
 const exact=(b:any,keys:string)=>b&&typeof b==='object'&&!Array.isArray(b)&&Object.keys(b).sort().join(',')===keys
-function nearExchange(district:string,position:Geo){if(distance(exchange(district),position)>180)throw new HttpError(409,'Drive to the district exchange to trade')}
+function nearExchange(district:string,position:Geo){if(distance(exchange(district),position)>2200)throw new HttpError(409,'Drive to the district exchange to trade')}
 function travelled(s:StreetState,position:Geo,now:number){
  // Persistent travel budget survives city jumps, reconnects, tabs and devices.
  if(s.travel&&distance(s.travel,position)>200+(now-s.travel.at)*.045)throw new HttpError(409,'Cargo is still in transit. Drive to the exchange before trading')

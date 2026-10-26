@@ -1,9 +1,9 @@
 import {Street} from './street'
 import {GOODS,MASK_CATALOG,MISSIONS,cargoCount,capacity,vehiclePrice,performancePrice,exchange,streetOrderPrice} from '../shared/street'
 import {Economy} from './economy'
-import {COMMODITIES} from '../shared/economy'
+import {COMMODITIES,neighbours} from '../shared/economy'
 import {Crews} from './crews'
-import {CREW_COLORS,districtBounds} from '../shared/crews'
+import {CREW_COLORS,districtBounds,districtFor} from '../shared/crews'
 import {GlobalProperties} from './global-properties'
 import {hg} from '../shared/properties'
 import {distance,validId,validGeo,wrapLon} from '../shared/multiplayer'
@@ -29,7 +29,7 @@ import { Player, type Input } from './vehicle'
 import { MASKS, buildMask, validMask } from './character'
 import { World } from './world'
 import { TrafficSystem } from './traffic'
-import { DealerSystem } from './dealers'
+import { DealerSystem, CONTRABAND } from './dealers'
 
 
 type SaveData = import('../shared/preferences').Preferences
@@ -154,13 +154,28 @@ export class Game {
     scene.add(this.glitcherCones)
 
     this.beacon = new THREE.Group()
+    const beamMat = new THREE.MeshBasicMaterial({ color: 0xff9d00, transparent: true, opacity: 0.24, depthWrite: false, side: THREE.DoubleSide, blending: THREE.AdditiveBlending })
+    beamMat.userData.uTime = { value: 0 }
+    beamMat.onBeforeCompile = (shader) => {
+      shader.uniforms.uTime = beamMat.userData.uTime
+      shader.vertexShader = `varying vec3 vBeaconPos;\n` + shader.vertexShader.replace('#include <begin_vertex>', '#include <begin_vertex>\nvBeaconPos = position;')
+      shader.fragmentShader = `uniform float uTime;\nvarying vec3 vBeaconPos;\n` + shader.fragmentShader.replace(
+        '#include <dithering_fragment>',
+        `
+        float scan = 0.58 + 0.42 * sin(vBeaconPos.y * 1.6 - uTime * 12.0);
+        float band = step(0.15, fract(sin(floor(vBeaconPos.y * 0.35 - uTime * 3.0) * 43758.5453)));
+        gl_FragColor.a *= scan * (0.45 + 0.55 * band);
+        #include <dithering_fragment>
+        `,
+      )
+    }
     const beam = new THREE.Mesh(
-      new THREE.CylinderGeometry(3, 3, 400, 16, 1, true),
-      new THREE.MeshBasicMaterial({ color: 0xff9d00, transparent: true, opacity: 0.18, depthWrite: false, side: THREE.DoubleSide }),
+      new THREE.CylinderGeometry(2.6, 3.2, 400, 16, 1, true),
+      beamMat,
     )
     beam.position.y = 200
     beam.name = 'beam'
-    const ring = new THREE.Mesh(new THREE.TorusGeometry(10, 0.5, 8, 48), new THREE.MeshBasicMaterial({ color: 0xff9d00 }))
+    const ring = new THREE.Mesh(new THREE.TorusGeometry(10, 0.45, 8, 32), new THREE.MeshBasicMaterial({ color: 0xff9d00, wireframe: true }))
     ring.rotation.x = Math.PI / 2
     ring.position.y = 0.6
     ring.name = 'ring'
@@ -285,7 +300,6 @@ export class Game {
     this.world = await World.create(city,status)
     this.spray.surfaceHeight=(x,z,reference)=>this.world!.surfaceHeightAt(x,z,reference)
     this.scene.add(this.world.group)
-    if(!city.procedural){this.multiplayer=new Multiplayer(city);this.scene.add(this.multiplayer.group);void this.properties.activate();void this.crews.activate();void this.economy.activate()}else {this.properties.setLocation(null);this.crews.setLocation(null);this.economy.setLocation(null)}
     this.traffic = new TrafficSystem(this.world)
     this.scene.add(this.traffic.group)
     this.dealerAnchor={x:Infinity,z:Infinity}
@@ -302,6 +316,12 @@ export class Game {
     this.player.placeAtNode(this.world, this.garageNode)
     this.player.unsnap()
     if(friendSpawn){this.player.pos.set(0,this.world.groundHeightAt(0,0,this.player.pos.y)+1.2,0)}
+    if(!city.procedural){
+      const startGeo=worldToLatLon(city,this.player.pos.x,this.player.pos.z)
+      this.properties.setLocation(startGeo);this.crews.setLocation(startGeo);this.economy.setLocation(startGeo);this.street.tick(this.economy.district)
+      this.multiplayer=new Multiplayer(city);this.scene.add(this.multiplayer.group)
+      void this.properties.activate();void this.crews.activate();void this.economy.activate()
+    }else {this.properties.setLocation(null);this.crews.setLocation(null);this.economy.setLocation(null)}
     this.traffic.setActivitySites(this.dealers.dealers,this.actor)
     this.traffic.prime(this.actor)
     this.juice = Math.max(this.juice, this.player.spec.tank * 0.6)
@@ -447,6 +467,11 @@ export class Game {
     if(!this.playable)return
     const w = this.world
     if (!w || this.paused) return
+    const ft = this.economy.target
+    if (ft && this.economy.quote && !this.economy.driving && !w.city.procedural && distance(worldToLatLon(w.city, this.actor.x, this.actor.z), ft) <= 100) {
+      void this.economy.start()
+      return
+    }
     const market = this.dealers?.nearest(this.actor.x, this.actor.z)
     if (market?.dealer && market.dist <= 22) {
       this.openModal('market')
@@ -759,9 +784,9 @@ export class Game {
       case 'street-scout':void this.street.scout();break
       case 'street-route':{try{const t=exchange(arg);if(this.world){this.waypoint={x:wrapLon(t.lon-this.world.city.lon)*111320*Math.cos(this.world.city.lat*Math.PI/180),z:(this.world.city.lat-t.lat)*110540,label:'Night Market · '+arg};this.routeTimer=0;this.closeModal()}}catch{}break}
       case 'street-waypoint':{const t=this.street.exchange;if(t&&this.world){this.waypoint={x:wrapLon(t.lon-this.world.city.lon)*111320*Math.cos(this.world.city.lat*Math.PI/180),z:(this.world.city.lat-t.lat)*110540,label:'Night Market exchange'};this.routeTimer=0;this.closeModal()}break}
-      case 'courier-quote':{const [destination,mission]=arg.split('|');void this.economy.courierQuote(destination,mission);break}
+      case 'courier-quote':{const [destination,mission]=arg.split('|');void this.economy.courierQuote(destination,mission).then(()=>{const t=this.economy.target;if(t&&this.world){this.waypoint={x:wrapLon(t.lon-this.world.city.lon)*111320*Math.cos(this.world.city.lat*Math.PI/180),z:(this.world.city.lat-t.lat)*110540,label:(this.economy.quote?.label??'Courier')+' pickup depot'};this.routeTimer=0;this.computeRoute();this.drawRoute();this.toast('Quote locked — follow the holo-beacon to the pickup depot','good')}});break}
       case 'freight-refresh': void this.economy.refresh();break
-      case 'freight-quote': {const [destination,commodity]=arg.split('|');void this.economy.getQuote(destination,commodity,($('freight-competitive') as HTMLInputElement)?.checked??false);break}
+      case 'freight-quote': {const [destination,commodity]=arg.split('|');void this.economy.getQuote(destination,commodity,($('freight-competitive') as HTMLInputElement)?.checked??false).then(()=>{const t=this.economy.target;if(t&&this.world){this.waypoint={x:wrapLon(t.lon-this.world.city.lon)*111320*Math.cos(this.world.city.lat*Math.PI/180),z:(this.world.city.lat-t.lat)*110540,label:'Freight pickup depot'};this.routeTimer=0;this.computeRoute();this.drawRoute()}});break}
       case 'freight-start': void this.economy.start().then(()=>{if(this.economy.driving)this.closeModal()});break
       case 'freight-retry': void this.economy.retry();break
       case 'freight-resume': void this.economy.resume().then(()=>{if(this.economy.driving)this.closeModal()});break
@@ -853,17 +878,20 @@ export class Game {
     const s = this.save
     switch (view) {
       case 'contracts':{
-        const e=this.economy,destinations=[...new Set(e.markets.map(m=>m.district))].filter(d=>d!==e.district),q=e.quote,v=e.active
+        const e=this.economy,curDistrict=e.district||(this.world&&!this.world.city.procedural?districtFor(worldToLatLon(this.world.city,this.actor.x,this.actor.z)):''),fromMarkets=[...new Set(e.markets.map(m=>m.district))].filter(d=>d!==curDistrict),destinations=fromMarkets.length?fromMarkets:(curDistrict?neighbours(curDistrict):[]),q=e.quote,v=e.active
+        const depotDist=q&&this.world?Math.round(distance(worldToLatLon(this.world.city,this.actor.x,this.actor.z),q.route.points[0])):null
         return `<h2>Courier dispatch</h2><p role="status">${esc(e.status)}</p><p>${hg(this.street.balance)} · No upfront fee. Collect at the pickup depot and complete the route before the deadline.</p><div class="grid">${MISSIONS.map(m=>`<div class="card"><h3>${m.name}</h3><p>${m.client} · ${m.description}</p>${destinations.map(d=>`<button class="btn" data-act="courier-quote" data-arg="${d}|${m.id}" ${e.busy||v?.status==='active'?'disabled':''}>Quote delivery to ${esc(d)}</button>`).join('')}</div>`).join('')}</div>${!destinations.length?'<button class="btn" data-act="freight-refresh">Load nearby jobs</button>':''}
-        ${q?`<h3>${esc(q.label??'Freight job')}</h3><p>${hg(q.net)} payout · ${(q.route.total/1000).toFixed(1)} km${q.duration?` · ${Math.ceil(q.duration/60000)} minute deadline`:''}</p><button class="btn" data-act="freight-waypoint">Guide to pickup</button><button class="btn buy" data-act="freight-start" ${e.busy||e.pending?'disabled':''}>Collect package</button>`:''}
+        ${q?`<div class="card active-card"><h3>${esc(q.label??'Freight job')}</h3><p>${hg(q.net)} payout · ${(q.route.total/1000).toFixed(1)} km${q.duration?` · ${Math.ceil(q.duration/60000)} minute deadline`:''}${depotDist!==null?` · ${depotDist<=100?'IN RANGE — READY TO COLLECT':`${depotDist} m to pickup depot (park within 100 m)`}`:''}</p><div class="row"><button class="btn" data-act="freight-waypoint">Guide to pickup</button><button class="btn buy" data-act="freight-start" ${e.busy||e.pending?'disabled':''}>Collect package</button></div></div>`:''}
         ${v?`<h3>Current delivery</h3><p>${esc(v.status)} · ${hg(v.net)} payout · ${Math.max(0,Math.ceil((v.expires_at-Date.now())/1000))} seconds remaining</p><button class="btn" data-act="freight-waypoint">Next gate</button><button class="btn" data-act="freight-resume">Resume delivery</button><button class="btn danger" data-act="freight-cancel">Abandon</button>`:''}${e.pending?'<button class="btn" data-act="freight-retry">Recover package pickup</button>':''}<button class="btn ghost" data-act="view" data-arg="economy">Freight & crew convoys</button>`
       }
       case 'market':{
         const t=this.street,q=t.quote,used=cargoCount(t.state),room=capacity(t.state)-used,disabled=t.busy||t.pending?'disabled':''
-        return `<h2>Night Market</h2><p role="status">${esc(t.status)}</p><p>${hg(t.balance)} · Cargo ${used}/${capacity(t.state)} · ${esc(t.district)}</p><p>Buy low, haul to another district, sell high. Stock and hourly supply shocks move prices. Quotes include the price impact of the full order. Park within 180 m of the exchange to trade.</p><div class="row"><button class="btn" data-act="street-waypoint">Guide to exchange</button><button class="btn" data-act="street-refresh">Refresh prices</button><button class="btn" data-act="street-scout">Compare nearby markets</button><button class="btn" data-act="view" data-arg="stash">Property stash</button></div>
+        const near=this.nearbyDealer(35),leaders=this.dealers?.dealers??[]
+        return `<h2>Night Market</h2><p role="status">${esc(t.status)}</p><p>${hg(t.balance)} · Cargo ${used}/${capacity(t.state)} · ${esc(t.district)}</p>${near?`<p class="ok">Linked to ${esc(near.name)} · ${esc(near.gang)} syndicate channel (${esc(near.bio)})</p>`:''}${t.balance<8500&&!used?`<div class="card active-card"><h3>Need starting capital?</h3><p>Courier dispatch requires 0 HG upfront. Complete a delivery run to fund your first contraband buy.</p><button class="btn buy" data-act="view" data-arg="contracts">Open courier jobs</button></div>`:''}<p>Buy low, haul to another district, sell high. Stock and hourly supply shocks move prices. Quotes include the price impact of the full order. Park within 180 m of the exchange or beside a syndicate leader to trade.</p><div class="row"><button class="btn" data-act="street-waypoint">Guide to exchange</button><button class="btn" data-act="street-refresh">Refresh prices</button><button class="btn" data-act="street-scout">Compare nearby markets</button><button class="btn" data-act="view" data-arg="stash">Property stash</button></div>
         <div class="grid">${GOODS.map(g=>{const m=t.rows.find(m=>m.good===g.id),owned=t.state.cargo[g.id]??0,max=m?Array.from({length:Math.min(room,m.stock)},(_,i)=>i+1).filter(n=>streetOrderPrice(t.district,g.id,m.stock,'buy',n,m.at??Date.now())*n<=t.balance).at(-1)??0:0;return `<div class="card"><h3>${g.name}</h3><p>${owned} held · ${m?.stock??0} in stock · ${esc(m?.event??'Loading prices')}</p><p>Buy ${m?hg(m.ask):'…'} / sell ${m?hg(m.bid):'…'} per ${g.unit}</p><div class="row"><button class="btn" data-act="street-quote" data-arg="buy|${g.id}|1" ${!max?'disabled':disabled}>Buy 1</button><button class="btn" data-act="street-quote" data-arg="buy|${g.id}|${max}" ${!max?'disabled':disabled}>Buy max (${max})</button><button class="btn" data-act="street-quote" data-arg="sell|${g.id}|1" ${!owned?'disabled':disabled}>Sell 1</button><button class="btn" data-act="street-quote" data-arg="sell|${g.id}|${owned}" ${!owned?'disabled':disabled}>Sell all</button></div></div>`}).join('')}</div>
         ${t.scouts.length?`<h3>Nearby sell prices</h3><p>Compare these bids with the purchase price here. Prices and stock can change during the drive.</p><div class="grid">${t.scouts.map(d=>`<div class="card"><h3>${esc(d.district)}</h3>${GOODS.map(g=>`<p>${g.name}: ${hg(d.rows.find(m=>m.good===g.id)?.bid??0)}</p>`).join('')}<button class="btn" data-act="street-route" data-arg="${esc(d.district)}">Route to this exchange</button></div>`).join('')}</div>`:''}
-        ${q?`<div class="card"><h3>Confirm ${esc(q.side)}</h3><p>${q.quantity} ${esc(GOODS.find(g=>g.id===q.good)?.name??q.good)} · ${hg(q.total)} total · quote valid for 30 seconds</p><button class="btn buy" data-act="street-trade" ${disabled}>Confirm trade</button></div>`:''}${t.pending?'<button class="btn" data-act="street-retry">Recover pending transaction</button>':''}`
+        ${q?`<div class="card active-card"><h3>Confirm ${esc(q.side)}</h3><p>${q.quantity} ${esc(GOODS.find(g=>g.id===q.good)?.name??q.good)} · ${hg(q.total)} total · quote valid for 30 seconds</p><button class="btn buy" data-act="street-trade" ${disabled}>Confirm trade</button></div>`:''}${t.pending?'<button class="btn" data-act="street-retry">Recover pending transaction</button>':''}
+        ${leaders.length?`<h3 class="sub">Syndicate street contacts</h3><div class="grid">${leaders.map(d=>{const distM=Math.round(Math.hypot(d.x-this.actor.x,d.z-this.actor.z)),specName=CONTRABAND.find(c=>c.id===d.specialty)?.name??d.specialty;return `<div class="card dealer-card" style="--dealer:#${d.color.toString(16).padStart(6,'0')}"><h3>${esc(d.name)} · ${esc(d.gang)}</h3><p>${esc(d.bio)}</p><p class="muted small">Specialty: ${esc(specName)} · ${distM} m away</p><button class="btn ghost" data-act="locate-dealer" data-arg="${esc(d.id)}">Locate dealer</button></div>`}).join('')}</div>`:''}`
       }
       case 'stash':return `<h2>Property stash</h2><p>${esc(this.street.status)}</p><p>Park within 120 m of an owned property to bank cargo. Your HG stays in your account wallet.</p><div class="row"><button class="btn" data-act="street-command" data-arg="stash|">Stash carried cargo</button><button class="btn" data-act="street-command" data-arg="withdraw|">Fill hold from stash</button></div>${GOODS.map(g=>`<p>${g.name}: ${this.street.state.cargo[g.id]??0} carried · ${this.street.state.vault[g.id]??0} banked</p>`).join('')}<button class="btn" data-act="global-portfolio">Your properties</button>`
 
@@ -1079,7 +1107,7 @@ export class Game {
       this.juice = Math.max(0, this.juice)
       this.saveTimer += dt
       if (this.saveTimer > 10) { this.persist(); this.saveTimer = 0 }
-      if (this.waypoint && Math.hypot(this.waypoint.x - this.actor.x, this.waypoint.z - this.actor.z) < 40) {
+      if (this.waypoint && Math.hypot(this.waypoint.x - this.actor.x, this.waypoint.z - this.actor.z) < 16) {
         this.toast(`Arrived at ${this.waypoint.label}`, 'good')
         this.waypoint = null
       }
@@ -1115,6 +1143,7 @@ export class Game {
     if(crewTarget&&!w.city.procedural){const x=wrapLon(crewTarget.lon-w.city.lon)*111320*Math.cos(w.city.lat*Math.PI/180),z=(w.city.lat-crewTarget.lat)*110540;this.crewGate.position.set(x,w.groundHeightAt(x,z,this.player.pos.y)+2,z);this.crewGate.rotation.x=-Math.PI/2;this.crewGate.scale.setScalar(this.economy.driving ? .12 : 1);this.crewGate.visible=true;if(this.crewGate.parent!==this.scene)this.scene.add(this.crewGate)}else this.crewGate.visible=false
     this.multiplayer?.update(dt,this.player,this.spray,w,this.paused?0:dt,this.save.paint==='factory'?undefined:this.save.paint)
     w.update(this.paused?0:dt)
+    this.dealers?.update(this.paused?0:dt)
     const traffic=this.traffic?.update(this.paused?0:dt,this.actor,this.player.groundSpeed,this.run.heat,this.spray)
     this.updateGlitcherCones()
     if(!this.paused&&traffic&&!this.economy.driving){
@@ -1214,8 +1243,12 @@ export class Game {
     if (!t) return
     const color = 0x19ffe6
     this.beacon.position.set(t.x, this.world!.groundHeightAt(t.x,t.z,this.actor.y), t.z)
-    this.beacon.children.forEach((c) => ((c as THREE.Mesh).material as THREE.MeshBasicMaterial).color.setHex(color))
-    this.beacon.getObjectByName('ring')!.rotation.z += dt
+    this.beacon.children.forEach((c) => {
+      const mat = (c as THREE.Mesh).material as THREE.MeshBasicMaterial
+      mat.color.setHex(color)
+      if (mat.userData?.uTime) mat.userData.uTime.value += dt
+    })
+    this.beacon.getObjectByName('ring')!.rotation.z += dt * 1.6
     ;(this.arrow.material as THREE.MeshBasicMaterial).color.setHex(color)
     const p = this.actor
     const ang = Math.atan2(t.x - p.x, t.z - p.z)
@@ -1276,8 +1309,13 @@ export class Game {
     const { dist } = this.world!.nearestPump(p.pos.x, p.pos.z)
     const prompt = $('prompt')
     const market = this.dealers?.nearest(this.actor.x, this.actor.z)
-    if (market?.dealer && market.dist < 22 && !this.paused) {
-      setHtml(prompt, `${touch ? 'Tap for freight' : '<kbd>R</kbd> Freight'} with ${esc(market.dealer.name)} · ${market.dealer.gang}`)
+    const ft = this.economy.target
+    const atDepot = !!(ft && this.economy.quote && !this.economy.driving && !this.world!.city.procedural && distance(worldToLatLon(this.world!.city, this.actor.x, this.actor.z), ft) <= 100)
+    if (atDepot && !this.paused) {
+      setHtml(prompt, `${touch ? 'Tap to collect' : '<kbd>R</kbd> Collect'} ${esc(this.economy.quote?.label ?? 'package')} · ${hg(this.economy.quote?.net ?? 0)}`)
+      prompt.classList.add('show')
+    } else if (market?.dealer && market.dist < 22 && !this.paused) {
+      setHtml(prompt, `${touch ? 'Tap for market' : '<kbd>R</kbd> Market'} · ${esc(market.dealer.name)} (${market.dealer.gang})`)
       prompt.classList.add('show')
     } else if (dist < 18 && !this.paused) {
       const need = p.spec.tank - this.juice

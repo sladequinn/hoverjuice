@@ -72,6 +72,37 @@ function rand(text: string) {
   return (x >>> 0) / 4294967296
 }
 
+function makeHoloMaterial(hex: number, opacity: number) {
+  const mat = new THREE.MeshBasicMaterial({
+    color: hex,
+    transparent: true,
+    opacity,
+    depthWrite: false,
+    side: THREE.DoubleSide,
+    blending: THREE.AdditiveBlending,
+  })
+  mat.userData.uTime = { value: 0 }
+  mat.onBeforeCompile = (shader) => {
+    shader.uniforms.uTime = mat.userData.uTime
+    shader.vertexShader = `varying vec3 vHoloPos;\n` + shader.vertexShader.replace(
+      '#include <begin_vertex>',
+      '#include <begin_vertex>\nvHoloPos = position;',
+    )
+    shader.fragmentShader = `uniform float uTime;\nvarying vec3 vHoloPos;\n` + shader.fragmentShader.replace(
+      '#include <dithering_fragment>',
+      `
+      float scan = 0.62 + 0.38 * sin(vHoloPos.y * 18.0 - uTime * 11.0);
+      float band = step(0.14, fract(sin(floor(vHoloPos.y * 2.2 - uTime * 3.5) * 43758.5453)));
+      float flicker = 0.84 + 0.16 * sin(uTime * 23.0 + vHoloPos.x * 3.0);
+      float fade = clamp(1.0 - (vHoloPos.y / 38.0), 0.12, 1.0);
+      gl_FragColor.a *= scan * (0.45 + 0.55 * band) * flicker * fade;
+      #include <dithering_fragment>
+      `,
+    )
+  }
+  return mat
+}
+
 function dealerCar(dealer: Dealer, index: number) {
   const leader=SYNDICATE_LEADERS[index]
   const car=buildVehicleMesh({...vehicleById(leader.chassis),body:leader.body,glow:leader.color})
@@ -79,7 +110,28 @@ function dealerCar(dealer: Dealer, index: number) {
   car.position.set(dealer.x,dealer.y+0.7,dealer.z)
   car.rotation.y=dealer.heading
   const flame=car.getObjectByName('flame');if(flame)flame.visible=false
-  const pad=car.getObjectByName('pad');if(pad)pad.visible=false
+  const pad=car.getObjectByName('pad') as THREE.Mesh|undefined
+  if(pad){
+    pad.visible=true
+    const pm=pad.material as THREE.MeshBasicMaterial
+    pm.opacity=0.36
+  }
+  const holo=new THREE.Group()
+  holo.name='dealer-holo'
+  const beamMat=makeHoloMaterial(dealer.color,0.28)
+  const beam=new THREE.Mesh(new THREE.CylinderGeometry(1.1,2.2,34,12,1,true),beamMat)
+  beam.position.y=17.5
+  beam.name='holo-beam'
+  const ringMat=new THREE.MeshBasicMaterial({color:dealer.color,wireframe:true,transparent:true,opacity:0.75,blending:THREE.AdditiveBlending,depthWrite:false})
+  const ring=new THREE.Mesh(new THREE.TorusGeometry(2.8,0.12,6,16),ringMat)
+  ring.rotation.x=Math.PI/2
+  ring.position.y=3.2
+  ring.name='holo-ring'
+  const prism=new THREE.Mesh(new THREE.OctahedronGeometry(1.35,0),ringMat)
+  prism.position.y=6.2
+  prism.name='holo-prism'
+  holo.add(beam,ring,prism)
+  car.add(holo)
   return car
 }
 
@@ -88,6 +140,7 @@ export class DealerSystem {
   group = new THREE.Group()
   dealers: Dealer[] = []
   private world: World
+  private time = 0
 
   constructor(world: World) {
     this.world = world
@@ -99,11 +152,49 @@ export class DealerSystem {
   refresh(x=0,z=0) {
     this.centerX=x;this.centerZ=z
     this.placeDealers()
+    this.syncHeights()
+  }
+
+  syncHeights() {
+    for (const dealer of this.dealers) {
+      const ground = this.world.groundHeightAt(dealer.x, dealer.z, dealer.y + 1.3)
+      if (Number.isFinite(ground)) dealer.y = ground
+      const car = this.group.getObjectByName(`dealer-car-${dealer.gang}`)
+      if (car) {
+        car.position.set(dealer.x, dealer.y + 0.7, dealer.z)
+        car.visible = true
+      }
+    }
+  }
+
+  update(dt: number) {
+    this.time += dt
+    for (const dealer of this.dealers) {
+      const car = this.group.getObjectByName(`dealer-car-${dealer.gang}`)
+      if (!car) continue
+      const ground = this.world.groundHeightAt(dealer.x, dealer.z, dealer.y + 1.3)
+      if (Number.isFinite(ground)) {
+        dealer.y = ground
+        car.position.y = dealer.y + 0.7
+      }
+      const beam = car.getObjectByName('holo-beam') as THREE.Mesh | undefined
+      if (beam) {
+        const mat = beam.material as THREE.MeshBasicMaterial
+        if (mat.userData.uTime) mat.userData.uTime.value = this.time
+      }
+      const ring = car.getObjectByName('holo-ring')
+      if (ring) ring.rotation.z = this.time * 1.4
+      const prism = car.getObjectByName('holo-prism')
+      if (prism) {
+        prism.rotation.y = -this.time * 1.8
+        prism.position.y = 6.2 + Math.sin(this.time * 2.6 + dealer.x * 0.01) * 0.45
+      }
+    }
   }
 
   private placeDealers() {
     const city = this.world.city
-    const missing=SYNDICATE_LEADERS.map((leader,index)=>({leader,index})).filter(({leader})=>!this.dealers.some(d=>d.gang===leader.gang && Math.hypot(d.x-this.centerX,d.z-this.centerZ)<4500))
+    const missing=SYNDICATE_LEADERS.map((leader,index)=>({leader,index})).filter(({leader})=>!this.dealers.some(d=>d.gang===leader.gang && Math.hypot(d.x-this.centerX,d.z-this.centerZ)<9000))
     if(!missing.length)return
     const candidates = city.nodes.map((node,i)=>({node,i}))
       .filter(({node,i})=>node.adj.length>0 && Math.hypot(node.x-this.centerX,node.z-this.centerZ)<3800 && !node.tunnel && Math.abs((node.y??0)-(this.world.city.terrain?.heightAt(node.x,node.z)??0))<0.5 &&
@@ -111,13 +202,13 @@ export class DealerSystem {
       .sort((a,b)=>Math.hypot(a.node.x,a.node.z)-Math.hypot(b.node.x,b.node.z) || hash(`${city.key}:${a.i}`)-hash(`${city.key}:${b.i}`))
     for(const {leader,index} of missing) {
       const angle=index*Math.PI/2+Math.PI/4
-      const tx=this.centerX+Math.cos(angle)*2300,tz=this.centerZ+Math.sin(angle)*2300
+      const tx=this.centerX+Math.cos(angle)*1650,tz=this.centerZ+Math.sin(angle)*1650
       candidates.sort((a,b)=>Math.hypot(a.node.x-tx,a.node.z-tz)-Math.hypot(b.node.x-tx,b.node.z-tz))
       let parked: {node:typeof city.nodes[number];i:number;x:number;z:number;heading:number}|undefined
       // Try every candidate before giving up; one blocked parking spot must not lose a leader.
-      for(const spacing of [1800,1200]) {
+      for(const spacing of [1600,1100,650,320]) {
         for(const {node,i} of candidates) {
-          if(spacing===1800 && ((node.x-this.centerX)*Math.cos(angle)<0 || (node.z-this.centerZ)*Math.sin(angle)<0))continue
+          if(spacing===1600 && ((node.x-this.centerX)*Math.cos(angle)<0 || (node.z-this.centerZ)*Math.sin(angle)<0))continue
           if(this.dealers.some(d=>d.gang!==leader.gang && (d.node===i || Math.hypot(d.x-node.x,d.z-node.z)<spacing)))continue
           const adjacent=city.nodes[node.adj[0]]
           const heading=Math.atan2(adjacent.x-node.x,adjacent.z-node.z)
@@ -139,13 +230,15 @@ export class DealerSystem {
       if(!parked)continue
       const {node,i,x,z,heading}=parked
       const specialty = CONTRABAND[(index + hash(city.key)) % CONTRABAND.length]
+      const baseH = city.terrain?.heightAt(x,z)??node.y??0
+      const groundH = this.world.groundHeightAt(x,z,baseH+1.3)
       const dealer: Dealer = {
         id: `${city.key}:dealer:${index}`,
         name: leader.name,
         gang: leader.gang,
         bio: leader.bio,
         heading,
-        y: city.terrain?.heightAt(x,z)??node.y??0,
+        y: Number.isFinite(groundH) ? groundH : baseH,
         node: i,
         x,
         z,

@@ -546,3 +546,241 @@ body.is-touch #combat-status{font-size:9px;line-height:10px}
 #account-status{margin:0;max-width:none;text-align:left}
 #btn-cloud{order:4}#account-retry,#account-latest{order:3}
 @media(max-width:760px){.title-statement{padding-top:clamp(70px,17vh,160px)}#driver-profile{width:100%}}
+
+/* ---------- Industrial Noir × Low-Budget Scanline Hologram Overhaul ---------- */
+:root {
+  --holo-cyan: #2cf2ff;
+  --holo-amber: #ff9d00;
+  --holo-red: #ff3b5c;
+  --noir-steel: rgba(9, 14, 19, 0.92);
+  --noir-border: rgba(66, 152, 168, 0.48);
+  --scanline-bg: repeating-linear-gradient(
+    180deg,
+    rgba(0, 240, 255, 0.055) 0px,
+    rgba(0, 240, 255, 0.055) 1px,
+    rgba(0, 0, 0, 0.28) 1px,
+    rgba(0, 0, 0, 0.28) 3px
+  );
+}
+
+@keyframes holo-flicker {
+  0%, 100% { opacity: 0.97; }
+  41% { opacity: 0.96; }
+  42% { opacity: 0.84; }
+  43% { opacity: 0.98; }
+  77% { opacity: 0.95; }
+  78% { opacity: 0.87; }
+  79% { opacity: 0.97; }
+}
+
+@keyframes scanline-drift {
+  0% { background-position: 0 0, 0 0; }
+  100% { background-position: 0 24px, 0 0; }
+}
+
+.panel,
+.modal-card,
+.prompt,
+.toast,
+.turn {
+  background-color: var(--noir-steel);
+  background-image:
+    var(--scanline-bg),
+    linear-gradient(135deg, rgba(0, 240, 255, 0.07) 0%, rgba(12, 18, 24, 0.94) 48%, rgba(255, 157, 0, 0.05) 100%);
+  border: 1px solid var(--noir-border);
+  box-shadow:
+    0 0 18px rgba(0, 240, 255, 0.12),
+    inset 0 0 16px rgba(0, 240, 255, 0.07),
+    inset 0 1px 0 rgba(255, 157, 0, 0.28);
+  animation: holo-flicker 6.5s infinite steps(1);
+}
+
+.hud-tl,
+.hud-bl,
+.contract {
+  position: absolute;
+  border-top: 2px solid var(--holo-amber);
+  border-bottom: 1px solid rgba(44, 242, 255, 0.42);
+}
+
+.money {
+  font-family: 'Orbitron', monospace;
+  font-variant-numeric: tabular-nums;
+  color: #ffba42;
+  text-shadow: -1px 0 rgba(255, 59, 92, 0.45), 1px 0 rgba(0, 240, 255, 0.55), 0 0 10px rgba(255, 157, 0, 0.25);
+  letter-spacing: 0.03em;
+}
+
+.speed {
+  font-family: 'Orbitron', monospace;
+  font-variant-numeric: tabular-nums;
+  color: #e6f9fc;
+  text-shadow: -1px 0 rgba(255, 59, 92, 0.48), 1px 0 rgba(0, 240, 255, 0.65), 0 0 12px rgba(0, 240, 255, 0.22);
+}
+
+#minimap {
+  border: 1px solid rgba(44, 242, 255, 0.55);
+  box-shadow: 0 0 16px rgba(0, 240, 255, 0.18), inset 0 0 14px rgba(0, 240, 255, 0.2);
+  filter: contrast(1.08) saturate(1.1);
+}
+
+.juice-bar {
+  height: 7px;
+  background: repeating-linear-gradient(90deg, rgba(0, 240, 255, 0.12) 0 6px, rgba(0, 0, 0, 0.6) 6px 8px);
+  border: 1px solid rgba(44, 242, 255, 0.45);
+}
+
+#juice-fill {
+  background: repeating-linear-gradient(
+    90deg,
+    #19d3e0 0px,
+    #2cf2ff 6px,
+    rgba(8, 28, 34, 0.85) 6px,
+    rgba(8, 28, 34, 0.85) 8px
+  );
+  box-shadow: 0 0 10px rgba(44, 242, 255, 0.45);
+}
+
+.prompt {
+  border: 1px solid var(--holo-cyan);
+  border-top: 2px solid var(--holo-amber);
+  color: #e7fbfd;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  text-shadow: -1px 0 rgba(255, 59, 92, 0.45), 1px 0 rgba(0, 240, 255, 0.6);
+  box-shadow: 0 0 22px rgba(0, 240, 255, 0.25), inset 0 0 14px rgba(0, 240, 255, 0.14);
+}
+
+.toast {
+  border-top: 2px solid var(--holo-cyan);
+  font-family: 'Rajdhani', monospace;
+  letter-spacing: 0.06em;
+  text-shadow: -1px 0 rgba(255, 59, 92, 0.4), 1px 0 rgba(0, 240, 255, 0.5);
+}
+.toast.good {
+  border-color: var(--holo-amber);
+  color: #ffe4a3;
+}
+.toast.bad {
+  border-color: var(--holo-red);
+  color: #ffc2ce;
+}
+
+.modal {
+  background:
+    repeating-linear-gradient(180deg, rgba(0, 240, 255, 0.025) 0px, rgba(0, 240, 255, 0.025) 1px, rgba(4, 8, 12, 0.82) 1px, rgba(4, 8, 12, 0.82) 4px);
+}
+
+.modal-card {
+  background-color: #0b1218;
+  border: 1px solid rgba(44, 242, 255, 0.46);
+  border-top: 2px solid var(--holo-amber);
+  border-radius: 3px;
+  box-shadow: 0 20px 70px rgba(0, 0, 0, 0.88), 0 0 28px rgba(0, 240, 255, 0.14);
+}
+
+.modal-card h2 {
+  font-family: 'Orbitron', 'Rajdhani', sans-serif;
+  font-size: 1.25rem;
+  text-transform: uppercase;
+  letter-spacing: 0.09em;
+  color: #dffaff;
+  text-shadow: -1px 0 rgba(255, 59, 92, 0.5), 1px 0 rgba(0, 240, 255, 0.65);
+  border-bottom: 1px dashed rgba(44, 242, 255, 0.28);
+  padding-bottom: 6px;
+  margin-bottom: 10px;
+}
+
+.tabs {
+  background:
+    var(--scanline-bg),
+    linear-gradient(90deg, rgba(10, 17, 23, 0.98), rgba(16, 28, 36, 0.98));
+  border-bottom: 1px solid rgba(44, 242, 255, 0.38);
+}
+
+.tabs .tab {
+  font-family: 'Orbitron', 'Rajdhani', sans-serif;
+  text-transform: uppercase;
+  font-size: 0.76rem;
+  letter-spacing: 0.06em;
+  border-radius: 2px;
+  border: 1px solid rgba(82, 118, 130, 0.38);
+}
+
+.tabs .tab.on {
+  background: rgba(0, 240, 255, 0.14);
+  border-color: var(--holo-cyan);
+  color: #e8fdff;
+  text-shadow: -1px 0 rgba(255, 59, 92, 0.45), 1px 0 rgba(0, 240, 255, 0.65);
+  box-shadow: inset 0 0 12px rgba(0, 240, 255, 0.22);
+}
+
+.card {
+  background-color: rgba(11, 19, 26, 0.86);
+  background-image: var(--scanline-bg);
+  border: 1px solid rgba(68, 122, 136, 0.42);
+  border-top: 2px solid rgba(0, 240, 255, 0.45);
+  border-radius: 2px;
+}
+
+.card h3 {
+  font-family: 'Orbitron', 'Rajdhani', sans-serif;
+  font-size: 0.96rem;
+  letter-spacing: 0.05em;
+  color: #e5f7fa;
+  text-shadow: -1px 0 rgba(255, 59, 92, 0.35), 1px 0 rgba(0, 240, 255, 0.45);
+}
+
+.active-card {
+  border-color: var(--holo-amber);
+  border-top: 2px solid var(--holo-amber);
+  background-color: rgba(34, 24, 12, 0.72);
+}
+
+.dealer-card {
+  border-top: 2px solid var(--dealer, var(--holo-amber));
+}
+
+.btn {
+  border-radius: 2px;
+  border: 1px solid rgba(44, 242, 255, 0.52);
+  background-color: rgba(16, 36, 44, 0.88);
+  background-image: var(--scanline-bg);
+  color: #d6f7fc;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  text-shadow: 0 0 8px rgba(0, 240, 255, 0.25);
+}
+
+.btn:hover:not(:disabled) {
+  border-color: var(--holo-cyan);
+  background-color: rgba(24, 62, 74, 0.92);
+  box-shadow: 0 0 14px rgba(0, 240, 255, 0.28), inset 0 0 10px rgba(0, 240, 255, 0.18);
+}
+
+.btn.buy {
+  border-color: var(--holo-amber);
+  background-color: rgba(54, 34, 10, 0.88);
+  color: #ffd27d;
+  text-shadow: 0 0 8px rgba(255, 157, 0, 0.35);
+}
+
+.title h1 {
+  text-shadow: -2px 0 rgba(255, 59, 92, 0.52), 2px 0 rgba(0, 240, 255, 0.62), 0 0 24px rgba(0, 240, 255, 0.18);
+}
+
+.title-status,
+.title .kicker {
+  text-shadow: 0 0 8px rgba(0, 240, 255, 0.32);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .panel,
+  .modal-card,
+  .prompt,
+  .toast,
+  .turn {
+    animation: none;
+  }
+}
+

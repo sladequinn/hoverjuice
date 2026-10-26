@@ -3,7 +3,7 @@ import {districtFor} from '../shared/crews'
 import {wrapLon,type Geo} from '../shared/multiplayer'
 export class Economy {
  enabled=false;player='';balance=0;markets:MarketRow[]=[];shipments:any[]=[];history:any[]=[];active:FreightView|null=null;quote:any=null;status='Global freight is disabled';busy=false;pending=false;fund=0;district=''
- private location:Geo|null=null;private checked=false;private polling=false;private received=0;private seq=0;private predicted:FreightCar|null=null;private input={throttle:0,steer:0};private send:((v:unknown)=>void)|null=null;private nextPoll=0
+ private location:Geo|null=null;private checked=false;private activating:Promise<void>|null=null;private polling=false;private received=0;private seq=0;private predicted:FreightCar|null=null;private input={throttle:0,steer:0};private send:((v:unknown)=>void)|null=null;private nextPoll=0
  private storage:Storage;private changed:()=>void;private transport:typeof fetch;private timer:ReturnType<typeof setInterval>
  private event=(e:Event)=>this.snapshot((e as CustomEvent).detail)
  constructor(storage:Storage,changed:()=>void,transport:typeof fetch=fetch.bind(globalThis)){
@@ -12,9 +12,9 @@ export class Economy {
   this.timer=setInterval(()=>{if(this.active?.status==='active'&&this.send&&!document.hidden)this.send({type:'freight-input',input:{seq:++this.seq,...this.input}});if(this.enabled&&this.location&&!document.hidden&&Date.now()>this.nextPoll&&!this.busy&&!this.polling){this.nextPoll=Date.now()+10000;void this.refresh()}},250)
  }
  dispose(){clearInterval(this.timer);window.removeEventListener('hoverghini:freight',this.event)}
- setLocation(p:Geo|null){this.location=p?{lat:p.lat,lon:wrapLon(p.lon)}:null;if(this.location)this.district=districtFor(this.location)}
+ setLocation(p:Geo|null){const prev=this.district;this.location=p?{lat:p.lat,lon:wrapLon(p.lon)}:null;this.district=this.location?districtFor(this.location):'';if(this.district&&this.district!==prev){this.nextPoll=0;if(this.enabled&&!this.polling&&!this.busy)void this.refresh()}}
  private async api(path:string,body?:unknown){const r=await this.transport('/api/economy/'+path,{credentials:'same-origin',signal:AbortSignal.timeout(18000),...(body===undefined?{}:{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})});let data:any;try{data=await r.json()}catch{throw Error('Economy service unavailable')};if(!r.ok)throw Object.assign(Error(data.error??'Freight request failed'),{status:r.status});return data}
- async activate(){if(this.checked)return;this.checked=true;try{this.enabled=(await this.api('status')).enabled;if(this.enabled)await this.refresh()}catch(e){this.status=(e as Error).message}this.changed()}
+ async activate(){if(this.activating)return this.activating;if(this.checked){if(this.enabled&&this.district&&!this.markets.length&&!this.polling)await this.refresh();return}this.checked=true;this.activating=(async()=>{try{this.enabled=(await this.api('status')).enabled;if(this.enabled)await this.refresh()}catch(e){this.status=(e as Error).message}finally{this.activating=null;this.changed()}})();return this.activating}
  async refresh(){if(this.polling)return;this.polling=true;try{
   const me=await this.api('me');if(me.player!==this.player){this.active=null;this.quote=null;this.predicted=null;this.player=me.player}
   this.balance=me.wallet?.balance??0;this.history=me.history;this.pending=!!this.storage.getItem('hoverghini.freight.pending:'+this.player)

@@ -4,12 +4,21 @@ import {districtBounds,districtFor} from '../shared/crews'
 export function freightRoute(data:any,origin:string,destination:string):Geo[]{
  if(data?.remark||!Array.isArray(data?.elements)||data.elements.length>4000)throw Error('Incomplete road snapshot')
  const nodes=new Map<number,Geo>(),edges=new Map<number,{to:number;cost:number}[]>()
- for(const w of data.elements){if(w.type!=='way'||!['residential','unclassified','tertiary','secondary','living_street','service'].includes(w.tags?.highway)||['private','no'].includes(w.tags?.access)||['yes','1','-1'].includes(w.tags?.oneway)||w.tags?.junction==='roundabout'||!Array.isArray(w.nodes)||w.nodes.length!==w.geometry?.length||w.nodes.length>1500||!w.nodes.every((n:any)=>Number.isSafeInteger(n)&&n>0)||!w.geometry.every(validGeo))continue
+ for(const w of data.elements){if(w.type!=='way'||!['primary','residential','unclassified','tertiary','secondary','living_street','service'].includes(w.tags?.highway)||['private','no'].includes(w.tags?.access)||['yes','1','-1'].includes(w.tags?.oneway)||w.tags?.junction==='roundabout'||!Array.isArray(w.nodes)||w.nodes.length!==w.geometry?.length||w.nodes.length>1500||!w.nodes.every((n:any)=>Number.isSafeInteger(n)&&n>0)||!w.geometry.every(validGeo))continue
   w.nodes.forEach((id:number,i:number)=>{nodes.set(id,w.geometry[i]);if(!edges.has(id))edges.set(id,[])})
   for(let i=1;i<w.nodes.length;i++){const a=w.nodes[i-1],b=w.nodes[i],cost=distance(nodes.get(a)!,nodes.get(b)!);if(cost>.5&&cost<500){edges.get(a)!.push({to:b,cost});edges.get(b)!.push({to:a,cost})}}
  }
  if(nodes.size>12000)throw Error('Road area too complex')
- const nearest=(district:string)=>[...nodes].filter(([,p])=>districtFor(p)===district).sort((a,b)=>distance(a[1],districtBounds(district))-distance(b[1],districtBounds(district))||a[0]-b[0])[0]?.[0]
+ const comp=new Map<number,number>(),hasOrigin=new Set<number>(),hasDest=new Set<number>();let cid=0
+ for(const [id] of nodes)if(!comp.has(id)){
+  const q=[id];comp.set(id,++cid)
+  while(q.length){const u=q.pop()!,d=districtFor(nodes.get(u)!);if(d===origin)hasOrigin.add(cid);if(d===destination)hasDest.add(cid);for(const e of edges.get(u)??[])if(!comp.has(e.to)){comp.set(e.to,cid);q.push(e.to)}}
+ }
+ const shared=new Set([...hasOrigin].filter(c=>hasDest.has(c)))
+ const nearest=(district:string)=>{
+  const all=[...nodes].filter(([,p])=>districtFor(p)===district).sort((a,b)=>distance(a[1],districtBounds(district))-distance(b[1],districtBounds(district))||a[0]-b[0])
+  return (all.find(([id])=>shared.has(comp.get(id)!))??all[0])?.[0]
+ }
  const start=nearest(origin),end=nearest(destination);if(!start||!end)throw Error('No road depots in both districts')
  const dist=new Map([[start,0]]),prev=new Map<number,number>(),heap:{id:number;d:number}[]=[]
  const push=(v:{id:number;d:number})=>{heap.push(v);let i=heap.length-1;while(i>0){const p=(i-1)>>1;if(heap[p].d<=v.d)break;heap[i]=heap[p];i=p}heap[i]=v}
