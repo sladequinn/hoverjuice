@@ -1,5 +1,7 @@
 name: Deploy HOVERGHINI to Cloudflare
 on:
+  push:
+    branches: [main]
   workflow_dispatch:
     inputs:
       target:
@@ -11,12 +13,12 @@ on:
 permissions:
   contents: read
 concurrency:
-  group: cloudflare-${{ inputs.target }}
+  group: cloudflare-${{ inputs.target || 'staging' }}
   cancel-in-progress: false
 jobs:
   deploy:
     runs-on: ubuntu-latest
-    environment: ${{ inputs.target }}
+    environment: ${{ inputs.target || 'staging' }}
     env:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
