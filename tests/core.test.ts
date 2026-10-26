@@ -258,3 +258,20 @@ test('dealers are dispersed, remain stable nearby, and reuse cars after long-dis
  for(const a of d.dealers)for(const b of d.dealers)if(a!==b)assert.ok(Math.hypot(a.x-b.x,a.z-b.z)>=1200)
  d.dispose()
 })
+
+test('distant building batches cull visually while preserving hitBuilding collision indexing',async()=>{
+ const city=proceduralCity('Cull test',43.45,-80.49), world=new World(city)
+ const from=city.buildings.length
+ for(let i=0;i<16;i++){
+  const x=8000+i*25
+  city.buildings.push(makeBuilding([[x,0],[x+12,0],[x+12,12],[x,12]],24)!)
+ }
+ await world.appendMap({buildingsFrom:from,roadsFrom:city.roads.length,tiles:1})
+ world.evictFar(0,0,2500)
+ const far=city.buildings.at(-1)!
+ assert.equal(world.hitBuilding(far.cx,far.cz,1),city.buildings.length-1)
+ world.evictFar(8100,0,2500)
+ assert.equal(world.hitBuilding(far.cx,far.cz,1),city.buildings.length-1)
+ world.dispose()
+})
+

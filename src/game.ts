@@ -122,6 +122,14 @@ export class Game {
   private streamBusy = false
   private mapOpen = false
   private mapZoom = 2
+  private glitcherCones: THREE.InstancedMesh
+  private scrapeCooldown = 0
+  private sprintRoad = ''
+  private sprintTimer = 0
+  private sprintDist = 0
+  private sprintSamples: { x: number; y: number; z: number; h: number }[] = []
+  private sprintBest = new Map<string, { time: number; samples: { x: number; y: number; z: number; h: number }[] }>()
+  private sprintGhost: THREE.Mesh | null = null
 
   constructor(scene: THREE.Scene) {
     this.scene = scene
@@ -131,6 +139,19 @@ export class Game {
     this.player = new Player(vehicleById(this.save.current), this.save.mask)
     this.juice = this.player.spec.tank
     scene.add(this.player.mesh)
+
+    const coneGeo = new THREE.ConeGeometry(2.6, 13, 12, 1, true)
+    coneGeo.rotateX(Math.PI / 2)
+    coneGeo.translate(0, 0, 7.2)
+    this.glitcherCones = new THREE.InstancedMesh(
+      coneGeo,
+      new THREE.MeshBasicMaterial({ color: 0x00f0ff, transparent: true, opacity: 0.16, depthWrite: false, side: THREE.DoubleSide, blending: THREE.AdditiveBlending }),
+      18,
+    )
+    this.glitcherCones.count = 0
+    this.glitcherCones.frustumCulled = false
+    this.glitcherCones.visible = false
+    scene.add(this.glitcherCones)
 
     this.beacon = new THREE.Group()
     const beam = new THREE.Mesh(
@@ -510,7 +531,8 @@ export class Game {
       if (delta && this.world === w) {
         await w.appendMap(delta)
         if(this.world !== w)return
-            this.traffic?.ensurePopulation()
+        w.evictFar(this.actor.x, this.actor.z, 2500)
+        this.traffic?.ensurePopulation()
         this.refreshDealers()
         this.buildMinimap()
         $('city-tag').textContent = `OSM · ${streamer.tileCount} SECTORS`
@@ -1041,12 +1063,15 @@ export class Game {
       p.overclocking=this.run.overclock>0; p.limping=this.run.limp>=0
       if(!this.economy.driving)this.player.update(dt, input, w, this.juice > 0)
       this.collisionCooldown=Math.max(0,this.collisionCooldown-dt)
+      this.scrapeCooldown=Math.max(0,this.scrapeCooldown-dt)
       if(p.impact>3 && !this.collisionCooldown) { this.run.damage(Math.min(45,p.impact*0.65),this.save.mask==='oni'); this.collisionCooldown=0.6 }
       if(p.apex) this.run.chain()
+      if(p.curbScrape && this.scrapeCooldown<=0) { this.run.chain(); this.scrapeCooldown=1.2 }
       if(this.run.limp===0) this.bust()
       const garage=w.city.nodes[this.garageNode]
       if(p.groundSpeed<3 && (Math.hypot(p.pos.x-garage.x,p.pos.z-garage.z)<12)) { this.run.heat=0; if(this.run.limp>=0)this.run.repair() }
       if(tunnel) this.route=[]
+      this.updateSprint(dt, w)
 
       const magEff = this.player.mode === 'mag' ? 0.7 : 1
       this.juice -= (spec.evap / this.run.flow + spec.burn * this.player.lastBurn * magEff) * dt
@@ -1067,11 +1092,23 @@ export class Game {
       this.streamTimer -= dt
       if (this.streamTimer <= 0) {
         this.streamTimer = 1.5
+        w.evictFar?.(this.actor.x, this.actor.z, 2500)
         if(Math.hypot(this.actor.x-this.dealerAnchor.x,this.actor.z-this.dealerAnchor.z)>250)this.refreshDealers()
         void this.streamMap()
       }
     }
-    if(!w.city.procedural){const geo=worldToLatLon(w.city,this.player.pos.x,this.player.pos.z);this.properties.setLocation(geo);this.crews.setLocation(geo);this.economy.setLocation(geo);this.street.tick(this.economy.district)}
+    if(!w.city.procedural){
+      const geo=worldToLatLon(w.city,this.player.pos.x,this.player.pos.z);this.properties.setLocation(geo);this.crews.setLocation(geo);this.economy.setLocation(geo);this.street.tick(this.economy.district)
+      const ownedSites = this.properties.nearby
+        .filter(prop => prop.ownerId && prop.ownerId === this.properties.playerId)
+        .map(prop => {
+          const x = wrapLon(prop.lon - w.city.lon) * 111320 * Math.cos(w.city.lat * Math.PI / 180)
+          const z = (w.city.lat - prop.lat) * 110540
+          const b = w.city.buildings.find(cand => Math.hypot(cand.cx - x, cand.cz - z) < 45)
+          return { id: prop.id, x: b?.cx ?? x, z: b?.cz ?? z, y: (b?.base ?? w.terrainHeightAt(x, z)) + (b?.height ?? 24) }
+        })
+      w.syncOwnedHolograms?.(ownedSites, this.save.mask, buildMask)
+    }
     const freight=this.economy.step(this.paused?-1:input.throttle,this.paused?0:input.steer,this.multiplayer?(v)=>{this.multiplayer?.connection.send(v)}:null)
     if(freight&&!w.city.procedural){const p=this.player;p.pos.x=wrapLon(freight.lon-w.city.lon)*111320*Math.cos(w.city.lat*Math.PI/180);p.pos.z=(w.city.lat-freight.lat)*110540;p.pos.y=w.groundHeightAt(p.pos.x,p.pos.z,p.pos.y)+1;p.heading=freight.yaw;p.speed=freight.speed;p.vel.set(Math.sin(p.heading)*p.speed,Math.cos(p.heading)*p.speed);p.mesh.position.copy(p.pos);p.mesh.rotation.set(0,p.heading,0)}
     const crewTarget=this.economy.target??this.crews.target
@@ -1079,6 +1116,7 @@ export class Game {
     this.multiplayer?.update(dt,this.player,this.spray,w,this.paused?0:dt,this.save.paint==='factory'?undefined:this.save.paint)
     w.update(this.paused?0:dt)
     const traffic=this.traffic?.update(this.paused?0:dt,this.actor,this.player.groundSpeed,this.run.heat,this.spray)
+    this.updateGlitcherCones()
     if(!this.paused&&traffic&&!this.economy.driving){
       if(traffic.horn)this.trafficSound.honk(traffic.horn.distance,traffic.horn.side,traffic.horn.freight)
       if(traffic.impact>0){this.run.damage(Math.min(30,traffic.impact*0.5),this.save.mask==='oni');if(this.player.mode==='mag' && traffic.impact>22)this.player.unsnap()}
@@ -1095,6 +1133,78 @@ export class Game {
     this.updateMarkers(dt)
     this.hudTimer -= dt
     if (this.hudTimer <= 0) { this.updateHud(); this.drawMinimap(); this.hudTimer = 0.1 }
+  }
+
+  private updateGlitcherCones() {
+    if (this.save.mask !== 'glitcher' || !this.traffic) {
+      this.glitcherCones.visible = false
+      return
+    }
+    const cones = this.traffic.patrolCones(this.actor, this.run.heat, 18)
+    this.glitcherCones.count = cones.length
+    this.glitcherCones.visible = cones.length > 0
+    const dummy = new THREE.Object3D()
+    const color = new THREE.Color()
+    cones.forEach((c, i) => {
+      dummy.position.set(c.x, c.y - 0.35, c.z)
+      dummy.rotation.set(0, c.heading, 0)
+      dummy.updateMatrix()
+      this.glitcherCones.setMatrixAt(i, dummy.matrix)
+      this.glitcherCones.setColorAt(i, color.setHex(c.hostile ? 0xff3b5c : 0x00f0ff))
+    })
+    this.glitcherCones.instanceMatrix.needsUpdate = true
+    if (this.glitcherCones.instanceColor) this.glitcherCones.instanceColor.needsUpdate = true
+  }
+
+  private updateSprint(dt: number, w: World) {
+    const p = this.player
+    if (p.mode !== 'mag' || p.groundSpeed < 18 || !w.city.roads?.length) {
+      this.sprintRoad = ''
+      this.sprintTimer = 0
+      this.sprintDist = 0
+      this.sprintSamples.length = 0
+      if (this.sprintGhost) this.sprintGhost.visible = false
+      return
+    }
+    const road = w.city.roads.find(r => r.major && r.name && r.nodeIds?.includes(p.edgeA) && r.nodeIds?.includes(p.edgeB))
+    if (!road?.name) return
+    if (this.sprintRoad !== road.name) {
+      this.sprintRoad = road.name
+      this.sprintTimer = 0
+      this.sprintDist = 0
+      this.sprintSamples = []
+    }
+    this.sprintTimer += dt
+    this.sprintDist += p.groundSpeed * dt
+    this.sprintSamples.push({ x: p.pos.x, y: p.pos.y, z: p.pos.z, h: p.heading })
+    const best = this.sprintBest.get(road.name)
+    if (best && best.samples.length) {
+      if (!this.sprintGhost) {
+        this.sprintGhost = new THREE.Mesh(
+          new THREE.BoxGeometry(1.1, 0.45, 2.4),
+          new THREE.MeshBasicMaterial({ color: 0x00f0ff, transparent: true, opacity: 0.32, wireframe: true }),
+        )
+        this.scene.add(this.sprintGhost)
+      }
+      const idx = Math.min(best.samples.length - 1, this.sprintSamples.length - 1)
+      const s = best.samples[idx]
+      this.sprintGhost.visible = true
+      this.sprintGhost.position.set(s.x, s.y, s.z)
+      this.sprintGhost.rotation.set(0, s.h, 0)
+    } else if (this.sprintGhost) {
+      this.sprintGhost.visible = false
+    }
+    if (this.sprintDist >= 400) {
+      const time = this.sprintTimer
+      const prev = this.sprintBest.get(road.name)
+      if (!prev || time < prev.time) {
+        this.sprintBest.set(road.name, { time, samples: [...this.sprintSamples] })
+        this.toast(`${road.name} 400m sprint PB · ${time.toFixed(2)}s`, 'good')
+      }
+      this.sprintTimer = 0
+      this.sprintDist = 0
+      this.sprintSamples = []
+    }
   }
 
   private updateMarkers(dt: number) {

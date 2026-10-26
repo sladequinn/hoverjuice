@@ -4,8 +4,11 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
     <meta name="theme-color" content="#0c1117" />
+    <meta name="description" content="Hoverghini: Own the night in a neon-drenched cyberpunk city. High-speed hovercraft driving, freight runs, economy, territory control, and real-time multiplayer." />
+    <meta property="og:title" content="Hoverjuice - HOVERGHINI | Own the Night" />
+    <meta property="og:description" content="Hoverghini: Own the night in a neon-drenched cyberpunk city. High-speed hovercraft driving, freight runs, economy, territory control, and real-time multiplayer." />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
-    <title>HOVERGHINI | Own the Night</title>
+    <title>Hoverjuice - HOVERGHINI | Own the Night</title>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@500;700;900&family=Rajdhani:wght@500;600;700&display=swap" rel="stylesheet" />
@@ -48,15 +51,12 @@
       <button id="prompt" class="prompt" data-tap="prompt"></button>
       <div id="toast" class="toast"></div>
 
-
-
       <div class="touch">
         <div class="left-pad">
           <div id="stick" class="stick" aria-label="Analog steering and throttle"><div id="stick-knob"></div></div>
         </div>
         <div class="throttle">
           <div class="stack">
-
             <button data-touch="rise" class="chip test-flight-only">RISE</button>
             <button data-touch="sink" class="chip test-flight-only">DESCEND</button>
             <button id="touch-mode" data-tap="mode" class="chip lock-btn" aria-pressed="false">MAG-LOCK</button>
@@ -80,7 +80,8 @@
         <button id="map-plus" aria-label="Zoom map in">+</button>
       </div>
       <div id="map-selection" class="panel map-selection" hidden></div>
-      <div class="map-attribution">Map data © <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap contributors</a> · <a href="./terrain-credits.html" target="_blank" rel="noopener">Terrain credits</a></div><details class="map-legend panel"><summary>Map key</summary><div class="legend-items"><span>▲ You</span><span style="color:#df8dcc">D Dealer</span><span style="color:#73ffcb">D Freight / crew gate</span><span>◆ Property title</span><span style="color:#fff280">W Waypoint</span><span style="color:#94e4b2">H Home</span><span style="color:#00d8e8">F Fuel</span><span>Tap buildings to inspect titles</span><span style="color:#45c4cb">SHINOBI</span><span style="color:#dce0da">LIARS</span><span style="color:#d7a35f">HYENAS</span><span style="color:#c879af">JESTERS</span></div></details>
+      <div class="map-attribution">Map data © <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap contributors</a> · <a href="./terrain-credits.html" target="_blank" rel="noopener">Terrain credits</a></div>
+      <details class="map-legend panel"><summary>Map key</summary><div class="legend-items"><span>▲ You</span><span style="color:#df8dcc">D Dealer</span><span style="color:#73ffcb">D Freight / crew gate</span><span>◆ Property title</span><span style="color:#fff280">W Waypoint</span><span style="color:#94e4b2">H Home</span><span style="color:#00d8e8">F Fuel</span><span>Tap buildings to inspect titles</span><span style="color:#45c4cb">SHINOBI</span><span style="color:#dce0da">LIARS</span><span style="color:#d7a35f">HYENAS</span><span style="color:#c879af">JESTERS</span></div></details>
     </div>
 
     <div id="title" class="title show">
@@ -92,15 +93,14 @@
         <p class="lede">Choose your ride. Run freight. Own a piece of the city.</p>
 
         <div class="title-actions">
-          <button id="btn-continue" class="btn buy big" style="display: none"></button>
+          <button id="btn-continue" class="btn buy big" style="display:none"></button>
           <p id="account-status" role="status">Connecting to your account…</p>
-          <label id="driver-profile" hidden>Choose your driver name<input id="driver-name" maxlength="20" autocomplete="nickname" placeholder="Driver name"></label>
+          <label id="driver-profile" hidden>Choose your driver name<input id="driver-name" maxlength="20" autocomplete="nickname" placeholder="Driver name" /></label>
           <button id="btn-cloud" class="btn ghost">Your account</button>
           <button id="account-latest" class="btn ghost" hidden>Load latest account save</button>
           <button id="account-retry" class="btn ghost" hidden>Retry connection</button>
           <button id="btn-new" class="btn big" disabled>Continue with Google</button>
         </div>
-
       </div>
     </div>
 
@@ -125,12 +125,16 @@
       <div class="muted small"><a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">Map data © OpenStreetMap contributors</a> · <a href="./terrain-credits.html" target="_blank" rel="noopener">Terrain credits</a></div>
     </div>
 
-    <script type="module" src="/src/main.ts"></script>
-  <section id="online-blocker" hidden aria-label="Connection interrupted" role="dialog" aria-modal="true">
-      <div><h2>City connection paused</h2><p id="online-message" role="status">Reconnecting…</p>
-      <button id="online-retry" class="btn">Retry connection</button>
-      <button id="online-sign-in" class="btn" hidden>Continue with Google</button>
-      <button id="online-reload" class="btn ghost" hidden>Load latest account save</button></div>
+    <section id="online-blocker" hidden aria-label="Connection interrupted" role="dialog" aria-modal="true">
+      <div>
+        <h2>City connection paused</h2>
+        <p id="online-message" role="status">Reconnecting…</p>
+        <button id="online-retry" class="btn">Retry connection</button>
+        <button id="online-sign-in" class="btn" hidden>Continue with Google</button>
+        <button id="online-reload" class="btn ghost" hidden>Load latest account save</button>
+      </div>
     </section>
+
+    <script type="module" src="/src/main.ts"></script>
   </body>
 </html>

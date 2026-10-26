@@ -136,6 +136,33 @@ export class World {
     }
   }
 
+  private buildingBatches: { objects: THREE.Object3D[]; cx: number; cz: number }[] = []
+  private ownedHologramKey = ''
+
+  evictFar(x: number, z: number, maxDist = 2500) {
+    for (const batch of this.buildingBatches) {
+      const visible = Math.hypot(batch.cx - x, batch.cz - z) <= maxDist
+      for (const obj of batch.objects) obj.visible = visible
+    }
+  }
+
+  syncOwnedHolograms(sites: { id: string; x: number; z: number; y: number }[], maskId: string, makeMask: (id: string) => THREE.Group) {
+    const key = `${maskId}:${sites.map(s => s.id).join(',')}`
+    if (key === this.ownedHologramKey) return
+    this.ownedHologramKey = key
+    while (this.ownedGroup.children.length) {
+      const c = this.ownedGroup.children[0]
+      this.ownedGroup.remove(c)
+    }
+    for (const site of sites.slice(0, 8)) {
+      const holo = makeMask(maskId)
+      holo.position.set(site.x, site.y + 8, site.z)
+      holo.scale.setScalar(9)
+      holo.userData.spin = true
+      this.ownedGroup.add(holo)
+    }
+  }
+
   private buildBuildings(from = 0, end = this.city.buildings.length) {
     const buckets = [0, 1].map(() => ({ pos: [] as number[], uv: [] as number[], col: [] as number[] }))
     const roofPos: number[] = [], roofCol: number[] = [], roofGang:number[]=[]
@@ -146,15 +173,17 @@ export class World {
     const trims: THREE.Matrix4[] = []
     const trimObject=new THREE.Object3D()
     const trim=(x:number,y:number,z:number,w:number,h:number,d:number,angle:number)=>{
-      if(this.trimCount>=6000)return
+      if(this.trimCount>=1200)return
       this.trimCount++
       trimObject.position.set(x,y,z);trimObject.rotation.set(0,angle,0);trimObject.scale.set(w,h,d);trimObject.updateMatrix();trims.push(trimObject.matrix.clone())
     }
     const col = new THREE.Color()
     const roofC = new THREE.Color()
+    let sumX = 0, sumZ = 0, bCount = 0
 
     for(let bi=from;bi<Math.min(end,this.city.buildings.length);bi++){
       const b=this.city.buildings[bi]
+      sumX += b.cx; sumZ += b.cz; bCount++
       const tint = TINTS[(bi * 7 + (bi >> 2)) % TINTS.length]
       col.set(tint).multiplyScalar(0.6 + ((bi * 97) % 40) / 100)
       roofC.set(tint).multiplyScalar(0.65)
@@ -177,12 +206,11 @@ export class World {
         const [x1, z1] = b.poly[i]
         const [x2, z2] = b.poly[(i + 1) % n]
         const len = Math.hypot(x2 - x1, z2 - z1)
-        if(len>5 && this.trimCount<6000){
+        if(len>6 && this.trimCount<1200 && bi%2===0){
           const angle=Math.atan2(-(z2-z1),x2-x1)
           trim((x1+x2)/2,h,(z1+z2)/2,len+.25,.32,.45,angle)
           trim((x1+x2)/2,base+3.8,(z1+z2)/2,len,.22,.4,angle)
-          if(bi%3===0)for(let t=0;t<len;t+=10)trim(x1+(x2-x1)*t/len,base+b.height/2,z1+(z2-z1)*t/len,.26,b.height,.38,angle)
-          if(bi%5===0)trim((x1+x2)/2,base+1.0,(z1+z2)/2,1.1,2,.65,angle)
+          if(bi%6===0)trim((x1+x2)/2,base+1.0,(z1+z2)/2,1.1,2,.65,angle)
         }
         const u1 = d / 32, u2 = (d + len) / 32, v = b.height / 32
         d += len
@@ -211,9 +239,15 @@ export class World {
       ranges.push({bi,start:roofStart,count:roofPos.length/3-roofStart})
     }
 
+    const batchObjects: THREE.Object3D[] = []
+    const addBatchObj = (obj: THREE.Object3D) => {
+      batchObjects.push(obj)
+      this.group.add(obj)
+    }
+
     if(trims.length){
       const mesh=new THREE.InstancedMesh(new THREE.BoxGeometry(1,1,1),new THREE.MeshStandardMaterial({color:0x424a4d,roughness:.9}),trims.length)
-      trims.forEach((matrix,i)=>mesh.setMatrixAt(i,matrix));this.group.add(mesh)
+      trims.forEach((matrix,i)=>mesh.setMatrixAt(i,matrix));addBatchObj(mesh)
     }
     buckets.forEach((bk,style) => {
       const geo = new THREE.BufferGeometry()
@@ -221,7 +255,7 @@ export class World {
       geo.setAttribute('uv', new THREE.Float32BufferAttribute(bk.uv, 2))
       geo.setAttribute('color', new THREE.Float32BufferAttribute(bk.col, 3))
       geo.computeVertexNormals()
-      this.group.add(new THREE.Mesh(geo, facadeMaterial(style)))
+      addBatchObj(new THREE.Mesh(geo, facadeMaterial(style)))
     })
 
     const roofGeo = new THREE.BufferGeometry()
@@ -236,12 +270,12 @@ export class World {
       shader.fragmentShader='varying float vGangId;\n'+shader.fragmentShader
       shader.fragmentShader=shader.fragmentShader.replace('#include <color_fragment>','#include <color_fragment>\nif(vGangId>0.5)diffuseColor.rgb+=vGangId<1.5?vec3(0.0,0.45,0.5):vGangId<2.5?vec3(0.35):vGangId<3.5?vec3(0.25,0.1,0.32):vec3(0.4,0.06,0.16);')
     }
-    this.group.add(new THREE.Mesh(roofGeo,roofMat))
+    addBatchObj(new THREE.Mesh(roofGeo,roofMat))
 
     const edgeGeo = new THREE.BufferGeometry()
     edgeGeo.setAttribute('position', new THREE.Float32BufferAttribute(edgePos, 3))
     edgeGeo.setAttribute('color', new THREE.Float32BufferAttribute(edgeCol, 3))
-    this.group.add(new THREE.LineSegments(edgeGeo, new THREE.LineBasicMaterial({ vertexColors: true })))
+    addBatchObj(new THREE.LineSegments(edgeGeo, new THREE.LineBasicMaterial({ vertexColors: true })))
 
     if (roofProps.length) {
       const units = new THREE.InstancedMesh(
@@ -259,12 +293,15 @@ export class World {
         units.setMatrixAt(i, matrix)
         units.setColorAt(i, color.setHex(p.color).multiplyScalar(0.45))
       })
-      this.group.add(units)
+      addBatchObj(units)
     }
     if (antennaPos.length) {
       const g = new THREE.BufferGeometry()
       g.setAttribute('position', new THREE.Float32BufferAttribute(antennaPos, 3))
-      this.group.add(new THREE.LineSegments(g, new THREE.LineBasicMaterial({ color: 0xff9d00 })))
+      addBatchObj(new THREE.LineSegments(g, new THREE.LineBasicMaterial({ color: 0xff9d00 })))
+    }
+    if (bCount > 0) {
+      this.buildingBatches.push({ objects: batchObjects, cx: sumX / bCount, cz: sumZ / bCount })
     }
   }
 
@@ -388,7 +425,7 @@ export class World {
     const head=new THREE.InstancedMesh(new THREE.BoxGeometry(0.35,0.065,0.7),new THREE.MeshBasicMaterial({color:0xffc174}),lamps.length)
     const arm=new THREE.InstancedMesh(new THREE.BoxGeometry(.09,.12,1.3),pole.material,lamps.length)
     const housing=new THREE.InstancedMesh(new THREE.BoxGeometry(.45,.16,.8),pole.material,lamps.length)
-    const pool=new THREE.InstancedMesh(new THREE.PlaneGeometry(8,12),new THREE.MeshBasicMaterial({color:0xffb35b,map:softDisc,transparent:true,opacity:0.23,depthWrite:false,blending:THREE.AdditiveBlending}),lamps.length)
+    const pool=new THREE.InstancedMesh(new THREE.PlaneGeometry(9.5,14),new THREE.MeshBasicMaterial({color:0xffb866,map:softDisc,transparent:true,opacity:0.31,depthWrite:false,blending:THREE.AdditiveBlending}),lamps.length)
     pole.name="streetlight-poles"
     const obj=new THREE.Object3D()
     lamps.forEach((l,i)=>{

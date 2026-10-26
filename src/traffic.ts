@@ -226,5 +226,12 @@ export class TrafficSystem {
   events.boxed=closeHostiles>=3&&playerSpeed<2
   return events
  }
+ patrolCones(player:THREE.Vector3,heat=0,limit=18){
+  return this.agents
+   .filter(c=>c.phase==='drive'&&c.pos.distanceToSquared(player)<180**2)
+   .sort((a,b)=>a.pos.distanceToSquared(player)-b.pos.distanceToSquared(player))
+   .slice(0,limit)
+   .map(c=>({x:c.pos.x,y:c.pos.y,z:c.pos.z,heading:c.heading,hostile:c.kind===2&&heat>.75}))
+ }
  dispose(){for(const mesh of this.fleets){mesh.geometry.dispose();(mesh.material as THREE.Material).dispose()}this.agents=[];this.sites=[];this.queues.clear();this.junctions.clear();this.waiting.clear()}
 }

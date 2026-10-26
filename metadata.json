@@ -1,0 +1,5 @@
+{
+  "name": "Hoverjuice",
+  "description": "Hoverghini: Own the night in a neon-drenched cyberpunk city. High-speed hovercraft driving, freight runs, economy, territory control, and real-time multiplayer.",
+  "capabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

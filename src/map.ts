@@ -391,6 +391,29 @@ export class MapStreamer {
         }
       }
     }
+    const wLayer = tile.layers.waterway
+    if (wLayer) for (let i = 0; i < wLayer.length; i++) {
+      const f = wLayer.feature(i)
+      const cls = String(f.properties.class || '')
+      if (!['river', 'canal', 'stream'].includes(cls)) continue
+      const halfW = cls === 'river' ? 9 : cls === 'canal' ? 5.5 : 3.2
+      const geo = f.toGeoJSON(x, y, TILE_ZOOM).geometry as GeoGeometry
+      const lines = geo.type === 'LineString' ? [geo.coordinates] : geo.type === 'MultiLineString' ? geo.coordinates : []
+      for (const line of lines) {
+        const pts = line.map(p => this.project(p))
+        if (pts.length < 2) continue
+        const left: Pt[] = [], right: Pt[] = []
+        for (let j = 0; j < pts.length; j++) {
+          const a = pts[Math.max(0, j - 1)], b = pts[Math.min(pts.length - 1, j + 1)]
+          const dx = b[0] - a[0], dz = b[1] - a[1], len = Math.hypot(dx, dz) || 1
+          const nx = (-dz / len) * halfW, nz = (dx / len) * halfW
+          left.push([pts[j][0] + nx, pts[j][1] + nz])
+          right.unshift([pts[j][0] - nx, pts[j][1] - nz])
+        }
+        const poly = [...left, ...right]
+        if (Math.abs(polyArea(poly)) > 25) this.city.waters.push({ poly, holes: [] })
+      }
+    }
     // Index POIs once per tile, instead of testing every city POI against every building.
     const venueCells = new Map<string, typeof this.city.venues>()
     for (const venue of this.city.venues) {

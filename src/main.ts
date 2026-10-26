@@ -1,21 +1,27 @@
+import './style.css'
+import * as THREE from 'three'
 import { AlleyPreview } from './menu-scene'
 import { crewInvite } from './spatial'
 import { CITIES } from './data'
-import './style.css'
-import * as THREE from 'three'
 import { $, Game } from './game'
 import { createSky, Rain } from './fx'
 import type { Input } from './vehicle'
 
-const startingPixelRatio=()=>window.matchMedia('(pointer: coarse), (max-width: 760px)').matches
-  ?Math.min(window.devicePixelRatio,1,Math.sqrt(1000000/(innerWidth*innerHeight)))
-  :Math.min(window.devicePixelRatio,1.25,Math.sqrt(1600000/(innerWidth*innerHeight)))
-const canvas = $<HTMLCanvasElement>('scene')
-const renderer = new THREE.WebGLRenderer({ canvas, stencil: true, antialias: true, powerPreference: 'high-performance' })
+const canvas = $('scene') as HTMLCanvasElement
+const startingPixelRatio = () =>
+  window.matchMedia('(pointer: coarse), (max-width: 760px)').matches
+    ? Math.min(window.devicePixelRatio, 1, Math.sqrt(1000000 / (innerWidth * innerHeight)))
+    : Math.min(window.devicePixelRatio, 1.25, Math.sqrt(1600000 / (innerWidth * innerHeight)))
+const renderer = new THREE.WebGLRenderer({
+  canvas,
+  stencil: true,
+  antialias: true,
+  powerPreference: 'high-performance',
+})
 renderer.setPixelRatio(startingPixelRatio())
 renderer.setSize(window.innerWidth, window.innerHeight)
 renderer.toneMapping = THREE.ACESFilmicToneMapping
-renderer.toneMappingExposure = 1.0
+renderer.toneMappingExposure = 1.04
 
 const scene = new THREE.Scene()
 scene.fog = new THREE.FogExp2(0x263441, 0.0045)
@@ -28,11 +34,10 @@ scene.add(sky)
 const rain = new Rain()
 scene.add(rain.mesh)
 
-const camera = new THREE.PerspectiveCamera(62, window.innerWidth / window.innerHeight, 0.3, 1400)
+const camera = new THREE.PerspectiveCamera(62, window.innerWidth / window.innerHeight, 0.22, 1400)
 camera.position.set(0, 30, -40)
 
-// One antialiased forward pass. No full-screen bloom chain on the driving path.
-const fill = new THREE.DirectionalLight(0xb5d9ff, 1.4)
+const fill = new THREE.DirectionalLight(0xb5d9ff, 1.45)
 scene.add(fill, fill.target)
 let renderScale = startingPixelRatio()
 let slowFrames = 0
@@ -56,26 +61,45 @@ coarse.addEventListener('change', syncTouch)
 
 const game = new Game(scene)
 ;(window as unknown as { hoverghini: Game }).hoverghini = game
-;(window as unknown as {hoverjuiceRenderStats:()=>unknown}).hoverjuiceRenderStats=()=>({calls:renderer.info.render.calls,triangles:renderer.info.render.triangles,geometries:renderer.info.memory.geometries,textures:renderer.info.memory.textures,pixelRatio:renderer.getPixelRatio()})
-
-// Compile materials and upload all starting geometry while the loading overlay is up.
-// The normal frame loop is suspended so warm-up cannot advance the game or cold open.
-game.prepareRender=async()=>{
-  const nextFrame=()=>new Promise<void>(resolve=>requestAnimationFrame(()=>resolve()))
-  updateCamera(1);sky.position.copy(camera.position)
-  await renderer.compileAsync(scene,camera)
-  const culled:{object:THREE.Object3D;value:boolean}[]=[]
-  scene.traverse(object=>{if(object instanceof THREE.Mesh||object instanceof THREE.LineSegments){culled.push({object,value:object.frustumCulled});object.frustumCulled=false}})
-  try{
-    renderer.render(scene,camera)
-    // Fence the initial upload/draw, allowing UI paints while the GPU completes it.
-    const gl=renderer.getContext() as WebGL2RenderingContext,fence=gl.fenceSync(gl.SYNC_GPU_COMMANDS_COMPLETE,0)
-    if(fence){gl.flush();try{while(gl.clientWaitSync(fence,0,0)===gl.TIMEOUT_EXPIRED)await nextFrame()}finally{gl.deleteSync(fence)}}
-  }finally{for(const {object,value} of culled)object.frustumCulled=value}
+;(window as unknown as { hoverjuiceRenderStats: () => unknown }).hoverjuiceRenderStats = () => ({
+  calls: renderer.info.render.calls,
+  triangles: renderer.info.render.triangles,
+  geometries: renderer.info.memory.geometries,
+  textures: renderer.info.memory.textures,
+  pixelRatio: renderer.getPixelRatio(),
+})
+game.prepareRender = async () => {
+  const nextFrame = () => new Promise<void>((resolve) => requestAnimationFrame(() => resolve()))
+  updateCamera(1)
+  sky.position.copy(camera.position)
+  await renderer.compileAsync(scene, camera)
+  const culled: { object: THREE.Object3D; value: boolean }[] = []
+  scene.traverse((object) => {
+    if (object instanceof THREE.Mesh || object instanceof THREE.LineSegments) {
+      culled.push({ object, value: object.frustumCulled })
+      object.frustumCulled = false
+    }
+  })
+  try {
+    renderer.render(scene, camera)
+    const gl = renderer.getContext() as WebGL2RenderingContext
+    const fence = gl.fenceSync(gl.SYNC_GPU_COMMANDS_COMPLETE, 0)
+    if (fence) {
+      gl.flush()
+      try {
+        while (gl.clientWaitSync(fence, 0, 0) === gl.TIMEOUT_EXPIRED) await nextFrame()
+      } finally {
+        gl.deleteSync(fence)
+      }
+    }
+  } finally {
+    for (const { object, value } of culled) object.frustumCulled = value
+  }
   await nextFrame()
-  renderer.render(scene,camera)
+  renderer.render(scene, camera)
   await nextFrame()
-  last=performance.now();slowFrames=0
+  last = performance.now()
+  slowFrames = 0
 }
 
 // ---------- input ----------
@@ -84,19 +108,26 @@ const touch = { up: false, down: false, left: false, right: false, boost: false,
 const stick = { x: 0, y: 0, active: false }
 
 window.addEventListener('keydown', (e) => {
-  if ((e.target as HTMLElement).tagName === 'INPUT'||!game.playable) return
+  if ((e.target as HTMLElement).tagName === 'INPUT' || !game.playable) return
   const k = e.key.toLowerCase()
   keys.add(k)
   if (e.repeat) return
   const modal = $('modal')
   const open = modal.classList.contains('show')
   const view = modal.dataset.view
-  const views: Record<string, string> = { j: 'contracts', n: 'market', g: 'garage', k: 'masks', p: 'holdings', m: 'warp', h: 'help' }
+  const views: Record<string, string> = {
+    j: 'contracts',
+    n: 'market',
+    g: 'garage',
+    k: 'masks',
+    p: 'holdings',
+    m: 'warp',
+    h: 'help',
+  }
   if (k === 'escape') {
     if ($('map-overlay').classList.contains('show')) game.toggleMap(false)
     else game.closeModal()
-  }
-  else if (views[k]) {
+  } else if (views[k]) {
     if (open && view === views[k]) game.closeModal()
     else game.openModal(views[k])
   } else if (!open) {
@@ -112,50 +143,44 @@ window.addEventListener('keydown', (e) => {
 window.addEventListener('keyup', (e) => keys.delete(e.key.toLowerCase()))
 window.addEventListener('blur', () => keys.clear())
 
-document.querySelectorAll<HTMLElement>('[data-touch]').forEach((el) => {
-  const k = el.dataset.touch as keyof typeof touch
-  let pointer = -1
-  const off = () => { pointer = -1; touch[k] = false; el.classList.remove('held') }
-  el.addEventListener('pointerdown', (e) => {
-    e.preventDefault()
-    if (pointer !== -1) return
-    pointer = e.pointerId; el.setPointerCapture(pointer)
-    touch[k] = true; el.classList.add('held')
+const mapCanvas = $('full-map') as HTMLCanvasElement
+let mapDrag: { id: number; x: number; y: number; startX: number; startY: number; moved: boolean } | null = null
+mapCanvas.addEventListener('pointerdown', (e) => {
+  if (mapDrag) return
+  e.preventDefault()
+  mapCanvas.setPointerCapture(e.pointerId)
+  mapDrag = { id: e.pointerId, x: e.clientX, y: e.clientY, startX: e.clientX, startY: e.clientY, moved: false }
+})
+mapCanvas.addEventListener('pointermove', (e) => {
+  if (!mapDrag || mapDrag.id !== e.pointerId) return
+  if (Math.hypot(e.clientX - mapDrag.startX, e.clientY - mapDrag.startY) > 6) mapDrag.moved = true
+  if (mapDrag.moved) game.panMap(e.clientX - mapDrag.x, e.clientY - mapDrag.y)
+  mapDrag.x = e.clientX
+  mapDrag.y = e.clientY
+})
+mapCanvas.addEventListener('pointerup', (e) => {
+  if (!mapDrag || mapDrag.id !== e.pointerId) return
+  const click = !mapDrag.moved
+  mapDrag = null
+  if (click) {
+    const r = mapCanvas.getBoundingClientRect()
+    game.mapPick(e.clientX - r.left, e.clientY - r.top)
+  }
+})
+for (const event of ['pointercancel', 'lostpointercapture']) {
+  mapCanvas.addEventListener(event, () => {
+    mapDrag = null
   })
-  for (const event of ['pointerup', 'pointercancel', 'lostpointercapture'])
-    el.addEventListener(event, (e) => { if ((e as PointerEvent).pointerId === pointer) off() })
-  window.addEventListener('blur', off)
-})
-document.querySelectorAll<HTMLElement>('[data-tap]').forEach((el) =>
-  el.addEventListener('click', () => {
-    if(!game.playable)return
-    const a = el.dataset.tap!
-    if (a === 'mode') game.toggleMode()
-    else if (a === 'prompt') game.promptAction()
-    else if (a === 'cam') game.cycleCamera()
-    else if (a === 'map') game.toggleMap()
-    else game.openModal(a)
-  }),
+}
+mapCanvas.addEventListener(
+  'wheel',
+  (e) => {
+    e.preventDefault()
+    e.stopPropagation()
+    game.zoomMap(e.deltaY < 0 ? 1.2 : 1 / 1.2)
+  },
+  { passive: false },
 )
-$('map-close').addEventListener('click', () => game.toggleMap(false))
-$('map-plus').addEventListener('click', () => game.zoomMap(1.35))
-$('map-minus').addEventListener('click', () => game.zoomMap(1 / 1.35))
-$('map-center').addEventListener('click',()=>game.centerMap())
-const mapCanvas=$('full-map')
-let mapDrag:{id:number;x:number;y:number;startX:number;startY:number;moved:boolean}|null=null
-mapCanvas.addEventListener('pointerdown',e=>{if(mapDrag)return;e.preventDefault();mapCanvas.setPointerCapture(e.pointerId);mapDrag={id:e.pointerId,x:e.clientX,y:e.clientY,startX:e.clientX,startY:e.clientY,moved:false}})
-mapCanvas.addEventListener('pointermove',e=>{
- if(!mapDrag||mapDrag.id!==e.pointerId)return
- if(Math.hypot(e.clientX-mapDrag.startX,e.clientY-mapDrag.startY)>6)mapDrag.moved=true
- if(mapDrag.moved)game.panMap(e.clientX-mapDrag.x,e.clientY-mapDrag.y)
- mapDrag.x=e.clientX;mapDrag.y=e.clientY
-})
-mapCanvas.addEventListener('pointerup',e=>{if(!mapDrag||mapDrag.id!==e.pointerId)return;const click=!mapDrag.moved;mapDrag=null;if(click){const r=mapCanvas.getBoundingClientRect();game.mapPick(e.clientX-r.left,e.clientY-r.top)}})
-for(const event of ['pointercancel','lostpointercapture'])mapCanvas.addEventListener(event,()=>{mapDrag=null})
-mapCanvas.addEventListener('wheel',e=>{e.preventDefault();e.stopPropagation();game.zoomMap(e.deltaY<0?1.2:1/1.2)},{passive:false})
-
-$('modal-close').addEventListener('click', () => game.closeModal())
-$('modal').addEventListener('click', (e) => { if (e.target === $('modal')) game.closeModal() })
 
 const stickEl = $('stick')
 const knob = $('stick-knob')
@@ -166,7 +191,10 @@ function moveStick(e: PointerEvent) {
   let dx = e.clientX - (r.left + r.width / 2)
   let dy = e.clientY - (r.top + r.height / 2)
   const d = Math.hypot(dx, dy)
-  if (d > STICK_R) { dx *= STICK_R / d; dy *= STICK_R / d }
+  if (d > STICK_R) {
+    dx *= STICK_R / d
+    dy *= STICK_R / d
+  }
   knob.style.transform = `translate(${dx}px, ${dy}px)`
   stick.x = dx / STICK_R
   stick.y = -dy / STICK_R
@@ -179,7 +207,9 @@ stickEl.addEventListener('pointerdown', (e) => {
   stick.active = true
   moveStick(e)
 })
-stickEl.addEventListener('pointermove', (e) => { if (e.pointerId === stickId) moveStick(e) })
+stickEl.addEventListener('pointermove', (e) => {
+  if (e.pointerId === stickId) moveStick(e)
+})
 const releaseStick = (e: PointerEvent) => {
   if (e.pointerId !== stickId) return
   stickId = -1
@@ -191,7 +221,55 @@ stickEl.addEventListener('pointerup', releaseStick)
 stickEl.addEventListener('pointercancel', releaseStick)
 stickEl.addEventListener('lostpointercapture', releaseStick)
 window.addEventListener('blur', () => {
-  stickId = -1; stick.active = false; stick.x = stick.y = 0; knob.style.transform = ''
+  stickId = -1
+  stick.active = false
+  stick.x = stick.y = 0
+  knob.style.transform = ''
+})
+
+document.querySelectorAll<HTMLElement>('[data-touch]').forEach((el) => {
+  const k = el.dataset.touch as keyof typeof touch
+  let pointer = -1
+  const off = () => {
+    pointer = -1
+    touch[k] = false
+    el.classList.remove('held')
+  }
+  el.addEventListener('pointerdown', (e) => {
+    e.preventDefault()
+    if (pointer !== -1) return
+    pointer = e.pointerId
+    el.setPointerCapture(pointer)
+    touch[k] = true
+    el.classList.add('held')
+  })
+  for (const event of ['pointerup', 'pointercancel', 'lostpointercapture']) {
+    el.addEventListener(event, (e) => {
+      if ((e as PointerEvent).pointerId === pointer) off()
+    })
+  }
+  window.addEventListener('blur', off)
+})
+
+document.querySelectorAll<HTMLElement>('[data-tap]').forEach((el) =>
+  el.addEventListener('click', () => {
+    if (!game.playable) return
+    const a = el.dataset.tap!
+    if (a === 'mode') game.toggleMode()
+    else if (a === 'prompt') game.promptAction()
+    else if (a === 'cam') game.cycleCamera()
+    else if (a === 'map') game.toggleMap()
+    else game.openModal(a)
+  }),
+)
+
+$('map-close').addEventListener('click', () => game.toggleMap(false))
+$('map-plus').addEventListener('click', () => game.zoomMap(1.35))
+$('map-minus').addEventListener('click', () => game.zoomMap(1 / 1.35))
+$('map-center').addEventListener('click', () => game.centerMap())
+$('modal-close').addEventListener('click', () => game.closeModal())
+$('modal').addEventListener('click', (e) => {
+  if (e.target === $('modal')) game.closeModal()
 })
 
 let smoothSteer = 0
@@ -207,103 +285,203 @@ function readInput(dt: number): Input {
   const kUp = has('w', 'arrowup') || touch.up
   const kDown = has('s', 'arrowdown') || touch.down
   return {
-      throttle: Math.max(kUp ? 1 : 0, dz(sy) > 0 ? dz(sy) : 0),
-      brake: Math.max(kDown ? 1 : 0, dz(sy) < -0.4 ? 1 : 0),
-      steer,
-      boost: has('shift') || touch.boost,
-      up: has(' ') || touch.rise,
-      down: has('c') || touch.sink,
+    throttle: Math.max(kUp ? 1 : 0, dz(sy) > 0 ? dz(sy) : 0),
+    brake: Math.max(kDown ? 1 : 0, dz(sy) < -0.4 ? 1 : 0),
+    steer,
+    boost: has('shift') || touch.boost,
+    up: has(' ') || touch.rise,
+    down: has('c') || touch.sink,
   }
 }
 
 let zoom = 1
-window.addEventListener('wheel', (e) => { zoom = Math.min(2.5, Math.max(0.5, zoom * (1 + Math.sign(e.deltaY) * 0.1))) }, { passive: true })
+window.addEventListener(
+  'wheel',
+  (e) => {
+    zoom = Math.min(2.5, Math.max(0.5, zoom * (1 + Math.sign(e.deltaY) * 0.1)))
+  },
+  { passive: true },
+)
 
-// ---------- title ----------
+// ---------- title & account ----------
 const title = $('title')
-const alley=new AlleyPreview()
-let menuFrame=0
-renderTitle = () => { if(title.classList.contains('show')){alley.resize(innerWidth,innerHeight);alley.render(renderer,performance.now()/1000)} }
+const alley = new AlleyPreview()
+let menuFrame = 0
+renderTitle = () => {
+  if (title.classList.contains('show')) {
+    alley.resize(innerWidth, innerHeight)
+    alley.render(renderer, performance.now() / 1000)
+  }
+}
 renderTitle()
 const cont = $<HTMLButtonElement>('btn-continue')
 const enter = $<HTMLButtonElement>('btn-new')
-const accountStatus=$('account-status')
-let booted=false,booting=false
-let googleAvailable=false
-function accountUI(){
-  if(game.online.ready&&!booted){game.applyAccountSave();booted=true}
-  const ready=game.online.ready&&game.street.ready
-  enter.textContent=ready?(game.hasSave?'Choose another city':'Enter the city ↗'):game.online.ready?'Loading inventory…':'Continue with Google'
-  enter.disabled=booting||(game.online.ready&&!game.street.ready)||(!game.online.ready&&!googleAvailable)
-  cont.style.display=ready&&game.hasSave?'':'none'
-  cont.textContent=`Continue in ${game.save.city?.name??'the city'}`
-  accountStatus.textContent=game.online.ready&&!game.street.ready?game.street.status:game.online.status
-  $('driver-profile').hidden=!ready||!!game.online.displayName
-  $('account-retry').hidden=ready||game.online.signedOut||game.online.conflict
-  $('account-latest').hidden=!game.online.conflict
-  const blocked=!!game.world&&!game.loading&&!game.playable
-  $('online-blocker').hidden=!blocked
-  $('online-message').textContent=!ready?game.online.status:game.multiplayer?.status??'Connecting to the city…'
-  $('online-sign-in').hidden=!game.online.signedOut
-  $('online-reload').hidden=!game.online.conflict&&!game.multiplayer?.status.includes('ANOTHER TAB')
+const accountStatus = $('account-status')
+let booted = false
+let booting = false
+let googleAvailable = false
+
+function accountUI() {
+  if (game.online.ready && !booted) {
+    game.applyAccountSave()
+    booted = true
+  }
+  const ready = game.online.ready && game.street.ready
+  enter.textContent = ready
+    ? game.hasSave
+      ? 'Choose another city'
+      : 'Enter the city ↗'
+    : game.online.ready
+      ? 'Loading inventory…'
+      : 'Continue with Google'
+  enter.disabled = booting || (game.online.ready && !game.street.ready) || (!game.online.ready && !googleAvailable)
+  cont.style.display = ready && game.hasSave ? '' : 'none'
+  cont.textContent = `Continue in ${game.save.city?.name ?? 'the city'}`
+  accountStatus.textContent = game.online.ready && !game.street.ready ? game.street.status : game.online.status
+  $('driver-profile').hidden = !ready || !!game.online.displayName
+  $('account-retry').hidden = ready || game.online.signedOut || game.online.conflict
+  $('account-latest').hidden = !game.online.conflict
+  const blocked = !!game.world && !game.loading && !game.playable
+  $('online-blocker').hidden = !blocked
+  $('online-message').textContent = !ready ? game.online.status : game.multiplayer?.status ?? 'Connecting to the city…'
+  $('online-sign-in').hidden = !game.online.signedOut
+  $('online-reload').hidden = !game.online.conflict && !game.multiplayer?.status.includes('ANOTHER TAB')
 }
-async function bootAccount(){
-  if(booting)return
-  booting=true;accountUI()
-  try{
-    const r=await fetch('/api/auth/providers',{cache:'no-store',signal:AbortSignal.timeout(8000)})
-    if(r.ok)googleAvailable=(await r.json()).google===true
+
+async function bootAccount() {
+  if (booting) return
+  booting = true
+  accountUI()
+  try {
+    const r = await fetch('/api/auth/providers', { cache: 'no-store', signal: AbortSignal.timeout(8000) })
+    if (r.ok) googleAvailable = (await r.json()).google === true
     await game.online.start()
-    if(game.online.ready&&!booted){game.applyAccountSave();booted=true}
-    if(game.online.ready)await game.street.refresh()
-    if(!game.online.ready&&game.online.signedOut&&!googleAvailable)game.online.status='Google sign-in is being configured. Please try again shortly.'
-  }catch{game.online.offline()}
-  finally{booting=false;accountUI()}
+    if (game.online.ready && !booted) {
+      game.applyAccountSave()
+      booted = true
+    }
+    if (game.online.ready) await game.street.refresh()
+    if (!game.online.ready && game.online.signedOut && !googleAvailable) {
+      game.online.status = 'Google sign-in is being configured. Please try again shortly.'
+    }
+  } catch {
+    game.online.offline()
+  } finally {
+    booting = false
+    accountUI()
+  }
 }
-async function saveDriverName(){
-  if(game.online.displayName)return true
-  const name=($('driver-name') as HTMLInputElement).value.trim()
-  if(!/^[a-zA-Z0-9 ._-]{2,20}$/.test(name)){accountStatus.textContent='Choose a driver name: 2–20 letters, numbers, spaces, dots, underscores or hyphens.';return false}
-  try{
-    const response=await fetch('/api/multiplayer/profile',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name}),signal:AbortSignal.timeout(8000)})
-    if(!response.ok)throw Error('Could not save your driver name. Please retry.')
-    game.online.displayName=name;accountUI();return true
-  }catch(error){accountStatus.textContent=(error as Error).message;return false}
+
+async function saveDriverName(): Promise<boolean> {
+  if (game.online.displayName) return true
+  const name = ($('driver-name') as HTMLInputElement).value.trim()
+  if (!/^[a-zA-Z0-9 ._-]{2,20}$/.test(name)) {
+    accountStatus.textContent = 'Choose a driver name: 2–20 letters, numbers, spaces, dots, underscores or hyphens.'
+    return false
+  }
+  try {
+    const response = await fetch('/api/multiplayer/profile', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name }),
+      signal: AbortSignal.timeout(8000),
+    })
+    if (!response.ok) throw Error('Could not save your driver name. Please retry.')
+    game.online.displayName = name
+    accountUI()
+    return true
+  } catch (error) {
+    accountStatus.textContent = (error as Error).message
+    return false
+  }
 }
-cont.addEventListener('click',async()=>{
-  if(!game.online.ready||!await saveDriverName())return
-  title.classList.remove('show');const c=game.save.city!;void game.warp(c.name,c.lat,c.lon)
+
+cont.addEventListener('click', async () => {
+  if (!game.online.ready || !(await saveDriverName())) return
+  title.classList.remove('show')
+  const c = game.save.city!
+  void game.warp(c.name, c.lat, c.lon)
 })
-$('btn-cloud').addEventListener('click',()=>{title.classList.remove('show');game.openModal('cloud')})
-enter.addEventListener('click',async()=>{
-  if(!game.online.ready){if(googleAvailable)location.assign('/api/auth/google/login');return}
-  if(!await saveDriverName())return
-  title.classList.remove('show');game.openModal(game.hasSave?'warp':'couch')
+$('btn-cloud').addEventListener('click', () => {
+  title.classList.remove('show')
+  game.openModal('cloud')
 })
-$('account-retry').addEventListener('click',()=>void bootAccount())
-$('online-sign-in').addEventListener('click',()=>location.assign('/api/auth/google/login'))
-$('online-retry').addEventListener('click',async()=>{await game.online.heartbeat();await game.street.refresh();game.multiplayer?.reconnect();accountUI()})
-function loadLatest(){
-  if(!confirm('Load the latest account save? Unsynced changes on this device will be archived for recovery.'))return
-  if(game.cloud.playerId){const key=`hoverghini.preferences.pending.${game.cloud.playerId}`,pending=localStorage.getItem(key);localStorage.setItem(key+'.conflict.'+Date.now(),JSON.stringify({pending:pending?JSON.parse(pending):null,preferences:game.save}));localStorage.removeItem(key)}
+enter.addEventListener('click', async () => {
+  if (!game.online.ready) {
+    if (googleAvailable) location.assign('/api/auth/google/login')
+    return
+  }
+  if (!(await saveDriverName())) return
+  title.classList.remove('show')
+  game.openModal(game.hasSave ? 'warp' : 'couch')
+})
+$('account-retry').addEventListener('click', () => void bootAccount())
+$('online-sign-in').addEventListener('click', () => location.assign('/api/auth/google/login'))
+$('online-retry').addEventListener('click', async () => {
+  await game.online.heartbeat()
+  await game.street.refresh()
+  game.multiplayer?.reconnect()
+  accountUI()
+})
+function loadLatest() {
+  if (!confirm('Load the latest account save? Unsynced changes on this device will be archived for recovery.')) return
+  if (game.cloud.playerId) {
+    const key = `hoverghini.preferences.pending.${game.cloud.playerId}`
+    const pending = localStorage.getItem(key)
+    localStorage.setItem(
+      key + '.conflict.' + Date.now(),
+      JSON.stringify({ pending: pending ? JSON.parse(pending) : null, preferences: game.save }),
+    )
+    localStorage.removeItem(key)
+  }
   location.reload()
 }
-$('online-reload').addEventListener('click',loadLatest)
-$('account-latest').addEventListener('click',loadLatest)
-window.addEventListener('offline',()=>{game.online.offline();accountUI()})
-window.addEventListener('online',()=>{void game.online.heartbeat().then(accountUI)})
-window.addEventListener('beforeunload',e=>{if(game.online.dirty){e.preventDefault();e.returnValue=''}})
-document.addEventListener('visibilitychange',()=>{if(document.hidden&&game.online.ready){game.persist();void game.online.flush()}else if(!document.hidden)void game.online.heartbeat()})
-setInterval(()=>{if(!document.hidden){if(!booted)void bootAccount();else void game.online.heartbeat().then(accountUI)}},10000)
-setInterval(accountUI,1000)
-void bootAccount().then(()=>{
-  const friendCode=new URLSearchParams(location.search).get('join')??sessionStorage.getItem('hoverghini.join')
-  if(friendCode)sessionStorage.setItem('hoverghini.join',friendCode)
-  if(!game.online.ready||!game.online.displayName)return
-  if(friendCode){void game.openFriendInvite(friendCode);return}
-  const invite=crewInvite(location.hash)
-  const city=CITIES.find(c=>c.name.toLowerCase().replace(/ /g,'-')===invite.city.toLowerCase())
-  if(city){title.classList.remove('show');void game.warp(city.name,city.lat,city.lon)}
+$('online-reload').addEventListener('click', loadLatest)
+$('account-latest').addEventListener('click', loadLatest)
+
+window.addEventListener('offline', () => {
+  game.online.offline()
+  accountUI()
+})
+window.addEventListener('online', () => {
+  void game.online.heartbeat().then(accountUI)
+})
+window.addEventListener('beforeunload', (e) => {
+  if (game.online.dirty) {
+    e.preventDefault()
+    e.returnValue = ''
+  }
+})
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden && game.online.ready) {
+    game.persist()
+    void game.online.flush()
+  } else if (!document.hidden) {
+    void game.online.heartbeat()
+  }
+})
+setInterval(() => {
+  if (!document.hidden) {
+    if (!booted) void bootAccount()
+    else void game.online.heartbeat().then(accountUI)
+  }
+}, 10000)
+setInterval(accountUI, 1000)
+
+void bootAccount().then(() => {
+  const friendCode = new URLSearchParams(location.search).get('join') ?? sessionStorage.getItem('hoverghini.join')
+  if (friendCode) sessionStorage.setItem('hoverghini.join', friendCode)
+  if (!game.online.ready || !game.online.displayName) return
+  if (friendCode) {
+    void game.openFriendInvite(friendCode)
+    return
+  }
+  const invite = crewInvite(location.hash)
+  const city = CITIES.find((c) => c.name.toLowerCase().replace(/ /g, '-') === invite.city.toLowerCase())
+  if (city) {
+    title.classList.remove('show')
+    void game.warp(city.name, city.lat, city.lon)
+  }
 })
 
 // ---------- camera ----------
@@ -317,7 +495,6 @@ const lookAt = new THREE.Vector3()
 const cameraLead = new THREE.Vector3()
 const fillOffset = new THREE.Vector3(8, 12, -6)
 
-/** Pull the camera in front of any tower between it and the subject. */
 function unblock(from: THREE.Vector3, to: THREE.Vector3) {
   const w = game.world
   if (!w) return to
@@ -340,6 +517,7 @@ function updateCamera(dt: number) {
   const subject = game.actor
   const top = game.save.cam === 'top'
   const speed = p.groundSpeed
+  const portrait = camera.aspect < 1
 
   let targetYaw = p.heading
   if (p.mode === 'free' && p.vel.length() > 8) {
@@ -357,39 +535,54 @@ function updateCamera(dt: number) {
   if (top) {
     dist = 7 * zoom
     height = (kind === 'truck' ? 38 : 28) * zoom + speed * 0.25
-    dist = 7 * zoom
   } else {
-    dist = (kind === 'board' ? 8 : kind === 'truck' ? 14 : 10) * zoom * (1 + speed / 140)
-    height = (kind === 'board' ? 4 : kind === 'truck' ? 6 : 4.5) * zoom + dist * 0.15
+    dist = (kind === 'board' ? 8 : kind === 'truck' ? 14 : 10) * zoom * (1 + speed / 140) * (portrait ? 0.88 : 1)
+    height = (kind === 'board' ? 4 : kind === 'truck' ? 6 : 4.5) * zoom + dist * (portrait ? 0.19 : 0.15)
   }
-  camTarget.set(subject.x, subject.y + 1.2, subject.z)
+  camTarget.set(subject.x, subject.y + (portrait ? 1.45 : 1.2), subject.z)
   camPos.set(camTarget.x - Math.sin(yaw) * dist, camTarget.y + height, camTarget.z - Math.cos(yaw) * dist)
   if (!top) unblock(camTarget, camPos)
-  if(game.world&&!game.world.isTunnel(subject.x,subject.z,subject.y))camPos.y=Math.max(camPos.y,game.world.terrainHeightAt(camPos.x,camPos.z)+2)
+  if (game.world && !game.world.isTunnel(subject.x, subject.z, subject.y)) {
+    camPos.y = Math.max(camPos.y, game.world.terrainHeightAt(camPos.x, camPos.z) + 2)
+  }
   camera.position.lerp(camPos, Math.min(1, dt * 9))
-  const lead = top ? 3 : 6
+  const lead = top ? 3 : portrait ? 8.2 : 6
   const heading = p.heading
-  lookAt.lerp(cameraLead.set(camTarget.x + Math.sin(heading) * lead, camTarget.y, camTarget.z + Math.cos(heading) * lead), Math.min(1, dt * 8))
+  lookAt.lerp(
+    cameraLead.set(
+      camTarget.x + Math.sin(heading) * lead,
+      camTarget.y - (portrait && !top ? 0.55 : 0),
+      camTarget.z + Math.cos(heading) * lead,
+    ),
+    Math.min(1, dt * 8),
+  )
   camera.lookAt(lookAt)
-  const baseFov = camera.aspect < 1 ? 62 + (1 - camera.aspect) * 30 : 62
+  const baseFov = portrait ? 62 + (1 - camera.aspect) * 26 : 62
   const fov = (top ? baseFov - 8 : baseFov) + (p.boosting ? 12 : 0) + speed * 0.08
   camera.fov += (fov - camera.fov) * Math.min(1, dt * 4)
   camera.updateProjectionMatrix()
 }
 
-// ---------- loop ----------
+// ---------- animation loop ----------
 function frame() {
   const now = performance.now()
-  if(title.classList.contains('show')&&!document.hidden&&!game.loading&&now-menuFrame>1000/30){alley.render(renderer,now/1000);menuFrame=now}
-  if(!title.classList.contains('show')&&game.world)alley.dispose()
-  if (document.hidden || game.loading || title.classList.contains('show')) { last = now; requestAnimationFrame(frame); return }
+  if (title.classList.contains('show') && !document.hidden && !game.loading && now - menuFrame > 1000 / 30) {
+    alley.render(renderer, now / 1000)
+    menuFrame = now
+  }
+  if (!title.classList.contains('show') && game.world) alley.dispose()
+  if (document.hidden || game.loading || title.classList.contains('show')) {
+    last = now
+    requestAnimationFrame(frame)
+    return
+  }
   const frameMs = now - last
   const dt = Math.min(frameMs / 1000, 0.05)
-  // Hysteresis: adapt only after sustained slow rendering, not one streaming hitch.
   slowFrames = frameMs > 28 ? slowFrames + 1 : Math.max(0, slowFrames - 2)
   if (slowFrames > 90 && renderScale > 0.65) {
     renderScale = Math.max(0.65, renderScale - 0.15)
-    renderer.setPixelRatio(renderScale); slowFrames = 0
+    renderer.setPixelRatio(renderScale)
+    slowFrames = 0
   }
   last = now
   const input = readInput(dt)

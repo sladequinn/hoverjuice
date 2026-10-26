@@ -10,9 +10,9 @@ function worldVarying(shader: {vertexShader: string; fragmentShader: string}) {
   shader.fragmentShader = 'varying vec3 vHJWorld; varying vec3 vHJNormal;\n' + hashGLSL + '\n' + shader.fragmentShader
 }
 
-/** Flat window bands: no room atlas, raymarching or per-building textures. */
+/** Flat window bands with shader-driven pilaster relief and street-level sodium bounce. */
 export function facadeMaterial(style=0) {
-  const mat = new THREE.MeshStandardMaterial({color:0xb0b5b8,vertexColors:true,roughness:0.9,metalness:0.02,side:THREE.DoubleSide})
+  const mat = new THREE.MeshStandardMaterial({color:0xb0b5b8,vertexColors:true,roughness:0.88,metalness:0.04,side:THREE.DoubleSide})
   mat.onBeforeCompile = shader => {
     worldVarying(shader)
     shader.uniforms.hjGrain={value:grain};shader.fragmentShader='uniform sampler2D hjGrain;\n'+shader.fragmentShader
@@ -22,9 +22,12 @@ export function facadeMaterial(style=0) {
       vec2 grid=wall/vec2(${style?5.4:3.0},${style?4.1:3.5});
       float grit=texture2D(hjGrain,wall*0.18).r;
       float seam=1.0-smoothstep(0.015,0.045,abs(fract(wall.y/3.5)-0.5));
-      diffuseColor.rgb*=mix(0.65,1.22,grit)*(1.0-seam*0.18)*mix(0.48,1.0,smoothstep(0.0,5.0,vHJWorld.y));
+      float pilaster=1.0-smoothstep(0.02,0.06,abs(fract(wall.x/${style?'5.4':'6.0'})-0.5));
+      diffuseColor.rgb*=mix(0.65,1.22,grit)*(1.0-seam*0.18)*(1.0-pilaster*0.16)*mix(0.48,1.0,smoothstep(0.0,5.0,vHJWorld.y));
       vec2 cell=fract(grid), aa=max(fwidth(grid),vec2(0.001));
       vec2 paneEdge=smoothstep(vec2(0.18,0.24),vec2(0.18,0.24)+aa,cell)*(1.0-smoothstep(vec2(0.8,0.82)-aa,vec2(0.8,0.82),cell));
+      float sill=smoothstep(0.19,0.24,cell.y)*(1.0-smoothstep(0.24,0.28,cell.y))*paneEdge.x*step(4.3,vHJWorld.y);
+      diffuseColor.rgb*=1.0+sill*0.22;
       float pane=paneEdge.x*paneEdge.y*step(4.3,vHJWorld.y);
       float seed=hjHash(floor(grid));
       float lit=step(0.88,seed);
@@ -34,20 +37,30 @@ export function facadeMaterial(style=0) {
       float rib=smoothstep(0.35,0.65,fract(wall.y*6.0));
       diffuseColor.rgb=mix(diffuseColor.rgb,vec3(0.065,0.078,0.085)*(0.75+rib*0.25),shop);
     `)
-    shader.fragmentShader=shader.fragmentShader.replace('#include <emissivemap_fragment>','#include <emissivemap_fragment>\ntotalEmissiveRadiance+=pane*lit*lightColor*0.65;')
+    shader.fragmentShader=shader.fragmentShader.replace('#include <emissivemap_fragment>',/* glsl */ `
+      #include <emissivemap_fragment>
+      float streetWarmth=(1.0-smoothstep(0.0,6.8,vHJWorld.y))*(0.55+0.45*sin(wall.x*0.196));
+      totalEmissiveRadiance+=pane*lit*lightColor*0.68+vec3(0.075,0.042,0.015)*streetWarmth;
+    `)
   }
-  mat.customProgramCacheKey=()=> 'hj-facade-art-v5-'+style
+  mat.customProgramCacheKey=()=> 'hj-facade-art-v6-'+style
   return mat
 }
 export function asphaltMaterial(color = 0x08090c) {
-  const mat=new THREE.MeshStandardMaterial({color,roughness:0.86,metalness:0.05,side:THREE.DoubleSide})
+  const mat=new THREE.MeshStandardMaterial({color,roughness:0.84,metalness:0.06,side:THREE.DoubleSide})
   mat.onBeforeCompile=shader=>{
     worldVarying(shader)
     shader.uniforms.hjGrain={value:grain};shader.fragmentShader='uniform sampler2D hjGrain;\n'+shader.fragmentShader
-    shader.fragmentShader=shader.fragmentShader.replace('#include <map_fragment>','#include <map_fragment>\nfloat puddle=smoothstep(0.48,0.7,hjNoise(vHJWorld.xz*0.065)); diffuseColor.rgb*=mix(1.0,0.58,puddle)*(0.7+texture2D(hjGrain,vHJWorld.xz*0.45).r*0.7);')
-    shader.fragmentShader=shader.fragmentShader.replace('#include <roughnessmap_fragment>','#include <roughnessmap_fragment>\nroughnessFactor=mix(0.86,0.08,puddle);')
+    shader.fragmentShader=shader.fragmentShader.replace('#include <map_fragment>',/* glsl */ `
+      #include <map_fragment>
+      float puddle=smoothstep(0.46,0.68,hjNoise(vHJWorld.xz*0.065));
+      float lampPool=0.5+0.5*cos(vHJWorld.x*0.196)*cos(vHJWorld.z*0.196);
+      diffuseColor.rgb*=mix(1.0,0.56,puddle)*(0.72+texture2D(hjGrain,vHJWorld.xz*0.45).r*0.68);
+      diffuseColor.rgb+=vec3(0.022,0.013,0.005)*lampPool*(0.45+puddle*0.55);
+    `)
+    shader.fragmentShader=shader.fragmentShader.replace('#include <roughnessmap_fragment>','#include <roughnessmap_fragment>\nroughnessFactor=mix(0.84,0.07,puddle);')
   }
-  mat.customProgramCacheKey=()=> 'hj-asphalt-art-v2'
+  mat.customProgramCacheKey=()=> 'hj-asphalt-art-v3'
   return mat
 }
 

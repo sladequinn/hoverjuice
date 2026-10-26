@@ -91,36 +91,59 @@ export function buildVehicleMesh(spec: VehicleSpec, maskId = 'balaclava') {
       halfW=1.12;halfL=2.25;break
     }
     case 'truck': {
-      add(new THREE.BoxGeometry(2.4, 1.7, 2.2), body, 0, 1.0, 2.4)
-      add(new THREE.BoxGeometry(2.2, 0.7, 0.1), glass, 0, 1.4, 3.52)
-      add(new THREE.BoxGeometry(2.6, 2.6, 5.2), dark, 0, 1.45, -1.4)
-      add(new THREE.BoxGeometry(2.62, 0.12, 5.22), glow, 0, 2.2, -1.4)
-      add(new THREE.BoxGeometry(2.62, 0.12, 5.22), glow, 0, 0.6, -1.4)
-      add(new THREE.BoxGeometry(2.5, 0.1, 0.1), glow, 0, 0.5, 3.52)
+      add(new RoundedBoxGeometry(2.38, 1.48, 2.25, 1, 0.14), body, 0, 0.92, 2.38)
+      add(wedge(2.26, 0.42, 1.35, 0.55), body, 0, 1.58, 2.55)
+      add(new RoundedBoxGeometry(2.14, 0.64, 0.16, 1, 0.04), glass, 0, 1.36, 3.48)
+      add(new RoundedBoxGeometry(2.56, 2.48, 5.15, 1, 0.12), dark, 0, 1.44, -1.38)
+      add(new RoundedBoxGeometry(2.42, 0.26, 4.95, 1, 0.06), body, 0, 0.34, -0.35)
+      for (const side of [-1, 1]) {
+        add(new RoundedBoxGeometry(0.24, 0.48, 6.8, 1, 0.08), dark, side * 1.24, 0.36, 0.2)
+        add(new THREE.CylinderGeometry(0.24, 0.24, 0.56, 12), dark, side * 0.96, 0.24, -3.85).rotation.x = Math.PI / 2
+        add(new THREE.BoxGeometry(0.54, 0.09, 0.06), new THREE.MeshBasicMaterial({ color: 0xe7cf9b }), side * 0.82, 0.68, 3.52)
+      }
+      add(new THREE.BoxGeometry(2.62, 0.1, 5.2), glow, 0, 2.22, -1.38)
+      add(new THREE.BoxGeometry(2.62, 0.1, 5.2), glow, 0, 0.58, -1.38)
+      add(new THREE.BoxGeometry(2.46, 0.09, 0.1), glow, 0, 0.48, 3.52)
+      add(new THREE.BoxGeometry(2.2, 0.08, 0.08), new THREE.MeshBasicMaterial({ color: 0xd85131 }), 0, 0.62, -3.98)
       halfW = 1.3; halfL = 4
       break
     }
     case 'luxury': {
-      add(wedge(2.0, 0.8, 5.0, 0.25), body, 0, 0.45, 0)
-      add(new THREE.BoxGeometry(1.6, 0.55, 2.3), glass, 0, 1.1, -0.4)
-      add(new THREE.BoxGeometry(1.2, 0.35, 0.08), new THREE.MeshStandardMaterial({ color: 0xffffff, metalness: 1, roughness: 0.1 }), 0, 0.55, 2.52)
-      add(new THREE.BoxGeometry(2.05, 0.05, 4.6), glow, 0, 0.12, 0)
-      add(new THREE.BoxGeometry(0.4, 0.07, 0.05), glow, 0.7, 0.62, 2.5)
-      add(new THREE.BoxGeometry(0.4, 0.07, 0.05), glow, -0.7, 0.62, 2.5)
+      add(new RoundedBoxGeometry(1.96, 0.5, 4.88, 1, 0.14), body, 0, 0.32, 0)
+      add(wedge(1.86, 0.34, 2.1, 0.48), body, 0, 0.64, 1.35)
+      add(new RoundedBoxGeometry(1.82, 0.26, 1.25, 1, 0.08), body, 0, 0.62, -1.72)
+      const luxCabin = new THREE.BoxGeometry(1.58, 0.5, 2.25)
+      const lcp = luxCabin.attributes.position
+      for (let i = 0; i < lcp.count; i++) if (lcp.getY(i) > 0) { lcp.setX(i, lcp.getX(i) * 0.78); lcp.setZ(i, lcp.getZ(i) * 0.58 - 0.1) }
+      luxCabin.computeVertexNormals()
+      add(luxCabin, glass, 0, 0.92, -0.28)
+      add(new THREE.BoxGeometry(1.22, 0.05, 1.18), body, 0, 1.18, -0.36)
+      add(new THREE.BoxGeometry(1.18, 0.32, 0.08), new THREE.MeshStandardMaterial({ color: 0xd8e2e6, metalness: 0.9, roughness: 0.15 }), 0, 0.48, 2.46)
+      for (const side of [-1, 1]) {
+        add(new RoundedBoxGeometry(0.22, 0.36, 3.6, 1, 0.08), dark, side * 0.96, 0.22, -0.1)
+        add(new THREE.CylinderGeometry(0.19, 0.19, 0.48, 12), dark, side * 0.78, 0.18, -2.28).rotation.x = Math.PI / 2
+        add(new THREE.BoxGeometry(0.42, 0.07, 0.05), glow, side * 0.68, 0.58, 2.46)
+      }
+      add(new THREE.BoxGeometry(2.02, 0.05, 4.55), glow, 0, 0.12, 0)
+      add(new THREE.BoxGeometry(1.76, 0.06, 0.06), new THREE.MeshBasicMaterial({ color: 0xd85131 }), 0, 0.58, -2.45)
       halfW = 1; halfL = 2.5
       break
     }
     case 'super': {
-      add(wedge(2.2, 0.75, 4.8, 0.7), body, 0, 0.4, 0)
-      const canopy = add(wedge(1.2, 0.45, 1.8, 0.8), glass, 0, 0.95, -0.3)
+      add(new RoundedBoxGeometry(2.14, 0.42, 4.65, 1, 0.12), body, 0, 0.28, 0)
+      add(wedge(2.18, 0.42, 2.4, 0.72), body, 0, 0.54, 1.15)
+      add(wedge(1.92, 0.28, 1.6, 0.4), body, 0, 0.58, -1.45)
+      const canopy = add(wedge(1.26, 0.44, 1.95, 0.78), glass, 0, 0.86, -0.22)
       canopy.scale.set(1, 1, 1)
-      add(new THREE.BoxGeometry(2.3, 0.1, 0.5), dark, 0, 1.0, -2.3)
-      add(new THREE.BoxGeometry(0.1, 0.4, 0.1), dark, 0.8, 0.8, -2.3)
-      add(new THREE.BoxGeometry(0.1, 0.4, 0.1), dark, -0.8, 0.8, -2.3)
-      add(new THREE.BoxGeometry(2.25, 0.05, 4.4), glow, 0, 0.08, 0)
-      add(new THREE.BoxGeometry(0.1, 0.05, 1.8), glow, 1.1, 0.45, 1.0).rotation.y = -0.2
-      add(new THREE.BoxGeometry(0.1, 0.05, 1.8), glow, -1.1, 0.45, 1.0).rotation.y = 0.2
-      add(new THREE.BoxGeometry(1.8, 0.06, 0.06), new THREE.MeshBasicMaterial({ color: 0xff1e3c }), 0, 0.6, -2.42)
+      for (const side of [-1, 1]) {
+        add(new RoundedBoxGeometry(0.28, 0.34, 2.85, 1, 0.08), dark, side * 1.02, 0.24, -0.25)
+        add(new THREE.CylinderGeometry(0.21, 0.21, 0.52, 12), dark, side * 0.74, 0.2, -2.18).rotation.x = Math.PI / 2
+        add(new THREE.BoxGeometry(0.1, 0.38, 0.14), dark, side * 0.82, 0.76, -2.22)
+        add(new THREE.BoxGeometry(0.1, 0.05, 1.8), glow, side * 1.08, 0.44, 0.95).rotation.y = -side * 0.2
+      }
+      add(new THREE.BoxGeometry(2.26, 0.08, 0.48), dark, 0, 0.96, -2.24)
+      add(new THREE.BoxGeometry(2.22, 0.05, 4.35), glow, 0, 0.08, 0)
+      add(new THREE.BoxGeometry(1.82, 0.06, 0.06), new THREE.MeshBasicMaterial({ color: 0xff1e3c }), 0, 0.56, -2.38)
       halfW = 1.1; halfL = 2.4
       break
     }
@@ -182,6 +205,7 @@ export class Player {
   limping = false
   impact = 0
   apex = false
+  curbScrape = false
   testFlight = false
   private turnRequest = 0
   private turnMemory = 0
@@ -345,7 +369,7 @@ export class Player {
 
   update(dt: number, input: Input, world: World, hasJuice: boolean) {
     const s = this.spec
-    this.impact = 0; this.apex = false
+    this.impact = 0; this.apex = false; this.curbScrape = false
     const power = this.limping ? 0.2 : hasJuice ? 1 : 0.4
     const cap = this.limping ? 0.18 : hasJuice ? 1 : 0.45
     this.boosting = false
@@ -422,6 +446,9 @@ export class Player {
       const laneWidth=laneOffset(Math.min(a.width??5,b.width??5),chassisHalfWidth)
       this.sway += (((1-this.laneIndex)*laneWidth)-this.sway)*(1-Math.exp(-18*dt))
       this.swayV=(this.sway-oldSway)/Math.max(dt,0.001)
+      if ((this.laneIndex === 0 || this.laneIndex === 2) && laneWidth > 0.25 && this.speed > 26 && Math.abs(Math.abs(this.sway) - laneWidth) < 0.18) {
+        this.curbScrape = true
+      }
       const lx = Math.cos(target), lz = -Math.sin(target)
       this.pos.x = a.x + (b.x - a.x) * t + lx * this.sway
       this.pos.z = a.z + (b.z - a.z) * t + lz * this.sway
